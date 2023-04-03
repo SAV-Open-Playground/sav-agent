@@ -23,7 +23,6 @@ LOGGER = get_logger("server")
 app = Flask(__name__, instance_relative_config=True)
 app.config.from_mapping(
     SECRET_KEY="dev",
-    DATABASE=os.path.join(CUR_DIR + "/data/", "sib.sqlite"),
 )
 
 app.config.from_object(config)

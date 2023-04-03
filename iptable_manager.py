@@ -7,10 +7,12 @@ import subprocess
 from model import db
 from model import SavInformationBase
 
+KEY_WORD = "SAVAGENT"
+
 
 def iptables_command_execute(sender, prefix, neighbor_as, interface, **extra):
     add_rule_status = subprocess.call(
-        ['iptables', '-A', 'SAVNET', '!', '-i', interface, '-s', prefix, '-j', 'DROP'])
+        ['iptables', '-A', KEY_WORD, '!', '-i', interface, '-s', prefix, '-j', 'DROP'])
     print(add_rule_status)
 
 
@@ -22,17 +24,16 @@ class IPTableManager():
 
     def __init__(self, app, logger):
         self.app = app
-        create_chain_status = subprocess.call(['iptables', '-N', 'SAVNET'])
+        create_chain_status = subprocess.call(['iptables', '-N', KEY_WORD])
         if create_chain_status != 0:
             return
         self.input_status = subprocess.call(
-            ['iptables', '-I', 'INPUT', '-j', 'SAVNET'])
+            ['iptables', '-I', 'INPUT', '-j', KEY_WORD])
         self.forward_status = subprocess.call(
-            ['iptables', '-I', 'FORWARD', '-j', 'SAVNET'])
+            ['iptables', '-I', 'FORWARD', '-j', KEY_WORD])
         self.logger = logger
         db.drop_all()
         db.create_all()
-        
 
     def _command_executer(self, command):
         return subprocess.run(command,
@@ -86,12 +87,12 @@ class IPTableManager():
                 SavInformationBase.prefix == prefix).count() == 0:
             interface_list.remove(interface)
             for drop_interface in interface_list:
-                command = "iptables -A SAVNET -i {0} -s {1} -j DROP".format(
-                    drop_interface, prefix)
+                command = f"iptables -A {KEY_WORD} -i {drop_interface} -s {prefix} -j DROP"
                 self._iptables_command_execute(command=command)
         else:
-            command = "iptables -L -v -n --line-numbers | grep {interface} | grep {prefix}"
-            command += "| awk '{ print $1 }' | xargs - I v1  iptables - D SAVNET v1"
+            command = f"iptables -L -v -n --line-numbers | grep {interface} | grep {prefix}"
+            command += "| awk '{ print $1 }' | xargs - I v1  iptables - D "
+            command += f"{KEY_WORD} v1"
             self._iptables_command_execute(command=command)
         # store data to DB
         sib_row = SavInformationBase(
@@ -117,13 +118,12 @@ class IPTableManager():
         session.commit()
         if session.query(SavInformationBase).filter(
                 SavInformationBase.prefix == prefix).count() == 0:
-            command = "iptables -L -v -n --line-numbers | grep %s | grep %s" % (
-                interface, prefix)
-            command += " |awk '{ print $1 }' | xargs - I v1  iptables - D SAVNET v1"
+            command = f"iptables -L -v -n --line-numbers | grep {interface} | grep {prefix}"
+            command += " |awk '{ print $1 }' | xargs - I v1  iptables - D "
+            command += f"{KEY_WORD} v1"
             self._iptables_command_execute(command=command)
         else:
-            command = "iptables -A SAVNET -i {0} -s {1} -j DROP".format(
-                interface, prefix)
+            command = f"iptables -A {KEY_WORD} -i {interface} -s {prefix} -j DROP"
             self._iptables_command_execute(command=command)
         session.close()
         return {"code": "0000", "message": "success"}
