@@ -66,6 +66,21 @@ def parse_bird_table(table, logger=None):
     return table_name, parsed_rows
 
 
+def rule_list_diff(old_rules, new_rules):
+    """
+    return adds and dels for the given lists
+    """
+    adds_ = []
+    dels_ = []
+    for item in new_rules:
+        if item not in old_rules:
+            adds_.append(item)
+    for item in old_rules:
+        if item not in new_rules:
+            dels_.append(item)
+    return adds_, dels_
+
+
 def decode_csv(input_str):
     """
     return a list of strings

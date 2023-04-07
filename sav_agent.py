@@ -132,9 +132,13 @@ class SavAgent():
                 app_instance = UrpfApp(
                     self, mode="loose", logger=self.logger)
                 self.add_app(app_instance)
-            elif name == "EFP-uRPF":
+            elif name == "EFP-uRPF-A":
                 app_instance = EfpUrpfApp(
-                    self, logger=self.logger)
+                    self, "A", logger=self.logger)
+                self.add_app(app_instance)
+            elif name == "EFP-uRPF-B":
+                app_instance = EfpUrpfApp(
+                    self, "B", logger=self.logger)
                 self.add_app(app_instance)
             elif name == "FP-uRPF":
                 app_instance = FpUrpfApp(

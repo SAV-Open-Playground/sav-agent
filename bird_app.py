@@ -132,6 +132,22 @@ class BirdApp(SavApp):
         # self.logger.debug(result)
         return result
 
+    def _parse_protocol_meta(self, protocol_name):
+        # TODO: implement reading other info
+        data = self._bird_cmd(cmd=f"show protocols all {protocol_name}")
+        if data is None:
+            return {}
+        meta = {}
+        data = data.split("\n")
+        for line in data:
+            if "Role:" in line:
+                meta["remote_role"] = line.split(":")[1].strip()
+            elif "Neighbor AS" in line:
+                meta["remote_as"] = line.split(":")[1].strip()
+        self.logger.debug(data)
+        self.logger.debug(meta)
+        return meta
+
     def send_msg(self, msg):
         """
         notify the bird to retrieve the msg from flask server and execute it.
@@ -241,6 +257,7 @@ class BirdApp(SavApp):
         if not (temp[0] == "BIRD" and temp[-1] == "ready."):
             self.logger.error(f"birdc execute error:{out}")
             return None
+
         out = "\n".join(out.split("\n")[1:])
         return out
 
