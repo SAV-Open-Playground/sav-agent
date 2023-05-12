@@ -335,10 +335,13 @@ class LinkManager(InfoManager):
     """
 
     def add(self, link_name, link_dict):
-        if link_name in self.data:
-            self.logger.warning("key {link_name} already exists")
+        if "rpki" in link_name:
             return
-
+        self.logger.debug(f"adding {link_name}")
+        if link_name in self.data:
+            self.logger.warning(f"key {link_name} already exists")
+            return
+        # self.db =
         self.data[link_name] = link_dict
 
     def add_meta(self, link_name, meta):
@@ -355,6 +358,7 @@ class LinkManager(InfoManager):
             return
         if link_name in self.data:
             self.data[link_name]["meta"] = meta
+        # self.db.upsert("link", str(self.data))
 
     def get(self, key):
         return self.data[key]

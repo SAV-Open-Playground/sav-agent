@@ -1,1 +1,3 @@
 pylint.conf
+__pycache__/*
+data/*

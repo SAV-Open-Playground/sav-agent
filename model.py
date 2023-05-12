@@ -16,8 +16,29 @@ Base = declarative_base()
 class SavInformationBase(Base):
     """
     define sav information base data model
+    this table holds everything we need for SAV
     """
     __tablename__ = 'SIB'
+    id = Column(Integer, primary_key=True, autoincrement=True)  # key name
+    value = Column(String(1024*1024*8), nullable=False)
+    key = Column(String(64), nullable=False)
+    createtime = Column(DateTime, server_default=func.now())
+    updatetime = Column(DateTime, server_default=func.now(),
+                        onupdate=func.now())
+
+    def __init__(self, key, value):
+        self.key = key
+        self.value = value
+
+    def __repr__(self):
+        return '<id %r>' % self.id
+
+
+class SavTable(Base):
+    """
+    define sav table base data model
+    """
+    __tablename__ = 'STB'
     id = Column(Integer, primary_key=True, autoincrement=True)
     prefix = Column(String(256), nullable=False)
     neighbor_as = Column(Integer, nullable=True)
@@ -43,16 +64,16 @@ class SavInformationBase(Base):
 
 
 class DataBase():
-    DB_URI = 'sqlite:///' + \
-        os.path.dirname(os.path.abspath(__file__)) + "/data/sib.sqlite"
-    engine = create_engine(DB_URI, pool_size=8,  pool_recycle=60*30)
-    DBsession = sessionmaker(bind=engine)
-
-    def create_all(self):
-        Base.metadata.create_all(self.engine)
-
-    def drop_all(self):
-        Base.metadata.drop_all(self.engine)
+    def __init__(self):
+        DB_URI = 'sqlite:///' + \
+            os.path.dirname(os.path.abspath(__file__)) + "/data/sib.sqlite"
+        self.engine = create_engine(DB_URI, pool_size=8,  pool_recycle=60*30)
+        self.DBsession = sessionmaker(bind=self.engine)
+        try:
+            Base.metadata.drop_all(self.engine)
+            Base.metadata.create_all(self.engine)
+        except:
+            pass
 
     @property
     def session(self):

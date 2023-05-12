@@ -32,8 +32,7 @@ if not os.path.exists(path=CUR_DIR + "/data/"):
     os.makedirs(CUR_DIR + "/data/")
 
 
-sa = SavAgent(app,
-              logger=LOGGER,
+sa = SavAgent(logger=LOGGER,
               path_to_config=r"/root/savop/SavAgent_config.json")
 # flask is used as a tunnel between bird and agent
 
@@ -74,10 +73,13 @@ def search_sib():
     data = []
     for row in sib_tables:
         data.append({"id": row.id,
-                     "prefix": row.prefix,
-                     "neighbor_as": row.neighbor_as,
-                     "interface": row.interface,
-                     "source": row.source,
-                     "direction": row.direction,
-                     "createtime": row.createtime})
+                     "key": row.key,
+                     "value": row.value})
+        # data.append({"id": row.id,
+        #              "prefix": row.prefix,
+        #              "neighbor_as": row.neighbor_as,
+        #              "interface": row.interface,
+        #              "source": row.source,
+        #              "direction": row.direction,
+        #              "createtime": row.createtime})
     return data

@@ -15,7 +15,7 @@ from multiprocessing import Manager
 import copy
 
 from sav_common import *
-from iptable_manager import IPTableManager
+from iptable_manager import IPTableManager, SIBManager
 from bird_app import BirdApp
 from urpf_app import UrpfApp
 from efp_urpf_app import EfpUrpfApp
@@ -48,7 +48,7 @@ def aggregate_asn_path(list_of_asn_path):
 
 
 class SavAgent():
-    def __init__(self, flask_app, logger=None, path_to_config=os.path.join(
+    def __init__(self, logger=None, path_to_config=os.path.join(
             os.path.dirname(os.path.abspath(__file__)), "SavAgent_config.json")):
         if not logger:
             logger = get_logger("SavAgent")
@@ -56,8 +56,12 @@ class SavAgent():
         self.config = self._config_validation(path_to_config)
         self._init_data()
         self.cmds = Manager().list()
-        self.ip_man = IPTableManager(flask_app, logger=self.logger)
         self._init_apps()
+        # we have self.data["active_app"] after self._init_apps()
+        self.sib_man = SIBManager(logger=self.logger)
+        self.ip_man = IPTableManager(self.logger, self.data["active_app"])
+        self.sib_man.upsert("config", str(self.config))
+        self.sib_man.upsert("active_app", str(self.data["active_app"]))
         self._start()
 
     def _config_validation(self, path_to_config):
@@ -80,7 +84,6 @@ class SavAgent():
         self.data["links"] = {}  # link manager"s data
         # bird_app is a must
         self.data["required_apps"] = self.config["required_apps"]
-        self.data["neighbors"] = {}  # not used
         self.data["fib"] = []  # system"s fib table
         # key is prefix (str), value is as paths in csv
         self.data["sav_table"] = {}
@@ -97,6 +100,7 @@ class SavAgent():
         if asn_a == asn_b:
             if not asn_a in data_dict["nodes"]:
                 data_dict["nodes"][asn_a] = None
+            self.sib_man.upsert("sav_graph", str(data_dict))
             return
         self.logger.info(
             f"SAV GRAPH LINK ADDED :{asn_a}-{asn_b}")
@@ -110,9 +114,11 @@ class SavAgent():
         value_asn = asn_a if key_asn == asn_b else asn_b
         if not key_asn in data_dict["links"]:
             data_dict["links"][key_asn] = [value_asn]
+            self.sib_man.upsert("sav_graph", str(data_dict))
             return
-        if value_asn not in data_dict["links"][key_asn]:
+        elif value_asn not in data_dict["links"][key_asn]:
             data_dict["links"][key_asn].append(value_asn)
+        self.sib_man.upsert("sav_graph", str(data_dict))
 
     def log_local_asn_table(self):
         self.logger.info(
@@ -136,6 +142,10 @@ class SavAgent():
                 app_instance = EfpUrpfApp(
                     self, "A", logger=self.logger)
                 self.add_app(app_instance)
+            elif name == "EFP-uRPF-A-ROA":
+                app_instance = EfpUrpfApp(
+                    self, "A_ROA", logger=self.logger)
+                self.add_app(app_instance)
             elif name == "EFP-uRPF-B":
                 app_instance = EfpUrpfApp(
                     self, "B", logger=self.logger)
@@ -146,8 +156,10 @@ class SavAgent():
                 self.add_app(app_instance)
             else:
                 self.logger.error(msg=f"unknown app name: {name}")
+        self.data["active_app"] = self.data["required_apps"][0]
+
         self.logger.debug(
-            msg=f"initialized apps: {self.data['required_apps']}")
+            msg=f"initialized apps: {self.data['required_apps']},using {self.data['active_app']}")
 
     def _if_fib_stable(self, stable_span=5):
         """
@@ -181,7 +193,8 @@ class SavAgent():
                             f"error when processing: {err}:{msg}")
                 self._send_link_init()
             else:
-                self._if_fib_stable(1)
+                self._if_fib_stable(
+                    stable_span=self.config.get("fib_stable_threshold"))
                 time.sleep(0.1)
 
     def _send_link_init(self):
@@ -233,6 +246,7 @@ class SavAgent():
 
         local_prefixes = list(map(lambda x: netaddr.IPNetwork(
             x["Destination"]+"/"+x["Genmask"]), prefixes))
+        self.sib_man.upsert("local_prefixes", str(local_prefixes))
         return local_prefixes
 
     def get_fib(self):
@@ -251,6 +265,7 @@ class SavAgent():
         output = list(map(lambda x: x.split(" "), output))
         headings = output.pop(0)
         output = list(map(lambda x: dict(zip(headings, x)), output))
+        self.sib_man.upsert("local_fib", str(output))
         # begin of filter
 
         return output
@@ -300,6 +315,7 @@ class SavAgent():
                 man.data[link_name]["status"] = link_dict["status"]
         else:
             man.add(link_name, link_dict)
+        self.sib_man.upsert("link_data", str(man.data))
 
     def _process_link_config(self, msg):
         """
@@ -327,13 +343,13 @@ class SavAgent():
             temp.append(str(int(msg["router_id"][:2], 16)))
             msg["router_id"] = msg["router_id"][2:]
         msg["router_id"] = ".".join(temp)
-
         if not self.link_man.exist(msg["protocol_name"]):
             data_dict = self._get_new_link_dict(msg["protocol_name"])
             data_dict["meta"] = msg
             self.link_man.add(msg["protocol_name"], data_dict)
         else:
             self.link_man.add_meta(msg["protocol_name"], msg)
+        self.sib_man.upsert("link_data", str(self.link_man.data))
 
     def _log_info_for_front(self, msg, log_type, link_name=None):
         """
@@ -681,9 +697,9 @@ class SavAgent():
 
         if len(intra_links) > 0:
             for link in intra_links:
-                for remote_as in inter_paths:
+                for remote_as, path in inter_paths.items():
                     msg = self._construct_msg(
-                        link, inter_paths[remote_as], "origin", True)
+                        link, path, "origin", True)
                     self.get_app(link["app"]).send_msg(msg)
                     self.logger.debug(f"sent origin via intra{msg}")
                   # TODO intra origin

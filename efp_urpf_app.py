@@ -104,21 +104,76 @@ class EfpUrpfApp(BirdApp):
         old_rules = self.rules
         if self.type == "a":
             return self.algorithm_a(old_rules)
+        elif self.type == "a_roa":
+            return self.algorithm_a(old_rules, roa=True)
         elif self.type == "b":
             return self.algorithm_b(old_rules)
 
-    def algorithm_a(self, old_rules):
+    def _parse_roa_table(self, t_name):
+        cmd = "show route table "+t_name
+        row_str = []
+        # detect if roa table have rows and stale
+        last_len = -1
+        for _ in range(30):
+            data = self._bird_cmd(cmd)
+            row_str = data.split("\n")[1:]
+            while "" in row_str:
+                row_str.remove("")
+            this_len = len(row_str)
+            if this_len > 0:
+                if this_len == last_len:
+                    break
+                else:
+                    last_len = this_len
+            time.sleep(0.1)
+        if len(row_str) == 0:
+            self.logger.warning("no roa info detected")
+            return {}
+        else:
+            result = {}
+            for row in row_str:
+                d = row.split(" ")
+                as_number = int(d[1][2:])
+                prefix = d[0]
+                prefix = prefix.replace('24-24', '24')
+                if as_number not in result:
+                    result[as_number] = set()
+                result[as_number].add(prefix)
+        # self.logger.debug(result)
+        return result
+
+    def algorithm_a(self, old_rules, roa=False):
         """
         RFC 8704
         """
         X = {}
         all_int_in = {}
+        roa_info = {}
+        if roa:
+            roa_info = self._parse_roa_table(t_name="r4")
+            self.logger.debug(roa_info)
         for protocol_name in self.protocols:
             # self.logger.debug(msg=f"protocol_name:{protocol_name}")
             meta = self.agent.link_man.get(protocol_name)["meta"]
             all_int_in[protocol_name] = {"meta": meta}
             all_int_in[protocol_name]["adj-in"] = self._parse_import_table(protocol_name)[
                 "import"]
+            # filter out the adj-in that does not match the roa
+            if roa:
+                temp = {}
+                for k, v in all_int_in[protocol_name]['adj-in'].items():
+                    this_prefix = str(k)
+                    this_asn = v[0]['origin_as']
+                    if this_asn in roa_info:
+                        if this_prefix in roa_info[this_asn]:
+                            temp[k] = v
+                        else:
+                            self.logger.warning(f"roa mismatch for {k}:{v}")
+                self.logger.debug("afj-in before roa filter:")
+                self.logger.debug(all_int_in[protocol_name]["adj-in"])
+                all_int_in[protocol_name]["adj-in"] = temp
+                self.logger.debug("afj-in after roa filter:")
+                self.logger.debug(all_int_in[protocol_name]["adj-in"])
         for protocol_name, data in all_int_in.items():
             if data["meta"]["remote_role"] == "customer":
                 for prefix, paths in data["adj-in"].items():
@@ -134,6 +189,7 @@ class EfpUrpfApp(BirdApp):
         new_rules = set()
         for protocol_name, data in all_int_in.items():
             if not data["meta"]["remote_role"] == "customer":
+                # self.logger.debug(f"new_rules:{data['meta']['remote_role']}")
                 continue
             for origin_asn, prefixes in X.items():
                 is_prefix_included = False

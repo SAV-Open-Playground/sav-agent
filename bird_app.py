@@ -87,33 +87,45 @@ class BirdApp(SavApp):
         new_ = new_["master4"]
         dels = []
         adds = []
-        # here we only uses the as_path of each prefix
-        for prefix in new_:
-            temp = []
-            for item in new_[prefix]:
-                if "as_path" in item:
-                    temp.append(item["as_path"])
-            temp.sort()
-            new_[prefix] = temp
-        # self.logger.debug(new_)
         for prefix in new_:
             if prefix not in old_:
-                for path in new_[prefix]:
+                for path in new_[prefix]["as_path"]:
                     adds.append((prefix, path))
             else:
                 if new_[prefix] != old_[prefix]:
-                    for path in old_[prefix]:
-                        if not path in new_[prefix]:
+                    for path in old_[prefix]["as_path"]:
+                        if not path in new_[prefix]["as_path"]:
                             dels.append((prefix, path))
-                    for path in new_[prefix]:
-                        if not path in old_[prefix]:
+                    for path in new_[prefix]["as_path"]:
+                        if not path in old_[prefix]["as_path"]:
                             adds.append((prefix, path))
         for prefix in old_:
             if prefix not in new_:
-                for path in old_[prefix]:
+                for path in old_[prefix]["as_path"]:
                     dels.append((prefix, path))
         self.pp_v4_dict = new_
         return adds, dels
+
+    def _parse_birdc_show_table(self, data):
+        """
+        parse the cmd output of birdc_show_table cmd
+        """
+        data = data.split("Table")
+        while "" in data:
+            data.remove("")
+        result = {}
+        for table in data:
+            table_name, table_data = self._parse_bird_table(table)
+            result[table_name] = table_data
+        return result
+
+    def _parse_bird_roa(self):
+        """
+
+        """
+        data = self._bird_cmd(cmd="show route table r4")
+        if data is None:
+            return {}
 
     def _parse_bird_fib(self):
         """
@@ -127,26 +139,49 @@ class BirdApp(SavApp):
             data.remove("")
         result = {}
         for table in data:
-            table_name, table_data = parse_bird_table(table, self.logger)
+            table_name, table_data = self._parse_bird_table(table)
             result[table_name] = table_data
-        # self.logger.debug(result)
         return result
 
-    def _parse_protocol_meta(self, protocol_name):
-        # TODO: implement reading other info
-        data = self._bird_cmd(cmd=f"show protocols all {protocol_name}")
-        if data is None:
-            return {}
-        meta = {}
-        data = data.split("\n")
-        for line in data:
-            if "Role:" in line:
-                meta["remote_role"] = line.split(":")[1].strip()
-            elif "Neighbor AS" in line:
-                meta["remote_as"] = line.split(":")[1].strip()
-        self.logger.debug(data)
-        self.logger.debug(meta)
-        return meta
+    def _parse_bird_table(self, table):
+        """
+        return table_name (string) and parsed_rows (dict)
+        only parse the as_path
+        """
+        # self.logger.debug(table)
+        temp = table.split("\n")
+        while '' in temp:
+            temp.remove('')
+        table_name = temp[0][1:-1]
+        parsed_rows = {}
+        temp = temp[1:]
+        rows = []
+        this_row = []
+        for line in temp:
+            if not (line[0] == '\t' or line[0] == ' '):
+                rows.append(this_row)
+                this_row = [line]
+            else:
+                this_row.append(line)
+        rows.append(this_row)
+        while [] in rows:
+            rows.remove([])
+
+        for row in rows:
+            prefix = row.pop(0)
+            if "blackhole" in prefix:
+                continue
+            prefix = prefix.split(" ")[0]
+            # TODO: demo filter
+            if str(prefix).startswith("192"):
+                prefix = netaddr.IPNetwork(prefix)
+                temp = {"as_path": []}
+                for line in row:
+                    if line.startswith("\tBGP.as_path: "):
+                        temp["as_path"].append(list(map(
+                            int, line.split(": ")[1].split(" "))))
+                parsed_rows[prefix] = temp
+        return table_name, parsed_rows
 
     def send_msg(self, msg):
         """
@@ -235,6 +270,24 @@ class BirdApp(SavApp):
     def get_prepared_cmd(self):
         return self.prepared_cmd.pop(0)
 
+    def put_link_up(self, link_name):
+        msg = {
+            "msg_type": "link_state_change",
+            "source_app": self.name,
+            "source_link": link_name,
+            "msg": True
+        }
+        self.agent.put_msg(msg)
+
+    def put_link_down(self, link_name):
+        msg = {
+            "msg_type": "link_state_change",
+            "source_app": self.name,
+            "source_link": link_name,
+            "msg": False
+        }
+        self.agent.put_msg(msg)
+
     def _bird_cmd(self, cmd):
         """
         execute bird command and return the output in std
@@ -257,7 +310,6 @@ class BirdApp(SavApp):
         if not (temp[0] == "BIRD" and temp[-1] == "ready."):
             self.logger.error(f"birdc execute error:{out}")
             return None
-
         out = "\n".join(out.split("\n")[1:])
         return out
 
