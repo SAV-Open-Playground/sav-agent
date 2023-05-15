@@ -69,9 +69,6 @@ class SavAgent():
         return dictionary object if is a valid config file. Otherwise, raise ValueError
         """
         config = read_json(path_to_config)
-        # now check the key name and value type
-        if not "mode" in config:
-            config["mode"] = "white_list"
         if "bird" not in config["required_apps"]:
             raise ValueError("bird is a must")
         return config
@@ -138,17 +135,9 @@ class SavAgent():
                 app_instance = UrpfApp(
                     self, mode="loose", logger=self.logger)
                 self.add_app(app_instance)
-            elif name == "EFP-uRPF-A":
+            elif name.startswith("EFP-uRPF"):
                 app_instance = EfpUrpfApp(
-                    self, "A", logger=self.logger)
-                self.add_app(app_instance)
-            elif name == "EFP-uRPF-A-ROA":
-                app_instance = EfpUrpfApp(
-                    self, "A_ROA", logger=self.logger)
-                self.add_app(app_instance)
-            elif name == "EFP-uRPF-B":
-                app_instance = EfpUrpfApp(
-                    self, "B", logger=self.logger)
+                    self, name, self.logger, self.config.get("ca_host"), self.config.get("ca_port", 3000))
                 self.add_app(app_instance)
             elif name == "FP-uRPF":
                 app_instance = FpUrpfApp(

@@ -1,5 +1,35 @@
 import subprocess
 from bird_app import *
+import requests
+
+
+def get_aspa(logger, hostname, port_number, pwd="krill"):
+    while True:
+        try:
+            headers = {"Authorization": f"Bearer {pwd}",
+                       "Content-Type": "application/json"}
+            url = f"https://{hostname}:{port_number}/api/v1/cas/testbed/aspas"
+            response = requests.request(
+                "GET", url, headers=headers, verify=False)
+            response.raise_for_status()  # Raises an exception for any HTTP error status codes
+            # Return the response as a dictionary
+            return response.json()
+        except Exception as err:
+            logger.debug(err)
+            time.sleep(0.1)
+
+
+def aspa_check(meta, aspa_info):
+    """
+    return True if the meta is in the aspa_info
+    """
+    # TODO: ipv6
+    adj_provider_as = f"AS{meta['meta']['local_as']}(v4)"
+    adj_customer_as = meta["meta"]["remote_as"]
+    for data in aspa_info:
+        if data["customer"] == int(adj_customer_as):
+            return adj_provider_as in data["providers"]
+    return False
 
 
 class EfpUrpfApp(BirdApp):
@@ -7,11 +37,25 @@ class EfpUrpfApp(BirdApp):
     a SAV App implementation based on modified bird
     """
 
-    def __init__(self, agent, alg, name="EFP-uRPF_app", logger=None):
-        name = name.replace("EFP-uRPF_", f"EFP-uRPF-Algorithm-{alg.upper()}_")
+    def __init__(self, agent, name, logger=None, ca_host="", ca_port=""):
+        if not name.startswith("EFP-uRPF"):
+            raise ValueError("name should start with 'EFP-uRPF'")
+        name = name[9:].upper().split("-")
+        self.type = name.pop(0)
+        args = name
+        self.roa = False
+        self.aspa = False
+        name = f"EFP-uRPF-Algorithm-{self.type}"
+        if "ROA" in args:
+            name += "-ROA"
+            self.roa = True
+        if "ASPA" in args:
+            name += "-ASPA"
+            self.aspa = True
+            self.aspa_info = get_aspa(logger, ca_host, ca_port)
+        name += "_app"
         super(EfpUrpfApp, self).__init__(agent, name, logger)
         self.rules = []
-        self.type = alg.lower()
 
     def _init_protocols(self):
         result = self._parse_sav_protocols()
@@ -102,11 +146,9 @@ class EfpUrpfApp(BirdApp):
         """
         self._init_protocols()
         old_rules = self.rules
-        if self.type == "a":
+        if self.type == "A":
             return self.algorithm_a(old_rules)
-        elif self.type == "a_roa":
-            return self.algorithm_a(old_rules, roa=True)
-        elif self.type == "b":
+        elif self.type == "B":
             return self.algorithm_b(old_rules)
 
     def _parse_roa_table(self, t_name):
@@ -142,14 +184,14 @@ class EfpUrpfApp(BirdApp):
         # self.logger.debug(result)
         return result
 
-    def algorithm_a(self, old_rules, roa=False):
+    def algorithm_a(self, old_rules):
         """
         RFC 8704
         """
         X = {}
         all_int_in = {}
         roa_info = {}
-        if roa:
+        if self.roa:
             roa_info = self._parse_roa_table(t_name="r4")
             self.logger.debug(roa_info)
         for protocol_name in self.protocols:
@@ -159,7 +201,7 @@ class EfpUrpfApp(BirdApp):
             all_int_in[protocol_name]["adj-in"] = self._parse_import_table(protocol_name)[
                 "import"]
             # filter out the adj-in that does not match the roa
-            if roa:
+            if self.roa:
                 temp = {}
                 for k, v in all_int_in[protocol_name]['adj-in'].items():
                     this_prefix = str(k)
@@ -169,13 +211,15 @@ class EfpUrpfApp(BirdApp):
                             temp[k] = v
                         else:
                             self.logger.warning(f"roa mismatch for {k}:{v}")
-                self.logger.debug("afj-in before roa filter:")
-                self.logger.debug(all_int_in[protocol_name]["adj-in"])
                 all_int_in[protocol_name]["adj-in"] = temp
-                self.logger.debug("afj-in after roa filter:")
-                self.logger.debug(all_int_in[protocol_name]["adj-in"])
         for protocol_name, data in all_int_in.items():
             if data["meta"]["remote_role"] == "customer":
+                if self.aspa:
+                    self.logger.debug(data)
+                    self.logger.debug(self.aspa_info)
+                    self.logger.debug(aspa_check(data, self.aspa_info))
+                    if not aspa_check(data, self.aspa_info):
+                        continue
                 for prefix, paths in data["adj-in"].items():
                     for path in paths:
                         X[path["origin_as"]] = set()
