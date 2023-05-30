@@ -79,5 +79,8 @@ class DataBase():
     def session(self):
         return self.DBsession()
 
-
+CUR_DIR = os.path.dirname(os.path.abspath(__file__))
+# ensure the instance folder exists
+if not os.path.exists(path=CUR_DIR + "/data/"):
+    os.makedirs(CUR_DIR + "/data/")
 db = DataBase()

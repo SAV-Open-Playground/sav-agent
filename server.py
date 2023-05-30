@@ -9,13 +9,11 @@ import json
 
 from flask import Flask
 from flask import request
-
 from model import db
 from model import SavInformationBase
 from sav_agent import get_logger
 from sav_agent import SavAgent
 import config
-CUR_DIR = os.path.dirname(os.path.abspath(__file__))
 
 LOGGER = get_logger("server")
 
@@ -26,11 +24,6 @@ app.config.from_mapping(
 )
 
 app.config.from_object(config)
-
-# ensure the instance folder exists
-if not os.path.exists(path=CUR_DIR + "/data/"):
-    os.makedirs(CUR_DIR + "/data/")
-
 
 sa = SavAgent(logger=LOGGER,
               path_to_config=r"/root/savop/SavAgent_config.json")
