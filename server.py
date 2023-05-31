@@ -63,16 +63,7 @@ def search_sib():
     return the SIB table
     """
     sib_tables = db.session.query(SavInformationBase).all()
-    data = []
+    data = {}
     for row in sib_tables:
-        data.append({"id": row.id,
-                     "key": row.key,
-                     "value": row.value})
-        # data.append({"id": row.id,
-        #              "prefix": row.prefix,
-        #              "neighbor_as": row.neighbor_as,
-        #              "interface": row.interface,
-        #              "source": row.source,
-        #              "direction": row.direction,
-        #              "createtime": row.createtime})
-    return data
+        data[row.key]=json.loads(row.value)
+    return json.dumps(data,indent=2)
