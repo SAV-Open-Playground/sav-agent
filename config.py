@@ -7,6 +7,5 @@
 
 import os
 DEBUG = True
-SQLALCHEMY_DATABASE_URI = 'sqlite:///' + \
-    os.path.dirname(os.path.abspath(__file__)) + "/data/sib.sqlite"
+SQLALCHEMY_DATABASE_URI = f"sqlite:////root/savop/sib.sqlite"
 SQLALCHEMY_TRACK_MODIFICATIONS = True

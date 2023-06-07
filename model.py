@@ -65,22 +65,19 @@ class SavTable(Base):
 
 class DataBase():
     def __init__(self):
-        DB_URI = 'sqlite:///' + \
-            os.path.dirname(os.path.abspath(__file__)) + "/data/sib.sqlite"
+        cur_dir = os.path.dirname(os.path.abspath(__file__))
+        if not os.path.exists(path=cur_dir + "/data/"):
+            os.makedirs(cur_dir + "/data/")
+        DB_URI = f"sqlite:///{cur_dir}/data/sib.sqlite"
         self.engine = create_engine(DB_URI, pool_size=8,  pool_recycle=60*30)
         self.DBsession = sessionmaker(bind=self.engine)
-        try:
-            Base.metadata.drop_all(self.engine)
-            Base.metadata.create_all(self.engine)
-        except:
-            pass
+        Base.metadata.drop_all(self.engine)
+        Base.metadata.create_all(self.engine)
 
     @property
     def session(self):
         return self.DBsession()
 
-CUR_DIR = os.path.dirname(os.path.abspath(__file__))
+
 # ensure the instance folder exists
-if not os.path.exists(path=CUR_DIR + "/data/"):
-    os.makedirs(CUR_DIR + "/data/")
 db = DataBase()

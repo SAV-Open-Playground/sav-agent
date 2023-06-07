@@ -41,6 +41,7 @@ def parse_bird_table(table, logger=None):
         if "blackhole" in heading:
             continue
         prefix = heading.split(" ")[0]
+        prefix = prefix.replace("24-24", "24")
         # TODO: demo filter
         if not prefix.startswith("192"):
             continue
@@ -358,7 +359,7 @@ class LinkManager(InfoManager):
             return
         if link_name in self.data:
             self.data[link_name]["meta"] = meta
-        # self.db.upsert("link", str(self.data))
+        # self.db.upsert("link", json.dumps(self.data))
 
     def get(self, key):
         return self.data[key]
@@ -399,8 +400,7 @@ class LinkManager(InfoManager):
     def exist(self, link_name):
         return link_name in self.data
 
-
-def get_aa_msg(link_meta, msg_meta, logger):
+def get_agent_app_msg(link_meta, msg_meta, logger):
     """
     message between agent and app
     """
@@ -431,3 +431,47 @@ def get_aa_msg(link_meta, msg_meta, logger):
         if not tell_str_is_interior(path):
             raise ValueError(
                 "interior msg should have interior scope")
+
+
+def check_agent_agent_msg(msg, logger):
+    """
+    message structure between agent and agent,
+    there are two types :'origin' and 'relay'
+    """
+    # self.as4_session = link_meta["as4_session"]
+    # self.protocol_name = link_meta["protocol_name"]
+    # check src dst
+    # raise an error if the given msg is not a valid agent to agent message
+    origin_key = "sav_origin"
+    path_key = "sav_path"
+    logger.debug(json.dumps(msg,indent=2))
+    if not isinstance(msg["src"], str):
+        raise TypeError("src type error, should be a string")
+    if not isinstance(msg["dst"], str):
+        raise TypeError("dst type error, should be a string")
+    if not msg["msg_type"] in ['origin','relay']:
+        raise ValueError(f"mst_type should be ether 'origin' or 'relay'")
+
+    if not isinstance(msg["sav_scope"], list):
+        raise TypeError("scope type error, should be a list")
+    if not isinstance(msg["sav_nlri"], list):
+        raise TypeError("sav_nlri type error, should be a list")
+    
+    if not isinstance(msg[path_key], list):
+        raise TypeError("path type error, should be a list")
+    for path in msg[path_key]:
+        if not tell_str_is_interior(path):
+            raise ValueError(f"interior msg should have interior {path_key}")
+    
+    if not isinstance(msg[origin_key], str):
+        raise TypeError(f"{origin_key} type error")
+    
+    if not isinstance(msg["is_interior"], bool):
+        raise TypeError("is_interior type error, should be bool")
+    if msg["is_interior"]:
+        if not tell_str_is_interior(msg[path_key]) or\
+                not tell_str_is_interior(msg[origin_key]):
+            raise ValueError(
+                "interior msg should have interior path and origin")
+
+    return True

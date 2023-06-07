@@ -4,8 +4,10 @@
 @Time    :   2023/01/17 16:04:22
 '''
 import subprocess
+import json
 from model import db
 from model import SavInformationBase, SavTable
+
 
 KEY_WORD = "SAVAGENT"
 
@@ -178,7 +180,17 @@ class SIBManager():
         session.add(new_row)
         session.commit()
         session.close()
-        self.logger.info(f"SIB UPDATED: {key} :{value}")
+        v = json.loads(value)
+        msg = f"SIB UPDATED: {key}:"
+        if isinstance(v, list):
+            for i in v:
+                msg += f"\n{i}"
+        elif isinstance(v, dict):
+            msg += f"\n{json.dumps(v,indent=4)}"
+        else:
+            msg += f"{v}"
+            # self.logger.debug(type(v))
+        # self.logger.debug(f"SIB UPDATED: {msg}")
 
     def delete(self, key):
         session = db.session

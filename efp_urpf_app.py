@@ -1,5 +1,5 @@
 import subprocess
-from bird_app import *
+from required_apps import *
 import requests
 
 
@@ -34,7 +34,7 @@ def aspa_check(meta, aspa_info):
 
 class EfpUrpfApp(BirdApp):
     """
-    a SAV App implementation based on modified bird
+    a SAV App implementation based on reference router (BIRD)
     """
 
     def __init__(self, agent, name, logger=None, ca_host="", ca_port=""):
@@ -193,7 +193,7 @@ class EfpUrpfApp(BirdApp):
         roa_info = {}
         if self.roa:
             roa_info = self._parse_roa_table(t_name="r4")
-            self.logger.debug(roa_info)
+            self.logger.debug(f"roa_info: {roa_info}")
         for protocol_name in self.protocols:
             # self.logger.debug(msg=f"protocol_name:{protocol_name}")
             meta = self.agent.link_man.get(protocol_name)["meta"]
@@ -215,9 +215,9 @@ class EfpUrpfApp(BirdApp):
         for protocol_name, data in all_int_in.items():
             if data["meta"]["remote_role"] == "customer":
                 if self.aspa:
-                    self.logger.debug(data)
-                    self.logger.debug(self.aspa_info)
-                    self.logger.debug(aspa_check(data, self.aspa_info))
+                    # self.logger.debug(data)
+                    # self.logger.debug(self.aspa_info)
+                    # self.logger.debug(aspa_check(data, self.aspa_info))
                     if not aspa_check(data, self.aspa_info):
                         continue
                 for prefix, paths in data["adj-in"].items():

@@ -14,9 +14,13 @@ import subprocess
 from multiprocessing import Manager
 import copy
 
+import grpc
+import agent_msg_pb2
+import agent_msg_pb2_grpc
+
 from sav_common import *
 from iptable_manager import IPTableManager, SIBManager
-from bird_app import BirdApp
+from required_apps import BirdApp, GrpcApp
 from urpf_app import UrpfApp
 from efp_urpf_app import EfpUrpfApp
 from fp_urpf_app import FpUrpfApp
@@ -60,8 +64,8 @@ class SavAgent():
         # we have self.data["active_app"] after self._init_apps()
         self.sib_man = SIBManager(logger=self.logger)
         self.ip_man = IPTableManager(self.logger, self.data["active_app"])
-        self.sib_man.upsert("config", str(self.config))
-        self.sib_man.upsert("active_app", str(self.data["active_app"]))
+        self.sib_man.upsert("config", json.dumps(self.config))
+        self.sib_man.upsert("active_app", json.dumps(self.data["active_app"]))
         self._start()
 
     def _config_validation(self, path_to_config):
@@ -69,9 +73,52 @@ class SavAgent():
         return dictionary object if is a valid config file. Otherwise, raise ValueError
         """
         config = read_json(path_to_config)
-        if "bird" not in config["required_apps"]:
-            raise ValueError("bird is a must")
+        required_keys = ["apps", "grpc_enabled"]
+        for key in required_keys:
+            if key not in config:
+                raise ValueError(f"{key} is a must")
+        if config.get("grpc_enabled"):
+            grpc_keys = ["grpc_server_addr",
+                         "grpc_id",
+                         "grpc_links"]
+            for key in grpc_keys:
+                if key not in config:
+                    raise ValueError(f"{key} is a must")
+
         return config
+
+    def _find_grpc_remote(self, remote_ip):
+        for i in self.config["grpc_links"]:
+            if i.startswith(remote_ip):
+                return i
+        raise ValueError(f"remote_ip {remote_ip} not found in grpc_links")
+
+    def _send_msg_to_agent(self, msg, link):
+        """
+        send message to another agent
+        this function will decide to use grpc or reference router to send the message
+        """
+        if not isinstance(msg, dict):
+            raise TypeError("msg must be a dict object")
+        # using grpc
+        if self.config.get("grpc_enabled"):
+            try:
+                str_msg = json.dumps(msg)
+                remote_ip = link.get("meta").get("remote_ip")
+                remote_addr = self._find_grpc_remote(remote_ip)
+                with grpc.insecure_channel(remote_addr) as channel:
+                    stub = agent_msg_pb2_grpc.AgentLinkStub(channel)
+                    agent_msg = agent_msg_pb2.AgentMsg(sender_id=self.config.get("grpc_id"),
+                                                       json_str=str_msg)
+                    rep = stub.Simple(agent_msg)
+                    if rep.json_str == f"got {str_msg}" and rep.sender_id == remote_ip:
+                        return
+                    else:
+                        self.logger.error(rep)
+            except ValueError:
+                pass
+        # using reference router]
+        self.get_app(link["app"]).send_msg(msg)
 
     def _init_data(self):
         """
@@ -79,8 +126,6 @@ class SavAgent():
         """
         self.data = {}
         self.data["links"] = {}  # link manager"s data
-        # bird_app is a must
-        self.data["required_apps"] = self.config["required_apps"]
         self.data["fib"] = []  # system"s fib table
         # key is prefix (str), value is as paths in csv
         self.data["sav_table"] = {}
@@ -97,7 +142,7 @@ class SavAgent():
         if asn_a == asn_b:
             if not asn_a in data_dict["nodes"]:
                 data_dict["nodes"][asn_a] = None
-            self.sib_man.upsert("sav_graph", str(data_dict))
+            self.sib_man.upsert("sav_graph", json.dumps((data_dict)))
             return
         self.logger.info(
             f"SAV GRAPH LINK ADDED :{asn_a}-{asn_b}")
@@ -111,23 +156,21 @@ class SavAgent():
         value_asn = asn_a if key_asn == asn_b else asn_b
         if not key_asn in data_dict["links"]:
             data_dict["links"][key_asn] = [value_asn]
-            self.sib_man.upsert("sav_graph", str(data_dict))
+            self.sib_man.upsert("sav_graph", json.dumps((data_dict)))
             return
         elif value_asn not in data_dict["links"][key_asn]:
             data_dict["links"][key_asn].append(value_asn)
-        self.sib_man.upsert("sav_graph", str(data_dict))
+        self.sib_man.upsert("sav_graph", json.dumps((data_dict)))
 
-    def log_local_asn_table(self):
-        self.logger.info(
-            f"UPDATED LOCAL PREFIX-AS_PATH TABLE {self.bird_app.get_pp_v4_dict()}")
 
     def _init_apps(self):
-        for name in self.data["required_apps"]:
-            if name == "bird":
-                app_instance = BirdApp(self, logger=self.logger)
-                self.add_app(app_instance)
-                self.bird_app = app_instance
-            elif name == "strict-uRPF":
+        # bird and grpc are must
+        self.bird_app = BirdApp(self, logger=self.logger)
+        self.add_app(self.bird_app)
+        self.grpc_app = GrpcApp(self, logger=self.logger)
+        self.add_app(self.grpc_app)
+        for name in self.config["apps"]:
+            if name == "strict-uRPF":
                 app_instance = UrpfApp(
                     self, mode="strict", logger=self.logger)
                 self.add_app(app_instance)
@@ -145,10 +188,9 @@ class SavAgent():
                 self.add_app(app_instance)
             else:
                 self.logger.error(msg=f"unknown app name: {name}")
-        self.data["active_app"] = self.data["required_apps"][0]
-
+        self.data["active_app"] = self.config["apps"][0]
         self.logger.debug(
-            msg=f"initialized apps: {self.data['required_apps']},using {self.data['active_app']}")
+            msg=f"initialized optional apps: {self.data['apps'].keys()},using {self.data['active_app']}")
 
     def _if_fib_stable(self, stable_span=5):
         """
@@ -179,7 +221,7 @@ class SavAgent():
                         self._process_msg(msg)
                     except Exception as err:
                         self.logger.error(
-                            f"error when processing: {err}:{msg}")
+                            f"error when processing: [{err}]:{msg}")
                 self._send_link_init()
             else:
                 self._if_fib_stable(
@@ -191,7 +233,8 @@ class SavAgent():
         decide whether to send initial broadcast of each link
         """
         all_link_names = self.link_man.get_all_up()
-        for link_name in all_link_names:
+        links_to_go = all_link_names
+        for link_name in links_to_go:
             link = self.link_man.get(link_name)
             if len(link["meta"]) > 0:
                 if link["initial_broadcast"] is False:
@@ -232,9 +275,9 @@ class SavAgent():
         # end of filter
         # get local prefix by gateway is 0.0.0.0
         prefixes = get_kv_match(prefixes, "Gateway", "0.0.0.0")
-
         local_prefixes = list(map(lambda x: netaddr.IPNetwork(
             x["Destination"]+"/"+x["Genmask"]), prefixes))
+        self.logger.debug(local_prefixes)
         self.sib_man.upsert("local_prefixes", str(local_prefixes))
         return local_prefixes
 
@@ -254,7 +297,7 @@ class SavAgent():
         output = list(map(lambda x: x.split(" "), output))
         headings = output.pop(0)
         output = list(map(lambda x: dict(zip(headings, x)), output))
-        self.sib_man.upsert("local_fib", str(output))
+        self.sib_man.upsert("local_fib", json.dumps(output))
         # begin of filter
 
         return output
@@ -266,7 +309,7 @@ class SavAgent():
         required_keys = ["msg", "msg_type", "source_app", "source_link"]
         for key in required_keys:
             if not key in data:
-                raise KeyError(f"required key missing {key} {data}")
+                raise KeyError(f"required key missing [{key}] in [{data}]")
         self.cmds.append(data)
         return
 
@@ -304,7 +347,7 @@ class SavAgent():
                 man.data[link_name]["status"] = link_dict["status"]
         else:
             man.add(link_name, link_dict)
-        self.sib_man.upsert("link_data", str(man.data))
+        self.sib_man.upsert("link_data", json.dumps(man.data))
 
     def _process_link_config(self, msg):
         """
@@ -338,7 +381,7 @@ class SavAgent():
             self.link_man.add(msg["protocol_name"], data_dict)
         else:
             self.link_man.add_meta(msg["protocol_name"], msg)
-        self.sib_man.upsert("link_data", str(self.link_man.data))
+        self.sib_man.upsert("link_data", json.dumps(self.link_man.data))
 
     def _log_info_for_front(self, msg, log_type, link_name=None):
         """
@@ -404,9 +447,9 @@ class SavAgent():
                         msg1['sav_nlri'] = list(map(str, msg1['sav_nlri']))
                         self._log_info_for_front(
                             msg, "relay_terminate", link_name)
-
-                        self.get_app(
-                            name=link["app"]).send_msg(relay_msg)
+                        # remote_grpc_addr = link["meta"
+                        self._send_msg_to_agent(msg, link)
+                        # self.get_app(link["app"]).send_msg(relay_msg)
                 else:
                     if path[0] in relay_scope:
                         relay_scope[path[0]].append(path)
@@ -435,13 +478,15 @@ class SavAgent():
                 relay_msg["sav_scope"] = relay_scope[next_as]
                 relay_msg = self._construct_msg(
                     link, relay_msg, "relay", True)
-                self.get_app(link["app"]).send_msg(relay_msg)
+                self._send_msg_to_agent(msg, link)
+                # self.get_app(link["app"]).send_msg(relay_msg)
             if link_meta["is_interior"] and msg["is_interior"]:
                 for link_name in intra_links:
                     link = self.link_man.get(link_name)
                     relay_msg = self._construct_msg(
                         link, relay_msg, "relay", True)
-                    self.get_app(link["app"]).send_msg(relay_msg)
+                    self._send_msg_to_agent(msg, link)
+                    # self.get_app(link["app"]).send_msg(relay_msg)
             if len(inter_links) == 0:
                 if link_meta["is_interior"]:
                     self.logger.error(
@@ -526,6 +571,7 @@ class SavAgent():
         prefix to AS_PATH, this function relaying on birdapp
         """
         # if we receive a bgp update, indicating the link is up
+        self.logger.debug(f"_process_bgp_update got:{msg}")
         link_name = msg["protocol_name"]
         self.link_man.get(key=link_name)["status"] = True
         if not msg["is_native_bgp"]:
@@ -534,7 +580,6 @@ class SavAgent():
         # send route changed info to apps
         # relying on bird app to get the as path of each prefix to send
         adds, dels = self.bird_app.diff_pp_v4()
-
         # the results are filtered for demo in Birdapp
         if len(adds) == 0 and len(dels) == 0:
             return
@@ -543,7 +588,8 @@ class SavAgent():
             changed_routes.append({prefix: path})
         # self.logger.debug(changed_routes)
         # in this Demo no remove is required
-        self.log_local_asn_table()
+        self.logger.info(
+            f"UPDATED LOCAL PREFIX-AS_PATH TABLE {self.bird_app.get_pp_v4_dict()}")
         self._send_origin(None, changed_routes)
         self._notify_apps()
 
@@ -565,6 +611,8 @@ class SavAgent():
             elif isinstance(app, FpUrpfApp):
                 a, d = app.fib_changed()
             elif isinstance(app, BirdApp):
+                pass
+            elif isinstance(app, GrpcApp):
                 pass
             else:
                 self.logger.error(f":{type(app)}")
@@ -613,15 +661,14 @@ class SavAgent():
 
         else:
             self.logger.error(f"unknown msg_type:{msg_type}\nmsg:{msg}")
-        # self.logger.debug(msg["msg_type"])
-        # self.logger.debug(msg["sav_scope"])
         # filter out empty sav_scope
         temp = []
         for path in msg["sav_scope"]:
             if len(path) > 0:
                 temp.append(path)
         msg["sav_scope"] = temp
-        return msg
+        if check_agent_agent_msg(msg, self.logger):
+            return msg
 
     def _send_origin(self, input_link_name=None, input_paths=None):
         """
@@ -679,7 +726,9 @@ class SavAgent():
                     paths_for_as = inter_paths[remote_as]
                     msg = self._construct_msg(
                         link, paths_for_as, "origin", True)
-                    self.get_app(link["app"]).send_msg(msg)
+                    # self.logger.error(link)
+                    self._send_msg_to_agent(msg, link)
+                    # self.get_app(link["app"]).send_msg(msg)
         else:
             self.logger.debug(
                 "no inter link or inter path, not sending inter origin")
@@ -689,11 +738,14 @@ class SavAgent():
                 for remote_as, path in inter_paths.items():
                     msg = self._construct_msg(
                         link, path, "origin", True)
-                    self.get_app(link["app"]).send_msg(msg)
+                    # self.logger.error(link)
+                    self._send_msg_to_agent(msg, link)
+                    # self.get_app(link["app"]).send_msg(msg)
                     self.logger.debug(f"sent origin via intra{msg}")
                   # TODO intra origin
 
     def _process_msg(self, input_msg):
+        # self.logger.debug(f"processing msg: {input_msg}")
         msg, m_t = input_msg["msg"], input_msg["msg_type"]
         if m_t == "link_state_change":
             self._process_link_state_change(input_msg)

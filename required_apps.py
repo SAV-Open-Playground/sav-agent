@@ -61,7 +61,7 @@ def prefixes_to_hex_str(prefix_list, ip_type="ipv4"):
 
 class BirdApp(SavApp):
     """
-    a sav app implementation based on modified bird
+    a sav app implementation based on reference router (based on bird)
     """
 
     def __init__(self, agent, name="bird_app", logger=None):
@@ -174,6 +174,7 @@ class BirdApp(SavApp):
             prefix = prefix.split(" ")[0]
             # TODO: demo filter
             if str(prefix).startswith("192"):
+                prefix = prefix.replace("24-24", "24")
                 prefix = netaddr.IPNetwork(prefix)
                 temp = {"as_path": []}
                 for line in row:
@@ -188,7 +189,7 @@ class BirdApp(SavApp):
         notify the bird to retrieve the msg from flask server and execute it.
         """
         if not isinstance(msg, dict):
-            self.logger.error("msg is not a dictionary")
+            self.logger.error(f"msg is not a dictionary msg is {type(msg)}")
             return
         while len(self.prepared_cmd) > 0:
             self.logger.warn(
@@ -270,24 +271,6 @@ class BirdApp(SavApp):
     def get_prepared_cmd(self):
         return self.prepared_cmd.pop(0)
 
-    def put_link_up(self, link_name):
-        msg = {
-            "msg_type": "link_state_change",
-            "source_app": self.name,
-            "source_link": link_name,
-            "msg": True
-        }
-        self.agent.put_msg(msg)
-
-    def put_link_down(self, link_name):
-        msg = {
-            "msg_type": "link_state_change",
-            "source_app": self.name,
-            "source_link": link_name,
-            "msg": False
-        }
-        self.agent.put_msg(msg)
-
     def _bird_cmd(self, cmd):
         """
         execute bird command and return the output in std
@@ -343,8 +326,7 @@ class BirdApp(SavApp):
                 msg["msg"] = self.preprocess_msg(msg["msg"])
             self.agent.put_msg(msg)
         else:
-            self.logger.error(
-                "unknown msg_type: {m_t}\n msg :{msg}")
+            self.logger.error(f"unknown msg_type: {m_t}\n msg :{msg}")
 
     def preprocess_msg(self, msg):
         # as_path is easier to process in string format, so we keep it
@@ -354,8 +336,10 @@ class BirdApp(SavApp):
         msg["del_routes"] = []
         for route in msg["routes"]:
             if route[0] == "+":
+                self.logger.debug("111")
                 msg["add_routes"].append(netaddr.IPNetwork(route[1:]))
             elif route[0] == "-":
+                self.logger.debug("222")
                 msg["del_routes"].append(netaddr.IPNetwork(route[1:]))
         del msg["routes"]
         # process sav_nlri
@@ -369,3 +353,54 @@ class BirdApp(SavApp):
         msg["is_native_bgp"] = not (len(msg["sav_nlri"]) > 0)
         # self.logger.debug(msg)
         return msg
+
+
+class GrpcApp(SavApp):
+    # in Grpc we can send the json in string format,
+    # so we don't need to convert it to hex string
+    # the sending function is implemented in Sav_agent
+    def __init__(self, agent, name="grpc_app", logger=None):
+        super(GrpcApp, self).__init__(agent, name, logger)
+        self.types = set()
+        # for i in self.agent.config.get("grpc_links"):
+        # self.logger.error(i)
+
+    def recv_msg(self, msg, sender_id):
+        self.logger.debug(f"app {self.name} got msg [{msg}]")
+        # add link
+        link_man = self.agent.link_man
+        local_ip = self.agent.config.get('grpc_id')
+
+        source_link = f"grpc_{local_ip}_{sender_id}"
+        self.logger.debug(source_link)
+        if not link_man.exist(source_link):
+            data_dict = self.agent._get_new_link_dict(source_link)
+            data_dict["meta"] = {"local_ip": local_ip, "remote_ip": sender_id}
+            link_man.add(source_link, data_dict)
+            self.put_link_up(source_link)
+        m_t = msg["msg_type"]
+        # if m_t == "link_state_change":
+        #     if msg["msg"] == "up":
+        #         self.put_link_up(msg["protocol_name"])
+        #     elif msg["msg"] == "down":
+        #         self.put_link_down(msg["protocol_name"])
+        #     else:
+        #         raise ValueError(f"unknown msg:{msg}")
+        # elif m_t in ["bird_bgp_config", "bgp_update"]:
+        # if m_t == "bgp_update":
+        #     msg["source_app"] = self.name
+        #     msg["source_link"] = msg["msg"]["protocol_name"]
+        #     self.put_link_up(msg["source_link"])
+
+        #     msg["msg"] = self.preprocess_msg(msg["msg"])
+        #     self.agent.put_msg(msg)
+        if m_t in ["origin", "relay"]:
+            temp = {"msg": msg}
+            msg = temp
+            msg["msg_type"] = "bgp_update"
+            msg["source_app"] = self.name
+            msg["source_link"] = source_link
+            self.agent.put_msg(msg)
+        else:
+            self.logger.error(
+                f"unknown msg_type: {m_t}\n msg :{msg}")
