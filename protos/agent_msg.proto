@@ -1,0 +1,18 @@
+
+syntax = "proto3";
+package agnet_msg;
+/*
+`message` is used to define the structure of the data to be transmitted, after the equal sign
+is the field number. Each field in the message definition has a unique number.
+The overall format is similar to defining a class in Python or a structure in Golang.
+*/
+message AgentMsg {
+    string sender_id = 1;
+    string json_str = 2;
+}
+
+// `service` is used to define methods for gRPC services in a fixed format, similar to defining
+//an interface in Golang
+service AgentLink {
+    rpc Simple (AgentMsg) returns (AgentMsg);
+}
