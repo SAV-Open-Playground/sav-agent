@@ -444,7 +444,7 @@ def check_agent_agent_msg(msg, logger):
     # raise an error if the given msg is not a valid agent to agent message
     origin_key = "sav_origin"
     path_key = "sav_path"
-    logger.debug(json.dumps(msg,indent=2))
+    # logger.debug(json.dumps(msg,indent=2))
     if not isinstance(msg["src"], str):
         raise TypeError("src type error, should be a string")
     if not isinstance(msg["dst"], str):

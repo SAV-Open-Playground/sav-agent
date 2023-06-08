@@ -88,9 +88,9 @@ class SavAgent():
         return config
 
     def _find_grpc_remote(self, remote_ip):
-        for i in self.config["grpc_links"]:
-            if i.startswith(remote_ip):
-                return i
+        for remote_addr,remote_id in self.config["grpc_links"]:
+            if remote_addr.startswith(remote_ip):
+                return (remote_addr,remote_id)
         raise ValueError(f"remote_ip {remote_ip} not found in grpc_links")
 
     def _send_msg_to_agent(self, msg, link):
@@ -105,16 +105,19 @@ class SavAgent():
             try:
                 str_msg = json.dumps(msg)
                 remote_ip = link.get("meta").get("remote_ip")
-                remote_addr = self._find_grpc_remote(remote_ip)
+                remote_addr,remote_id = self._find_grpc_remote(remote_ip)
                 with grpc.insecure_channel(remote_addr) as channel:
                     stub = agent_msg_pb2_grpc.AgentLinkStub(channel)
                     agent_msg = agent_msg_pb2.AgentMsg(sender_id=self.config.get("grpc_id"),
                                                        json_str=str_msg)
                     rep = stub.Simple(agent_msg)
-                    if rep.json_str == f"got {str_msg}" and rep.sender_id == remote_ip:
+                    expected_str = f"got {str_msg}"
+                    if rep.json_str == expected_str and rep.sender_id == remote_id:
                         return
                     else:
-                        self.logger.error(rep)
+                        self.logger.error(f'{rep}')
+                        self.logger.error(f'expected sender:{remote_id}, got {rep.sender_id}')
+                        self.logger.error(f'expected string:{expected_str}, got {rep.json_str}')
             except ValueError:
                 pass
         # using reference router]

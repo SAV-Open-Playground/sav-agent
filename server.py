@@ -71,8 +71,8 @@ if sa.config.get("grpc_enabled"):
         GrpcServer(sa, LOGGER), grpc_server)
     addr = sa.config.get("grpc_server_addr")
     grpc_server.add_insecure_port(addr)
-    LOGGER.debug(f"GRPC server running at {addr}")
     grpc_server.start()
+    LOGGER.debug(f"GRPC server running at {addr}")
 
 
 @app.route("/bird_bgp_upload/", methods=["POST", "GET"])
