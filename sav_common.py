@@ -10,7 +10,11 @@ import time
 import logging
 import logging.handlers
 import netaddr
-import copy
+
+# AS number int
+# IP Address 
+# Network netaddr class
+# =============================== start_of_key_words ==========================================
 
 
 def parse_bird_table(table, logger=None):
@@ -128,7 +132,7 @@ def get_logger(file_name):
 
 def tell_str_is_interior(input_str):
     """
-    tell the given str contains asn_umber or ip
+    tell the given str contains as_number or ip
     return True if AS number detected.
     return False if ip detected.
     """
@@ -247,7 +251,11 @@ class InfoManager():
     info manager manage the info of stored data,
     base class for SavAgent and SavApp.
     """
-
+    def __init__(self, data, logger):
+        self.logger = logger
+        self.data = data
+        if not isinstance(self.data, dict):
+            raise ValueError("data is not a dictionary")
     def __init__(self, data, logger):
         self.logger = logger
         self.data = data
@@ -311,12 +319,23 @@ class SavApp():
     def fib_changed(self):
         raise NotImplementedError
 
-    def put_link_up(self, link_name):
+    def put_link_up(self, link_name,link_type):
+        # this msg may incur creating of new link, so we need to know the type
         msg = {
             "msg_type": "link_state_change",
             "source_app": self.name,
             "source_link": link_name,
-            "msg": True
+            "link_type": link_type,
+            "msg": True,
+        }
+        self.agent.put_msg(msg)
+    def set_link_type(self,link_name, link_type):
+        # this msg may incur creating of new link, so we need to know the type
+        msg = {
+            "msg_type": "set_link_type",
+            "source_app": self.name,
+            "source_link": link_name,
+            "msg": link_type,
         }
         self.agent.put_msg(msg)
 
@@ -329,20 +348,26 @@ class SavApp():
         }
         self.agent.put_msg(msg)
 
-
+# class Link():
+#     """
+#     the intermedia between two sav agents
+#     """
+    # def __init__(self,link_name,source_app,remote_addr,remote_as,local_addr,local_as,interface,type):
 class LinkManager(InfoManager):
     """
     LinkManager manage the link status
     """
-
-    def add(self, link_name, link_dict):
+# TODO: we have three types of link: native bgp, modified bgp and grpc
+    def add(self, link_name, link_dict,link_type):
         if "rpki" in link_name:
             return
-        self.logger.debug(f"adding {link_name}")
+        self.logger.debug(f"adding {link_name},{link_dict}")
         if link_name in self.data:
             self.logger.warning(f"key {link_name} already exists")
             return
-        # self.db =
+        if not link_type in ["native_bgp", "modified_bgp","grpc"]:
+            self.logger.error(f'unknown link_type: {link_type}')
+        link_dict["link_type"] = link_type
         self.data[link_name] = link_dict
 
     def add_meta(self, link_name, meta):
@@ -376,23 +401,28 @@ class LinkManager(InfoManager):
                 result.append(link)
         return result
 
-    def get_all_up(self):
+    def get_all_up(self,include_native_bgp = False):
         """
         return a list of all up link_names ,use get(link_name) to get link object
         """
         temp = []
-        for key in self.data:
-            if self.data[key]["status"]:
-                temp.append(key)
+        for link_name in self.data:
+            link = self.data[link_name]
+            if link["status"]:
+                if link["link_type"] == "native_bgp":
+                        if include_native_bgp:
+                            temp.append(link_name)
+                else:
+                    temp.append(link_name)
         return temp
 
-    def get_all_up_type(self, is_interior):
+    def get_all_up_type(self, is_interior,include_native_bgp = False):
         """
         return a list of all up link_names with the correct type (is_interior or not),
         use get(link_name) to get link object
         """
         result = []
-        for link_name in self.get_all_up():
+        for link_name in self.get_all_up(include_native_bgp):
             if self.data[link_name]["meta"]["is_interior"] == is_interior:
                 result.append(link_name)
         return result
@@ -461,7 +491,9 @@ def check_agent_agent_msg(msg, logger):
         raise TypeError("path type error, should be a list")
     for path in msg[path_key]:
         if not tell_str_is_interior(path):
-            raise ValueError(f"interior msg should have interior {path_key}")
+            logger.debug(msg[path_key])
+            logger.debug(path)
+            raise ValueError(f"{path_key} should contain path value")
     
     if not isinstance(msg[origin_key], str):
         raise TypeError(f"{origin_key} type error")
@@ -469,9 +501,10 @@ def check_agent_agent_msg(msg, logger):
     if not isinstance(msg["is_interior"], bool):
         raise TypeError("is_interior type error, should be bool")
     if msg["is_interior"]:
-        if not tell_str_is_interior(msg[path_key]) or\
-                not tell_str_is_interior(msg[origin_key]):
+        if not tell_str_is_interior(msg[origin_key]):
             raise ValueError(
                 "interior msg should have interior path and origin")
 
     return True
+
+

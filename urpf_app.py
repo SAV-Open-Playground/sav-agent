@@ -190,7 +190,11 @@ class UrpfApp(SavApp):
         elif m_t in ["bird_bgp_config", "bgp_update"]:
             msg["source_app"] = self.name
             msg["source_link"] = msg["msg"]["protocol_name"]
-            self.put_link_up(msg["source_link"])
+            # self.put_link_up(msg["source_link"])
+            if "rpdp" in msg["msg"]["channels"]:
+                self.set_link_type(msg["source_link"], "modified_bgp")
+            else:
+                self.set_link_type(msg["source_link"],"native_bgp")
             if m_t == "bgp_update":
                 msg["msg"] = self.preprocess_msg(msg["msg"])
             self.agent.put_msg(msg)

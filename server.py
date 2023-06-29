@@ -47,10 +47,9 @@ class GrpcServer(agent_msg_pb2_grpc.AgentLinkServicer):
         self.logger = logger
 
     def Simple(self, req, context):
+        
         msg_str = req.json_str
-        # self.logger.debug(dir(context))
-        # self.logger.debug(req)
-        # self.logger.debug(f"got msg {msg_str} from {req.sender_id}")
+        self.logger.debug(f"grpc server got msg {msg_str} from {req.sender_id}")
         my_id = self.agent.config.get("grpc_id")
         reply = f"got {msg_str}"
         try:
@@ -86,17 +85,17 @@ def index():
         LOGGER.error(err)
         return {"code": "5001", "message": "Invalid Json String", "data": str(request.data)}
     try:
-        bird_app = sa.bird_app
+        rpdp_app = sa.rpdp_app
         required_keys = ["msg_type", "msg"]
         for key in required_keys:
             if key not in data:
                 LOGGER.warning(f"{key} not found in {data.keys()}")
                 return {"code": "5002", "message": f"{key} not found!"}
         if data["msg_type"] == "request_cmd":
-            cmd = bird_app.get_prepared_cmd()
+            cmd = rpdp_app.get_prepared_cmd()
             return {"code": "2000", "data": cmd, "message": "success"}
         # LOGGER.debug(data)
-        bird_app.recv_msg(data)
+        rpdp_app.recv_msg(data)
         return {"code": "0000", "message": "success"}
     except Exception as err:
         LOGGER.error(err)

@@ -1,5 +1,5 @@
 import subprocess
-from required_apps import *
+from rpdp_app import *
 import requests
 
 
@@ -32,12 +32,18 @@ def aspa_check(meta, aspa_info):
     return False
 
 
-class EfpUrpfApp(BirdApp):
+class EfpUrpfApp(SavApp):
     """
     a SAV App implementation based on reference router (BIRD)
     """
 
     def __init__(self, agent, name, logger=None, ca_host="", ca_port=""):
+        self.prepared_cmd = Manager().list()
+        self.pp_v4_dict = {}
+        # pp represents prefix-(AS)path
+        src_ip = agent.config.get("grpc_id")
+        link_man = agent.link_man
+        local_as = agent.config.get("local_as")
         if not name.startswith("EFP-uRPF"):
             raise ValueError("name should start with 'EFP-uRPF'")
         name = name[9:].upper().split("-")

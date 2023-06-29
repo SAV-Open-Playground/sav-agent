@@ -96,24 +96,25 @@ class IPTableManager():
         session.commit()
         session.close()
         log_msg = f"SAV RULE ADDED: {data}"
-        # prefix [{prefix}] can only comes from "
-        # log_msg += f"interface_name [{interface}], remote_as [{neighbor_as}]"
         self.logger.info(log_msg)
-        if src_app == self.active_app:
+        if src_app != self.active_app:
             return
         if session.query(SavTable).filter(
                 SavTable.prefix == prefix).count() == 0:
             interface_list.remove(interface)
+            self.logger.debug(interface_list)
             for drop_interface in interface_list:
                 command = f"iptables -A {KEY_WORD} -i {drop_interface} -s {prefix} -j DROP"
+                self.logger.debug(command)
                 self._iptables_command_execute(command=command)
         else:
             command = f"iptables -L -v -n --line-numbers | grep {interface} | grep {prefix}"
             command += "| awk '{ print $1 }' | xargs - I v1  iptables - D "
             command += f"{KEY_WORD} v1"
+            self.logger.debug(command)
             self._iptables_command_execute(command=command)
-        # log_msg = "IP TABLES CHANGED"
-        # self.logger.debug(log_msg)
+        log_msg = "IP TABLES CHANGED"
+        self.logger.debug(log_msg)
         # store data to DB
 
     def delete(self, input_id):

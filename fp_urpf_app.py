@@ -109,8 +109,8 @@ class FpUrpfApp(SavApp):
             for item in new_[prefix]:
                 temp.append(item["interface_name"])
             new_[prefix] = temp
-        self.logger.debug(f"new_:{new_}")
-        self.logger.debug(f"old_rules:{old_rules}")
+        # self.logger.debug(f"new_:{new_}")
+        # self.logger.debug(f"old_rules:{old_rules}")
         add_rules = []
         del_rules = []
         for prefix in new_:
