@@ -98,7 +98,7 @@ class FpUrpfApp(SavApp):
 
         if not "master4" in new_:
             self.logger.warning(
-                "no master4 table. Is birnewd ready?")
+                "no master4 table. Is BIRD ready?")
             return [], []
         old_rules = self.rules
         new_ = new_['master4']
