@@ -64,7 +64,6 @@ class RPDPApp(SavApp):
     a sav app implementation based on reference router (based on bird)
     embeded grpc link
     """
-
     def __init__(self, agent, name="rpdp_app", logger=None):
         super(RPDPApp, self).__init__(agent, name, logger)
         self.prepared_cmd = Manager().list()
@@ -106,7 +105,7 @@ class RPDPApp(SavApp):
         new_ = self._parse_bird_fib()
         if not "master4" in new_:
             self.logger.warning(
-                "no master4 table. Is birnewd ready?")
+                "no master4 table. Is BIRD ready?")
             return [], []
         new_ = new_["master4"]
         dels = []
@@ -319,20 +318,48 @@ class RPDPApp(SavApp):
             return None
         out = "\n".join(out.split("\n")[1:])
         return out
+    def _construct_msg(self, link, input_msg, msg_type, is_inter):
+        """
+        construct a message for apps to use,
+        if msg_type is origin, input_msg is the value of sav_scope list of paths
+        if msg_type is relay, input_msg a dict include sav_path, sav_nlri, sav_origin, sav_scope
+        """
+        try:
+            msg = {
+                "src": link["meta"]["local_ip"],
+                "dst": link["meta"]["remote_ip"],
+                "msg_type": msg_type,
+                "is_interior": is_inter,
+                "as4_session": link["meta"]["as4_session"],
+                "protocol_name": link["meta"]["protocol_name"],
+            }
+            if msg_type == "origin":
+                if is_inter:
+                    msg["sav_origin"] = link["meta"]["local_as"]
+                    msg["sav_scope"] = input_msg
+                else:
+                    msg["sav_origin"] = link["meta"]["router_id"]
+                msg["sav_path"] = [msg["sav_origin"]]
+                msg["sav_nlri"] = self.agent.get_local_prefixes()
 
-    # def fib_changed(self, adds1, dels1):
-    #     """
-    #     fib change dectected
-    #     """
-    #     adds, dels = self.diff_pp_v4()
-    #     # # currently we only support ipv4\]
-    #     # if len(adds) == 0 and len(dels) == 0:
-    #     #     return
-
-    #     self.logger.error(adds)
-    #     self.logger.error(adds1)
-    #     self.logger.error(dels)
-    #     self.logger.error(dels1)
+            elif msg_type == "relay":
+                msg["sav_origin"] = input_msg["sav_origin"]
+                msg["sav_nlri"] = input_msg["sav_nlri"]
+                msg["sav_path"] = input_msg["sav_path"]
+                msg["sav_scope"] = input_msg["sav_scope"]
+            else:
+                self.logger.error(f"unknown msg_type:{msg_type}\nmsg:{msg}")
+            # filter out empty sav_scope
+            temp = []
+            for path in msg["sav_scope"]:
+                if len(path) > 0:
+                    temp.append(path)
+            msg["sav_scope"] = temp
+            if check_agent_agent_msg(msg, self.logger):
+                return msg
+        except Exception as e:
+            self.logger.error(e)
+            self.logger.error("construct msg error")
 
     def recv_msg(self, msg):
         self.logger.debug("app {} got msg {}".format(self.name, msg))

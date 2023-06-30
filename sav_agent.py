@@ -477,7 +477,7 @@ class SavAgent():
                         link = self.link_man.get(link_name)
                         relay_msg["sav_path"] = msg["sav_path"]
                         relay_msg["sav_scope"] = scope_data
-                        relay_msg = self._construct_msg(
+                        relay_msg = self.rpdp_app._construct_msg(
                             link, relay_msg, "relay", True)
                         msg1 = relay_msg
                         msg1['sav_nlri'] = list(map(str, msg1['sav_nlri']))
@@ -509,12 +509,12 @@ class SavAgent():
         for next_as in relay_scope:
             inter_links = self.link_man.get_by(next_as, True)
             # native_ggp link may included
-            inter_links = [i for i in inter_links if i["link_type"]=="modified_bgp"]
+            inter_links = [i for i in inter_links if i["link_type"]!="native_bgp"]
             relay_msg["sav_scope"] = relay_scope[next_as]
             relay_msg["sav_path"] = msg["sav_path"] + [link_meta["local_as"]]
             for link in inter_links:
                 relay_msg["sav_scope"] = relay_scope[next_as]
-                relay_msg = self._construct_msg(
+                relay_msg = self.rpdp_app._construct_msg(
                     link, relay_msg, "relay", True)
                 self._send_msg_to_agent(relay_msg, link)
                 # self.get_app(link["app"]).send_msg(relay_msg)
@@ -634,6 +634,8 @@ class SavAgent():
     def _notify_apps(self):
         """
         rpdp logic is handled in other function
+        here we pass the FIB change to SAV mechamthems,
+        who does not need other information
         """
         adds, dels = self._diff_fib("fib_for_apps")
         self.logger.debug((adds, dels))
@@ -641,17 +643,13 @@ class SavAgent():
         del_rules = []
         for app_name in self.data['apps']:
             app = self.get_app(app_name)
-            self.logger.debug(f"calling app :{app_name}")
+            self.logger.debug(f"calling app: {app_name}")
             a, d = [], []
             if isinstance(app, UrpfApp):
-
                 a, d = app.fib_changed(adds, dels)
-            elif isinstance(app, EfpUrpfApp):
-                a, d = app.fib_changed()
-            elif isinstance(app, FpUrpfApp):
+            elif (isinstance(app, EfpUrpfApp) or isinstance(app, FpUrpfApp)):
                 a, d = app.fib_changed()
             elif isinstance(app, RPDPApp):
-                # a, d = app.fib_changed(adds, dels)
                 pass
             else:
                 self.logger.error(f":{type(app)}")
@@ -669,53 +667,7 @@ class SavAgent():
             pass  # TODO: delete
             # self.ip_man.
 
-    def _construct_msg(self, link, input_msg, msg_type, is_inter):
-        """
-        construct a message for apps to use,
-        if msg_type is origin, input_msg is the value of sav_scope list of paths
-        if msg_type is relay, input_msg a dict include sav_path, sav_nlri, sav_origin, sav_scope
-        """
-        try:
-            msg = {
-                "src": link["meta"]["local_ip"],
-                "dst": link["meta"]["remote_ip"],
-                "msg_type": msg_type,
-                "is_interior": is_inter,
-                "as4_session": link["meta"]["as4_session"],
-                "protocol_name": link["meta"]["protocol_name"],
-            }
-            if msg_type == "origin":
-                if is_inter:
-                    msg["sav_origin"] = link["meta"]["local_as"]
-                    msg["sav_scope"] = input_msg
-                else:
-                    msg["sav_origin"] = link["meta"]["router_id"]
-                msg["sav_path"] = [msg["sav_origin"]]
-                msg["sav_nlri"] = self.get_local_prefixes()
 
-            elif msg_type == "relay":
-                msg["sav_origin"] = input_msg["sav_origin"]
-                msg["sav_nlri"] = input_msg["sav_nlri"]
-                msg["sav_path"] = input_msg["sav_path"]
-                msg["sav_scope"] = input_msg["sav_scope"]
-
-            else:
-                self.logger.error(f"unknown msg_type:{msg_type}\nmsg:{msg}")
-            # filter out empty sav_scope
-            temp = []
-            # self.logger.debug(msg["sav_scope"])
-            # self.logger.debug(type(msg["sav_scope"]))
-            for path in msg["sav_scope"]:
-                # self.logger.debug(path)
-                # self.logger.debug(type(path))
-                if len(path) > 0:
-                    temp.append(path)
-            msg["sav_scope"] = temp
-            if check_agent_agent_msg(msg, self.logger):
-                return msg
-        except Exception as e:
-            self.logger.error(e)
-            self.logger.error("construct msg error")
 
     def _send_origin(self, input_link_name=None, input_paths=None):
         """
@@ -774,7 +726,7 @@ class SavAgent():
                 else:
                     paths_for_as = inter_paths[remote_as]
                     # self.logger.debug(paths_for_as)
-                    msg = self._construct_msg(
+                    msg = self.rpdp_app._construct_msg(
                         link, paths_for_as, "origin", True)
                     # self.logger.error(link)
                     self.logger.debug(msg)
@@ -787,7 +739,7 @@ class SavAgent():
         if len(intra_links) > 0:
             for link in intra_links:
                 for remote_as, path in inter_paths.items():
-                    msg = self._construct_msg(
+                    msg = self.rpdp_app._construct_msg(
                         link, path, "origin", True)
                     # self.logger.error(link)
                     self._send_msg_to_agent(msg, link)
