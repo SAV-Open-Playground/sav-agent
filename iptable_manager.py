@@ -99,20 +99,22 @@ class IPTableManager():
         self.logger.info(log_msg)
         if src_app != self.active_app:
             return
-        if session.query(SavTable).filter(
-                SavTable.prefix == prefix).count() == 0:
-            interface_list.remove(interface)
-            self.logger.debug(interface_list)
-            for drop_interface in interface_list:
-                command = f"iptables -A {KEY_WORD} -i {drop_interface} -s {prefix} -j DROP"
-                self.logger.debug(command)
-                self._iptables_command_execute(command=command)
-        else:
-            command = f"iptables -L -v -n --line-numbers | grep {interface} | grep {prefix}"
-            command += "| awk '{ print $1 }' | xargs - I v1  iptables - D "
-            command += f"{KEY_WORD} v1"
-            self.logger.debug(command)
-            self._iptables_command_execute(command=command)
+       # if session.query(SavTable).filter(
+       #         SavTable.prefix == prefix).count() == 0:
+       #     interface_list.remove(interface)
+       #     self.logger.debug(interface_list)
+       #     for drop_interface in interface_list:
+       #         command = f"iptables -A {KEY_WORD} -i {drop_interface} -s {prefix} -j DROP"
+       #         self.logger.debug(command)
+       #         self._iptables_command_execute(command=command)
+       # else:
+       #     command = f"iptables -L -v -n --line-numbers | grep {interface} | grep {prefix}"
+       #     command += "| awk '{ print $1 }' | xargs - I v1  iptables - D "
+       #     command += f"{KEY_WORD} v1"
+       #     self.logger.debug(command)
+       #     self._iptables_command_execute(command=command)
+        session = db.session
+
         log_msg = "IP TABLES CHANGED"
         self.logger.debug(log_msg)
         # store data to DB
@@ -125,7 +127,7 @@ class IPTableManager():
         session.delete(sib_row)
         session.commit()
         if session.query(SavTable).filter(
-                SavTable.prefix == prefix).count() == 0:
+         self.active_app:       SavTable.prefix == prefix).count() == 0:
             command = f"iptables -L -v -n --line-numbers | grep {interface} | grep {prefix}"
             command += " |awk '{ print $1 }' | xargs - I v1  iptables - D "
             command += f"{KEY_WORD} v1"
