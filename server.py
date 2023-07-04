@@ -3,22 +3,18 @@
 """
 @Time    :   2023/01/12 14:19:52
 """
-
-import os
 import json
-
 from flask import Flask
 from flask import request
 from model import db
 from model import SavInformationBase
 from sav_agent import get_logger
 from sav_agent import SavAgent
-import config
 from concurrent import futures
 import grpc
-
 import agent_msg_pb2
 import agent_msg_pb2_grpc
+from iptable_manager import iptables_refresh
 
 LOGGER = get_logger("server")
 
@@ -30,13 +26,8 @@ app_config = {
     "SQLALCHEMY_TRACK_MODIFICATIONS": True
 }
 app.config.from_object(app_config)
-
 # ensure the instance folder exists
-
-
-
-sa = SavAgent(logger=LOGGER,
-              path_to_config=r"/root/savop/SavAgent_config.json")
+sa = SavAgent(logger=LOGGER, path_to_config=r"/root/savop/SavAgent_config.json")
 # flask is used as a tunnel between reference_router and agent
 
 
@@ -100,6 +91,8 @@ def index():
     except Exception as err:
         LOGGER.error(err)
         return {"code": "5004", "message": str(err), "data": str(request.data)}
+
+
 @app.route("/sib_table/", methods=["POST", "GET"])
 def search_sib():
     """
@@ -109,4 +102,14 @@ def search_sib():
     data = {}
     for row in sib_tables:
         data[row.key]=json.loads(row.value)
-    return json.dumps(data,indent=2)
+    return json.dumps(data, indent=2)
+
+
+@app.route('/refresh_proto/<string:active_app>/', methods=["POST", "GET"])
+def refresh_proto(active_app):
+    info = iptables_refresh(active_app=active_app)
+    return {"code": "0000", "message": f"{info}"}
+
+
+if __name__ == '__main__':
+    app.run(host="0.0.0.0", port=8888)
