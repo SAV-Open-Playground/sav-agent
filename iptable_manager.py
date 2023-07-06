@@ -18,6 +18,8 @@ def iptables_command_execute(sender, prefix, neighbor_as, interface, **extra):
 
 
 def iptables_refresh(active_app):
+    if active_app is None:
+        return
     session = db.session
     rules = session.query(SavTable).filter(SavTable.source == active_app).all()
     session.close()
@@ -74,52 +76,55 @@ class IPTableManager():
     def _iptables_command_execute(self, command):
         command_result = self._command_executer(command=command)
         return command_result.returncode
-
-    def add(self, data):
+    def add(self,data_list):
         """
-        add a rule to the STB
+        add list of rules to the STB
         currently only add ipv4 and inter-domain rules
         """
-        prefix, src_app, interface = data.get(
-            "prefix"), data.get("source_app"), data.get("interface")
-        if (prefix is None) or (src_app is None) or (interface is None):
-            self.logger.error(f"Missing required fields [{data.keys()}]")
-            raise ValueError("Missing required field")
-        neighbor_as = data.get("neighbor_as")
-        interface_list = self._get_host_interface_list()
-        interface_list.append("*")
-        if interface not in interface_list:
-            self.logger.error(
-                f"the interface {interface} doesn't exit in the list:{interface_list}")
-            raise ValueError("the interface doesn't exit!")
+        self.logger.debug(data_list)
         session = db.session
-        if session.query(SavTable).filter(
+        src_apps = set()
+        for data in data_list:
+            prefix, src_app, interface = data.get(
+            "prefix"), data.get("source_app"), data.get("interface")
+            if (prefix is None) or (src_app is None) or (interface is None):
+                self.logger.error(f"Missing required fields [{data.keys()}]")
+                raise ValueError("Missing required field")
+            neighbor_as = data.get("neighbor_as")
+            interface_list = self._get_host_interface_list()
+            interface_list.append("*")
+            if interface not in interface_list:
+                self.logger.error(
+                    f"the interface {interface} doesn't exit in the list:{interface_list}")
+                raise ValueError("the interface doesn't exit!")
+            rules_in_table = session.query(SavTable).filter(
                 SavTable.prefix == prefix,
                 SavTable.interface == interface,
-                SavTable.source == src_app).count() != 0:
-            self.logger.warning("rule exists")
-            log_msg = f"SAV RULE EXISTS: {data}"
-            # log_msg = f"SAV RULE EXISTS: prefix [{prefix}] can only comes from "
-            # log_msg += f"interface_name [{interface}], remote_as [{neighbor_as}]"
-            self.logger.info(log_msg)
-            return
-        sib_row = SavTable(
+                SavTable.source == src_app)
+            if rules_in_table.count() != 0:
+                self.logger.warning("rule exists")
+                log_msg = f"SAV RULE EXISTS: {data}"
+                self.logger.info(log_msg)
+                return
+            src_apps.add(src_app)
+            sib_row = SavTable(
             prefix=prefix,
             neighbor_as=neighbor_as,
             interface=interface,
             source=src_app,
             direction=None)
-        session.add(sib_row)
-        session.commit()
+            session.add(sib_row)
+            session.commit()
+            log_msg = f"SAV RULE ADDED: {data}"
+            self.logger.info(log_msg)
         session.close()
-        log_msg = f"SAV RULE ADDED: {data}"
-        self.logger.info(log_msg)
-        if src_app != self.active_app:
+        self.logger.debug(src_apps)
+        self.logger.debug(self.active_app)
+        if not (self.active_app in src_apps):
             return
         refresh_info = iptables_refresh(src_app)
         log_msg = f"IP TABLES CHANGED: {refresh_info}"
         self.logger.debug(log_msg)
-        # store data to DB
 
     def delete(self, input_id):
         session = db.session

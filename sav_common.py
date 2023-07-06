@@ -10,12 +10,29 @@ import time
 import logging
 import logging.handlers
 import netaddr
+import requests
+
 
 # AS number int
 # IP Address 
 # Network netaddr class
 # =============================== start_of_key_words ==========================================
-
+def is_asn(in_put):
+    if isinstance(in_put,int):
+        pass 
+    #TODO
+class RPDPPeer():
+    def __init__(self,asn,port,ip,is_as4) -> None:
+        self.asn = asn
+        self.port = port
+        self.ip = ip
+        self.is_as4 = is_as4
+    def __str__(self) -> str:
+        return f"{self.asn},{self.ip}:{self.ip}"
+ASN_TYPE = int
+IP_ADDR_TYPE = netaddr.IPAddress
+PREFIX_TYPE = netaddr.IPNetwork
+RPDP_PEER_TYPE = RPDPPeer
 
 def parse_bird_table(table, logger=None):
     """
@@ -461,7 +478,90 @@ def get_agent_app_msg(link_meta, msg_meta, logger):
         if not tell_str_is_interior(path):
             raise ValueError(
                 "interior msg should have interior scope")
+            
+def prefixes_to_hex_str(prefix_list, ip_type="ipv4"):
+    """
+        constructs NLRI prefix list
+        :param prefix_list: prefix in str format list
+    """
+    if ip_type == "ipv4":
+        items = []
+        for prefix in prefix_list:
+            prefix = str(prefix)
+            ip_address, prefix = prefix.split("/")
+            items.append(prefix)
+            ip_address = ip_address.split(".")
+            items += ip_address[:int((int(prefix) + 7) / 8)]
+        return ",".join(items)
+    else:
+        raise NotImplementedError
+def hex_str_to_prefixes(input_bytes, t="ipv4"):
+    """
+    reverse of prefixes_to_hex_str
+    """
+    if t == "ipv4":
+        result = []
+        temp = decode_csv(input_bytes)
+        while "" in temp:
+            temp.remove("")
+        while len(temp) > 0:
+            prefix_len = int(temp.pop(0))
+            prefix = []
+            for _ in range(int((prefix_len + 7) / 8)):
+                prefix.append(temp.pop(0))
+            while len(prefix) < 4:
+                prefix.append("0")
+            result.append(netaddr.IPNetwork(
+                ".".join(prefix) + "/" + str(prefix_len)))
+        return result
+    else:
+        raise NotImplementedError
+    
+def str_to_scope(input_str):
+    temp = decode_csv(input_str)
+    result = []
+    while len(temp) > 0:
+        scope_len = int(temp.pop(0))
+        for _ in range(scope_len):
+            path_len = int(temp.pop(0))
+            path = []
+            for _ in range(path_len):
+                path.append(temp.pop(0))
+            result.append(path)
+    return result
+def remove_local(list_of_fib):
+    """
+    remove local prefixes
+    """
+    return [i for i in list_of_fib if not '0.0.0.0' in i['Gateway']]
 
+def get_aspa(logger, hostname, port_number, pwd="krill"):
+    while True:
+        try:
+            headers = {"Authorization": f"Bearer {pwd}",
+                       "Content-Type": "application/json"}
+            url = f"https://{hostname}:{port_number}/api/v1/cas/testbed/aspas"
+            response = requests.request(
+                "GET", url, headers=headers, verify=False)
+            response.raise_for_status()  # Raises an exception for any HTTP error status codes
+            # Return the response as a dictionary
+            return response.json()
+        except Exception as err:
+            logger.debug(err)
+            time.sleep(0.1)
+
+
+def aspa_check(meta, aspa_info):
+    """
+    return True if the meta is in the aspa_info
+    """
+    # TODO: ipv6
+    adj_provider_as = f"AS{meta['meta']['local_as']}(v4)"
+    adj_customer_as = meta["meta"]["remote_as"]
+    for data in aspa_info:
+        if data["customer"] == int(adj_customer_as):
+            return adj_provider_as in data["providers"]
+    return False
 
 def check_agent_agent_msg(msg, logger):
     """

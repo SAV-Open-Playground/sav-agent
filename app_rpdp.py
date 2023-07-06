@@ -3,12 +3,6 @@ import subprocess
 
 from sav_common import *
 
-
-
-
-
-
-
 class RPDPApp(SavApp):
     """
     a sav app implementation based on reference router (based on bird)
@@ -92,13 +86,12 @@ class RPDPApp(SavApp):
             result[table_name] = table_data
         return result
 
-    def _parse_bird_roa(self):
-        """
-
-        """
-        data = self._bird_cmd(cmd="show route table r4")
-        if data is None:
-            return {}
+    # def _parse_bird_roa(self):
+    #     """
+    #     """
+    #     data = self._bird_cmd(cmd="show route table r4")
+    #     if data is None:
+    #         return {}
 
     def _parse_bird_fib(self):
         """

@@ -25,16 +25,8 @@ class UrpfApp(SavApp):
         # TODO: implement del
         # self.logger.debug(f"app {self.name} fib_changed")
         # remove local prefixes
-        temp = []
-        for row in adds:
-            if not '0.0.0.0' in row['Gateway']:
-                temp.append(row)
-        adds = temp
-        temp = []
-        for row in dels:
-            if not '0.0.0.0' in row['Gateway']:
-                temp.append(row)
-        dels = temp
+        adds = remove_local(adds)
+        dels = remove_local(dels)
         if self.mode == "strict":
             return self._fib_changed_strict(adds, dels)
         elif self.mode == "loose":

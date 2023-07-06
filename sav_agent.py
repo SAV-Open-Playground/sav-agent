@@ -13,6 +13,7 @@ import threading
 import subprocess
 from multiprocessing import Manager
 import copy
+import sys
 
 import grpc
 import agent_msg_pb2
@@ -73,7 +74,7 @@ class SavAgent():
         return dictionary object if is a valid config file. Otherwise, raise ValueError
         """
         config = read_json(path_to_config)
-        required_keys = ["apps","grpc_links","grpc_id","grpc_server_addr"]
+        required_keys = ["apps","grpc_links","grpc_id","grpc_server_addr","enabled_sav_app"]
         for key in required_keys:
             if key not in config:
                 self.logger.error(f"{key} is a must")
@@ -183,7 +184,9 @@ class SavAgent():
         self.rpdp_app = None
         # we enable grpc as default
         self.data["active_app"] = None
-        
+        if len(self.config["apps"])==0:
+            self.logger.warning("no apps found, quiting")
+            sys.exit(0)
         for name in self.config["apps"]:
             if name == "strict-uRPF":
                 app_instance = UrpfApp(
@@ -206,7 +209,7 @@ class SavAgent():
                 self.add_app(self.rpdp_app)
             else:
                 self.logger.error(msg=f"unknown app name: {name}")
-            if self.data["active_app"] is None:
+            if self.config["enabled_sav_app"] == name:
                 self.data["active_app"] = app_instance.name
         if self.rpdp_app is None:
             msg = 'rpdp_app missing in config'
@@ -359,22 +362,21 @@ class SavAgent():
         """
         in this function, we manage the link state
         """
-        man = self.link_man
         link_name = msg["source_link"]
         link_dict = self._get_new_link_dict(msg["source_app"])
         link_dict["status"] = msg["msg"]
-        if link_name in man.data:
-            old_d = man.get(link_name)
+        if link_name in self.link_man.data:
+            old_d = self.link_man.get(link_name)
             old_status = old_d["status"]
             new_status = link_dict["status"]
             if old_status != new_status:
-                man.data[link_name]["status"] = link_dict["status"]
+                self.link_man.data[link_name]["status"] = link_dict["status"]
         else:
             self.logger.debug(msg)
             # self.logger.debug(link_name)
             # self.logger.debug(link_dict)
-            man.add(link_name, link_dict,msg["link_type"])
-        self.sib_man.upsert("link_data", json.dumps(man.data))
+            self.link_man.add(link_name, link_dict,msg["link_type"])
+        self.sib_man.upsert("link_data", json.dumps(self.link_man.data))
 
     def _process_link_config(self, msg):
         """
@@ -554,15 +556,15 @@ class SavAgent():
         # self.rpdp_app.preprocess_msg(msg)
         msg["is_interior"] = tell_str_is_interior(msg["sav_origin"])
         prefixes = msg["sav_nlri"]
-
+        temp_list = []
         for prefix in prefixes:
-            temp_dict = {"prefix": str(prefix),
+            temp_list.append({"prefix": str(prefix),
                          "neighbor_as": link_meta["remote_as"],
                          "interface": msg["interface_name"],
                          "source_app": msg["app_name"],
                          "source_link": msg["source_link"]
-                         }
-            self.ip_man.add(temp_dict)
+                         })
+        self.ip_man.add(temp_list)
         if msg["is_interior"]:
             # in inter-domain, sav_path is as_path
             msg["sav_path"] = msg["as_path"]
@@ -653,16 +655,15 @@ class SavAgent():
                 pass
             else:
                 self.logger.error(f":{type(app)}")
-            add_rules.extend(a)
-            del_rules.extend(d)
-        for row in add_rules:
-            temp_dict = {"prefix": row[0],
-                         "interface": row[1],
-                         "source_app": row[2],
-                         "neighbor_as": row[3]
+            for rule in a:
+                row = {"prefix": rule[0],
+                         "interface": rule[1],
+                         "source_app": rule[2],
+                         "neighbor_as": rule[3]
                          }
-            # self.logger.debug(temp_dict)
-            self.ip_man.add(temp_dict)
+                add_rules.append(row)
+            del_rules.extend(d)
+        self.ip_man.add(add_rules)
         for row in del_rules:
             pass  # TODO: delete
             # self.ip_man.
