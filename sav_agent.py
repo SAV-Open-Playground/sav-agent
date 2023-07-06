@@ -20,10 +20,10 @@ import agent_msg_pb2_grpc
 
 from sav_common import *
 from iptable_manager import IPTableManager, SIBManager
-from rpdp_app import RPDPApp
-from urpf_app import UrpfApp
-from efp_urpf_app import EfpUrpfApp
-from fp_urpf_app import FpUrpfApp
+from app_rpdp import RPDPApp
+from app_urpf import UrpfApp
+from app_efp_urpf import EfpUrpfApp
+from app_fp_urpf import FpUrpfApp
 
 
 def add_path(given_asn_path, data_dict):
