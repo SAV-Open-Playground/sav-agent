@@ -205,8 +205,9 @@ class SavAgent():
                     self, logger=self.logger)
                 self.add_app(app_instance)
             elif name == "rpdp_app":
-                self.rpdp_app = RPDPApp(self, logger=self.logger)
-                self.add_app(self.rpdp_app)
+                app_instance = RPDPApp(self, logger=self.logger)
+                self.add_app(app_instance)
+                self.rpdp_app = app_instance
             else:
                 self.logger.error(msg=f"unknown app name: {name}")
             if self.config["enabled_sav_app"] == name:
