@@ -118,11 +118,11 @@ class IPTableManager():
             log_msg = f"SAV RULE ADDED: {data}"
             self.logger.info(log_msg)
         session.close()
-        self.logger.debug(src_apps)
-        self.logger.debug(self.active_app)
+        # self.logger.debug(src_apps)
+        # self.logger.debug(self.active_app)
         if not (self.active_app in src_apps):
             return
-        refresh_info = iptables_refresh(src_app)
+        refresh_info = iptables_refresh(self.active_app)
         log_msg = f"IP TABLES CHANGED: {refresh_info}"
         self.logger.debug(log_msg)
 
