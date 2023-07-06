@@ -7,15 +7,41 @@ import subprocess
 import json
 from model import db
 from model import SavInformationBase, SavTable
-
+from tools import get_host_interface_list
 
 KEY_WORD = "SAVAGENT"
 
 
 def iptables_command_execute(sender, prefix, neighbor_as, interface, **extra):
     add_rule_status = subprocess.call(
-        ['iptables', '-A', KEY_WORD, '!', '-i', interface, '-s', prefix, '-j', 'DROP'])
-    print(add_rule_status)
+        ['iptables', '-A', KEY_WORD, '-i', interface, '-s', prefix, '-j', 'DROP'])
+
+
+def iptables_refresh(active_app):
+    session = db.session
+    rules = session.query(SavTable).filter(SavTable.source == active_app).all()
+    session.close()
+    if len(rules) == 0:
+        return f"there is no {active_app} sav rules, so don't need to refresh iptables"
+    sav_rule = {}
+    for rule in rules:
+        print("test")
+        prefix, interface = rule.prefix, rule.interface
+        if interface == "*":
+            continue
+        if prefix not in sav_rule.keys():
+            sav_rule[prefix] = {interface}
+        else:
+            sav_rule[prefix].add(interface)
+    interface_set = set(get_host_interface_list())
+    for key, value in sav_rule.items():
+        sav_rule[key] = interface_set - value
+    # flush the SAVAGENT chain in iptables
+    flush_chain_status = subprocess.call(['iptables', '-F', KEY_WORD])
+    for prefix, iface_set in sav_rule.items():
+        for iface in iface_set:
+            add_rule_status = subprocess.call(['iptables', '-A', KEY_WORD, '-i', iface, '-s', prefix, '-j', 'DROP'])
+    return f"refresh {active_app} iptables successfully"
 
 
 class IPTableManager():
@@ -43,16 +69,7 @@ class IPTableManager():
         return subprocess.run(command, shell=True, capture_output=True, encoding='utf-8')
 
     def _get_host_interface_list(self):
-        """
-        return a list of 'clean' interface names
-        """
-        command = "ip link|grep -v 'link' | grep -v -E 'docker0|lo' | awk -F: '{ print $2 }' | sed 's/ //g'"
-        command_result = self._command_executer(command=command)
-        std_out = command_result.stdout
-        # self.logger.debug(command_result)
-        result = std_out.split("\n")[:-1]
-        result = list(map(lambda x: x.split('@')[0], result))
-        return result
+        return get_host_interface_list()
 
     def _iptables_command_execute(self, command):
         command_result = self._command_executer(command=command)
@@ -99,21 +116,8 @@ class IPTableManager():
         self.logger.info(log_msg)
         if src_app != self.active_app:
             return
-        if session.query(SavTable).filter(
-                SavTable.prefix == prefix).count() == 0:
-            interface_list.remove(interface)
-            self.logger.debug(interface_list)
-            for drop_interface in interface_list:
-                command = f"iptables -A {KEY_WORD} -i {drop_interface} -s {prefix} -j DROP"
-                self.logger.debug(command)
-                self._iptables_command_execute(command=command)
-        else:
-            command = f"iptables -L -v -n --line-numbers | grep {interface} | grep {prefix}"
-            command += "| awk '{ print $1 }' | xargs - I v1  iptables - D "
-            command += f"{KEY_WORD} v1"
-            self.logger.debug(command)
-            self._iptables_command_execute(command=command)
-        log_msg = "IP TABLES CHANGED"
+        refresh_info = iptables_refresh(src_app)
+        log_msg = f"IP TABLES CHANGED: {refresh_info}"
         self.logger.debug(log_msg)
         # store data to DB
 
@@ -124,8 +128,7 @@ class IPTableManager():
         prefix, interface = sib_row.prefix, sib_row.interface
         session.delete(sib_row)
         session.commit()
-        if session.query(SavTable).filter(
-                SavTable.prefix == prefix).count() == 0:
+        if session.query(SavTable).filter(SavTable.prefix == prefix).count() == 0:
             command = f"iptables -L -v -n --line-numbers | grep {interface} | grep {prefix}"
             command += " |awk '{ print $1 }' | xargs - I v1  iptables - D "
             command += f"{KEY_WORD} v1"
@@ -187,7 +190,7 @@ class SIBManager():
             for i in v:
                 msg += f"\n{i}"
         elif isinstance(v, dict):
-            msg += f"\n{json.dumps(v,indent=4)}"
+            msg += f"\n{json.dumps(v, indent=4)}"
         else:
             msg += f"{v}"
             # self.logger.debug(type(v))

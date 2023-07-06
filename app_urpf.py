@@ -1,23 +1,6 @@
 from sav_common import *
 
 
-def prefixes_to_hex_str(prefix_list, ip_type="ipv4"):
-    """
-        constructs NLRI prefix list
-        :param prefix_list: prefix in str format list
-    """
-    if ip_type == "ipv4":
-        items = []
-        for prefix in prefix_list:
-            prefix = str(prefix)
-            ip_address, prefix = prefix.split("/")
-            items.append(prefix)
-            ip_address = ip_address.split(".")
-            items += ip_address[:int((int(prefix) + 7) / 8)]
-        return ",".join(items)
-    else:
-        raise NotImplementedError
-
 
 class UrpfApp(SavApp):
     """

@@ -1,35 +1,6 @@
+from multiprocessing import Manager
 import subprocess
-from rpdp_app import *
-import requests
-
-
-def get_aspa(logger, hostname, port_number, pwd="krill"):
-    while True:
-        try:
-            headers = {"Authorization": f"Bearer {pwd}",
-                       "Content-Type": "application/json"}
-            url = f"https://{hostname}:{port_number}/api/v1/cas/testbed/aspas"
-            response = requests.request(
-                "GET", url, headers=headers, verify=False)
-            response.raise_for_status()  # Raises an exception for any HTTP error status codes
-            # Return the response as a dictionary
-            return response.json()
-        except Exception as err:
-            logger.debug(err)
-            time.sleep(0.1)
-
-
-def aspa_check(meta, aspa_info):
-    """
-    return True if the meta is in the aspa_info
-    """
-    # TODO: ipv6
-    adj_provider_as = f"AS{meta['meta']['local_as']}(v4)"
-    adj_customer_as = meta["meta"]["remote_as"]
-    for data in aspa_info:
-        if data["customer"] == int(adj_customer_as):
-            return adj_provider_as in data["providers"]
-    return False
+from sav_common import *
 
 
 class EfpUrpfApp(SavApp):
@@ -252,7 +223,7 @@ class EfpUrpfApp(SavApp):
                         rule = sav_rule_tuple(
                             prefix, data["meta"]["interface_name"], self.name, origin_asn)
                         new_rules.add(rule)
-        self.logger.debug(f"new_rules:{new_rules}")
+        # self.logger.debug(f"EFP-A new_rules:{new_rules}")
 
         return rule_list_diff(old_rules, new_rules)
 
@@ -298,6 +269,6 @@ class EfpUrpfApp(SavApp):
             for prefix, origin_as in Z:
                 new_rules.add(sav_rule_tuple(
                     prefix, interface, self.name, origin_as))
-        # self.logger.debug(f"new_rules:{new_rules}")
+        # self.logger.debug(f"EFP-B new_rules:{new_rules}")
         # new_rules = self._set_to_rules(I, Z)
         return rule_list_diff(old_rules, new_rules)
