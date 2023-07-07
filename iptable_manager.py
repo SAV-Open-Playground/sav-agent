@@ -20,6 +20,13 @@ def iptables_command_execute(sender, prefix, neighbor_as, interface, **extra):
 def iptables_refresh(active_app):
     if active_app is None:
         return
+    with open('/root/savop/SavAgent_config.json', 'r') as file:
+        config = json.load(file)
+        enabled_sav_app = config.get("enabled_sav_app")
+    if enabled_sav_app is None:
+        return
+    if enabled_sav_app != active_app:
+        return
     session = db.session
     rules = session.query(SavTable).filter(SavTable.source == active_app).all()
     session.close()
