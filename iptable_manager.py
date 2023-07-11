@@ -8,6 +8,7 @@ import json
 from model import db
 from model import SavInformationBase, SavTable
 from tools import get_host_interface_list
+from sav_common import get_logger
 
 KEY_WORD = "SAVAGENT"
 
@@ -25,8 +26,8 @@ def iptables_refresh(active_app):
         enabled_sav_app = config.get("enabled_sav_app")
     if enabled_sav_app is None:
         return
-    if enabled_sav_app != active_app:
-        return
+    # if enabled_sav_app != active_app:
+    #     return
     session = db.session
     rules = session.query(SavTable).filter(SavTable.source == active_app).all()
     session.close()
@@ -50,7 +51,10 @@ def iptables_refresh(active_app):
     for prefix, iface_set in sav_rule.items():
         for iface in iface_set:
             add_rule_status = subprocess.call(['iptables', '-A', KEY_WORD, '-i', iface, '-s', prefix, '-j', 'DROP'])
-    return f"refresh {active_app} iptables successfully"
+    logger = get_logger("SavAgent")
+    log_info = f"refresh {active_app} iptables successfully"
+    logger.info(log_info)
+    return log_info
 
 
 class IPTableManager():
