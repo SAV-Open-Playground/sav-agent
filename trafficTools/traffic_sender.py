@@ -10,8 +10,6 @@
 -------------------------------------------------
 """
 import argparse
-import time
-
 from scapy.all import *
 from scapy.layers.inet import IP, ICMP
 
@@ -22,10 +20,10 @@ class TrafficSender:
         success_count, fail_count = 0, 0
         for i in range(trans_num):
             if src is None:
-                packet = IP(dst=dst) / ICMP()
+                packet = Ether() / IP(dst=dst) / ICMP()
             else:
-                packet = IP(src=src, dst=dst) / ICMP()
-            reply = sr1(packet, timeout=2, verbose=0)
+                packet = Ether() / IP(src=src, dst=dst) / ICMP()
+            reply = srp1(packet, timeout=1, iface=iface, verbose=0)
             if reply and reply.haslayer(ICMP) and reply[ICMP].type == 0:
                 success_count += 1
             if reply is None:
@@ -37,10 +35,11 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--dst')
     parser.add_argument('--src', default=None)
+    parser.add_argument('--iface', default=None)
     parser.add_argument('--trans_num', type=int, default=10)
     args = parser.parse_args()
 
-    dst, src, trans_num = args.dst, args.src, args.trans_num
-    count = TrafficSender.send(dst=dst, src=src, trans_num=trans_num)
+    dst, src, iface, trans_num = args.dst, args.src, args.iface, args.trans_num
+    count = TrafficSender.send(dst=dst, src=src, iface=iface, trans_num=trans_num)
     print(count)
     
