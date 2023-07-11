@@ -23,7 +23,7 @@ class TrafficSender:
                 packet = Ether() / IP(dst=dst) / ICMP()
             else:
                 packet = Ether() / IP(src=src, dst=dst) / ICMP()
-            reply = srp1(packet, timeout=1, iface=iface, verbose=0)
+            reply = srp1(packet, timeout=0.5, iface=iface, verbose=0)
             if reply and reply.haslayer(ICMP) and reply[ICMP].type == 0:
                 success_count += 1
             if reply is None:
