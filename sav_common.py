@@ -11,6 +11,7 @@ import logging
 import logging.handlers
 import netaddr
 import requests
+import subprocess
 
 
 # AS number int
@@ -71,7 +72,7 @@ def parse_bird_table(table, logger=None):
             parsed_rows[prefix] = []
         temp = {}
         for line in row:
-            if line.startswith("\tBGP.as_path: "):
+            if line.startswith("\tBGP.as_path:"):
                 temp["as_path"] = list(
                     map(int, line.split(": ")[1].split(" ")))
                 temp["as_path"].reverse()
@@ -85,6 +86,8 @@ def parse_bird_table(table, logger=None):
                 temp = {}
         parsed_rows[prefix].append(temp)
         # parsed_rows[prefix].sort()
+        if len(parsed_rows[prefix])==1 and len(parsed_rows[prefix][0])==0:
+            del parsed_rows[prefix]
     return table_name, parsed_rows
 
 
@@ -137,9 +140,7 @@ def get_logger(file_name):
         __file__))+f"/../logs/{file_name}.log", maxBytes=maxsize, backupCount=backup_num)
     handler.setLevel(logging.DEBUG)
 
-    formatter = logging.Formatter(
-        # "[%(asctime)s] [%(process)d] [%(filename)s] [%(funcName)s] [%(levelname)s] %(message)s")
-        "[%(asctime)s]  [%(filename)s:%(lineno)s-%(funcName)s] [%(levelname)s] %(message)s")
+    formatter = logging.Formatter("[%(asctime)s]  [%(filename)s:%(lineno)s-%(funcName)s] [%(levelname)s] %(message)s")
     formatter.converter = time.gmtime
     handler.setFormatter(formatter)
 
@@ -364,7 +365,147 @@ class SavApp():
             "msg": False
         }
         self.agent.put_msg(msg)
-
+    def _bird_cmd(self, cmd):
+        return birdc_cmd(self.logger,cmd)
+    def _parse_roa_table(self,t_name = 'r4'):
+        return get_roa(self.logger,t_name)
+def birdc_cmd(logger, cmd):
+        """
+        execute bird command and return the output in std
+        """
+        proc = subprocess.Popen(
+            ["/usr/local/sbin/birdc "+cmd],
+            shell=True,
+            stdout=subprocess.PIPE,
+            stdin=subprocess.PIPE,
+            stderr=subprocess.PIPE)
+        proc.stdin.write("\n".encode("utf-8"))
+        proc.stdin.flush()
+        proc.wait()
+        out = proc.stdout.read().decode()
+        temp = out.split("\n")[0]
+        temp = temp.split()
+        if len(temp) < 2:
+            return None
+        if not (temp[0] == "BIRD" and temp[-1] == "ready."):
+            logger.error(f"birdc execute error:{out}")
+            return None
+        out = "\n".join(out.split("\n")[1:])
+        return out
+def birdc_show_protocols(logger):
+    """
+    execute show protocols 
+    """
+    data = birdc_cmd(logger,cmd="show protocols")
+    if data is None:
+        return {}
+    data = data.split("\n")
+    while "" in data:
+        data.remove("")
+    return data
+def birdc_get_protos_by(logger,key,value):
+    data = birdc_show_protocols(logger)
+    title = data.pop(0).split()
+    result = []
+    for row in data:
+        temp = row.split()
+        a = {}
+        for i in range(min(len(title),len(temp))):
+            a[title[i]]=temp[i]
+        if not key in a:
+            logger.error(f"key {key} missing in:{list(a.keys())}")
+            return result
+        if a[key]==value:
+            result.append(a)
+    return result
+def birdc_get_import(logger, protocol_name, channel_name="ipv4"):
+        """
+        using birdc show all import to get bird fib
+        return a list
+        """
+        cmd = f"show route all import table {protocol_name}.{channel_name}"
+        data = birdc_cmd(logger,cmd)
+        if data.startswith("No import table in channel"):
+            logger.warning(data)
+            logger.debug(f"{protocol_name}.{channel_name}")
+            return {"import": {}}
+        if data is None:
+            return {"import": {}}
+        data = data.split("Table")
+        while "" in data:
+            data.remove("")
+        for table in data:
+            table_name, table_data = parse_bird_table(table, logger)
+            if table_name =="import":
+                return table_data
+        return []
+def get_roa(logger,t_name= 'r4'):
+    """
+    get ROA info from bird table
+    """
+    cmd = "show route table "+t_name
+    row_str = []
+    # detect if roa table have rows and stale
+    last_len = -1
+    for _ in range(30):
+        data = birdc_cmd(logger,cmd)
+        if data is None:
+            logger.warning('empty roa')
+            return {}
+        row_str = data.split("\n")[1:]
+        while "" in row_str:
+            row_str.remove("")
+        this_len = len(row_str)
+        if this_len > 0:
+            if this_len == last_len:
+                break
+            else:
+                last_len = this_len
+        time.sleep(0.1)
+    if len(row_str) == 0:
+        logger.warning("no roa info detected")
+        return {}
+    else:
+        result = {}
+        for row in row_str:
+            d = row.split(" ")
+            as_number = int(d[1][2:])
+            prefix = d[0]
+            prefix = prefix.replace('24-24', '24')
+            if as_number not in result:
+                result[as_number] = []
+            result[as_number].append(netaddr.IPNetwork(prefix))
+            # result[as_number].append(prefix)
+    return result
+def get_p_by_asn(logger,asn,roa,aspa):
+    """
+    return a a dict(key is prefix,value is origin as) of unique prefix that could be used as src in packet from this as using aspa an roa info
+    customer and peer is considered
+    """
+    result = {}
+    for p in roa[asn]:
+        result[p] = asn
+    added = True
+    ass = [asn]
+    while added:
+        added = False
+        for customer_asn,providers in aspa.items(): 
+            if element_exist_check(ass,providers):
+                if not customer_asn in ass:
+                    ass.append(customer_asn)
+                    for p in roa[customer_asn]:
+                        if not p in result:
+                            result[p]=customer_asn
+                    added = True
+    return result                    
+def element_exist_check(a,b):
+    """
+    return True if any element in a exists in b
+    """
+    for e in a:
+        if e in b:
+            return True
+    return False
 # class Link():
 #     """
 #     the intermedia between two sav agents
@@ -378,7 +519,7 @@ class LinkManager(InfoManager):
     def add(self, link_name, link_dict,link_type):
         if "rpki" in link_name:
             return
-        self.logger.debug(f"adding {link_name},{link_dict}")
+        # self.logger.debug(f"adding {link_name},{link_dict}")
         if link_name in self.data:
             self.logger.warning(f"key {link_name} already exists")
             return
@@ -403,8 +544,8 @@ class LinkManager(InfoManager):
             self.data[link_name]["meta"] = meta
         # self.db.upsert("link", json.dumps(self.data))
 
-    def get(self, key):
-        return self.data[key]
+    def get(self, link_name):
+        return self.data.get(link_name)
 
     def get_by(self, remote_as, is_interior):
         """return a list of link objects that matches both remote_as,is_interior
@@ -535,7 +676,7 @@ def remove_local(list_of_fib):
     """
     return [i for i in list_of_fib if not '0.0.0.0' in i['Gateway']]
 
-def get_aspa(logger, hostname, port_number, pwd="krill"):
+def get_aspa(logger, hostname="savopkrill.com", port_number=3000, pwd="krill"):
     while True:
         try:
             headers = {"Authorization": f"Bearer {pwd}",
@@ -545,11 +686,22 @@ def get_aspa(logger, hostname, port_number, pwd="krill"):
                 "GET", url, headers=headers, verify=False)
             response.raise_for_status()  # Raises an exception for any HTTP error status codes
             # Return the response as a dictionary
-            return response.json()
+            temp = response.json()
+            #TODO ipv6
+            result = {}
+            for row in temp:
+                temp2 = []
+                for s in row["providers"]:
+                    s = s.replace("AS","")
+                    s = s.replace("(v4)","")
+                    s = int(s)
+                    if not s in temp2:
+                        temp2.append(s)
+                result[row["customer"]] = temp2
+            return result
         except Exception as err:
             logger.debug(err)
             time.sleep(0.1)
-
 
 def aspa_check(meta, aspa_info):
     """

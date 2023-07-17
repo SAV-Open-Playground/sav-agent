@@ -22,12 +22,7 @@ class FpUrpfApp(SavApp):
         """
         using 'birdc show protocols' to get bird protocols
         """
-        data = self._bird_cmd(cmd="show protocols")
-        if data is None:
-            return {}
-        data = data.split("\n")
-        while "" in data:
-            data.remove("")
+        data = birdc_show_protocols(self.logger)
         result = []
         for row in data:
             protocol_name = row.split("\t")[0].split(" ")[0]
@@ -47,30 +42,7 @@ class FpUrpfApp(SavApp):
                         prefix, interface_name, self.name, as_number))
         return result
 
-    def _bird_cmd(self, cmd):
-        """
-        execute bird command and return the output in std
-        """
-        proc = subprocess.Popen(
-            ["/usr/local/sbin/birdc "+cmd],
-            shell=True,
-            stdout=subprocess.PIPE,
-            stdin=subprocess.PIPE,
-            stderr=subprocess.PIPE)
-        proc.stdin.write("\n".encode("utf-8"))
-        proc.stdin.flush()
-        proc.wait()
-        out = proc.stdout.read().decode()
-        temp = out.split("\n")[0]
-        temp = temp.split()
-        if len(temp) < 2:
-            return None
-        if not (temp[0] == "BIRD" and temp[-1] == "ready."):
-            self.logger.error(f"birdc execute error:{out}")
-            return None
-        out = "\n".join(out.split("\n")[1:])
-        return out
-
+    
     def _parse_bird_fib(self):
         """
         using birdc show all to get bird fib
@@ -79,6 +51,7 @@ class FpUrpfApp(SavApp):
         if data is None:
             return {}
         data = data.split("Table")
+        # self.logger.debug(data)
         while "" in data:
             data.remove("")
         result = {}
@@ -86,7 +59,7 @@ class FpUrpfApp(SavApp):
             table_name, table_data = parse_bird_table(
                 table, self.logger)
             result[table_name] = table_data
-        # self.logger.debug(result)
+        self.logger.debug(result)
         return result
 
     def fib_changed(self):
@@ -107,6 +80,7 @@ class FpUrpfApp(SavApp):
             # self.logger.debug(f"prefix:{prefix}:{new_[prefix]}")
             temp = []
             for item in new_[prefix]:
+                # self.logger.debug(item)
                 temp.append(item["interface_name"])
             new_[prefix] = temp
         # self.logger.debug(f"new_:{new_}")

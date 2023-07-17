@@ -1,5 +1,4 @@
 from multiprocessing import Manager
-import subprocess
 
 from sav_common import *
 
@@ -237,30 +236,6 @@ class RPDPApp(SavApp):
     def get_prepared_cmd(self):
         return self.prepared_cmd.pop(0)
 
-    def _bird_cmd(self, cmd):
-        """
-        execute bird command and return the output in std
-        """
-        proc = subprocess.Popen(
-            ["/usr/local/sbin/birdc "+cmd],
-            shell=True,
-            stdout=subprocess.PIPE,
-            stdin=subprocess.PIPE,
-            stderr=subprocess.PIPE)
-        proc.stdin.write("\n".encode("utf-8"))
-        proc.stdin.flush()
-        proc.wait()
-        out = proc.stdout.read().decode()
-        temp = out.split("\n")[0]
-        temp = temp.split()
-        if len(temp) < 2:
-            self.logger.warning(f"birdc give empty result:[{out}];{temp}")
-            return None
-        if not (temp[0] == "BIRD" and temp[-1] == "ready."):
-            self.logger.error(f"birdc execute error:{out}")
-            return None
-        out = "\n".join(out.split("\n")[1:])
-        return out
     def _construct_msg(self, link, input_msg, msg_type, is_inter):
         """
         construct a message for apps to use,
@@ -305,14 +280,13 @@ class RPDPApp(SavApp):
             self.logger.error("construct msg error")
 
     def recv_msg(self, msg):
-        self.logger.debug("app {} got msg {}".format(self.name, msg))
+        # self.logger.debug("app {} got msg {}".format(self.name, msg))
         m_t = msg["msg_type"]
         if "channels" in msg:
             # grpc_link is not handled here
             if "rpdp" in msg["channels"]: 
                 link_type = "modified_bgp"
             else:
-                self.logger.warning(msg)
                 link_type = "native_bgp"
         if m_t == "link_state_change":
             if msg["msg"] == "up":

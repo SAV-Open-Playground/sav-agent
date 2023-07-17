@@ -45,12 +45,7 @@ class EfpUrpfApp(SavApp):
         """
         using 'birdc show protocols' to get bird protocols
         """
-        data = self._bird_cmd(cmd="show protocols")
-        if data is None:
-            return {}
-        data = data.split("\n")
-        while "" in data:
-            data.remove("")
+        data = birdc_show_protocols(self.logger)
         result = []
         for row in data:
             protocol_name = row.split("\t")[0].split(" ")[0]
@@ -73,49 +68,8 @@ class EfpUrpfApp(SavApp):
         """
         using birdc show all import to get bird fib
         """
-        cmd = f"show route all import table {protocol_name}.{channel_name}"
-        # self.logger.debug(cmd)
-        data = self._bird_cmd(cmd=cmd)
-        if data.startswith("No import table in channel"):
-            self.logger.warning(data)
-            return {"import": {}}
-        if data is None:
-            return {"import": {}}
-        # self.logger.debug(f"table {protocol_name}.{channel_name}")
-
-        data = data.split("Table")
-        while "" in data:
-            data.remove("")
-        result = {}
-        for table in data:
-            table_name, table_data = parse_bird_table(table, self.logger)
-            result[table_name] = table_data
-        # self.logger.debug(result)
-        return result
-
-    def _bird_cmd(self, cmd):
-        """
-        execute bird command and return the output in std
-        """
-        proc = subprocess.Popen(
-            ["/usr/local/sbin/birdc "+cmd],
-            shell=True,
-            stdout=subprocess.PIPE,
-            stdin=subprocess.PIPE,
-            stderr=subprocess.PIPE)
-        proc.stdin.write("\n".encode("utf-8"))
-        proc.stdin.flush()
-        proc.wait()
-        out = proc.stdout.read().decode()
-        temp = out.split("\n")[0]
-        temp = temp.split()
-        if len(temp) < 2:
-            return None
-        if not (temp[0] == "BIRD" and temp[-1] == "ready."):
-            self.logger.error(f"birdc execute error:{out}")
-            return None
-        out = "\n".join(out.split("\n")[1:])
-        return out
+        
+        return birdc_get_import(self.logger,protocol_name,channel_name)
 
     def fib_changed(self):
         """
@@ -127,40 +81,9 @@ class EfpUrpfApp(SavApp):
             return self.algorithm_a(old_rules)
         elif self.type == "B":
             return self.algorithm_b(old_rules)
+        # TODO update self.rules
 
-    def _parse_roa_table(self, t_name):
-        cmd = "show route table "+t_name
-        row_str = []
-        # detect if roa table have rows and stale
-        last_len = -1
-        for _ in range(30):
-            data = self._bird_cmd(cmd)
-            row_str = data.split("\n")[1:]
-            while "" in row_str:
-                row_str.remove("")
-            this_len = len(row_str)
-            if this_len > 0:
-                if this_len == last_len:
-                    break
-                else:
-                    last_len = this_len
-            time.sleep(0.1)
-        if len(row_str) == 0:
-            self.logger.warning("no roa info detected")
-            return {}
-        else:
-            result = {}
-            for row in row_str:
-                d = row.split(" ")
-                as_number = int(d[1][2:])
-                prefix = d[0]
-                prefix = prefix.replace('24-24', '24')
-                if as_number not in result:
-                    result[as_number] = set()
-                result[as_number].add(prefix)
-        # self.logger.debug(result)
-        return result
-
+    
     def algorithm_a(self, old_rules):
         """
         RFC 8704
@@ -171,12 +94,20 @@ class EfpUrpfApp(SavApp):
         if self.roa:
             roa_info = self._parse_roa_table(t_name="r4")
             self.logger.debug(f"roa_info: {roa_info}")
+        # self.logger.debug(f"EFP-A old_rules:{old_rules}")
         for protocol_name in self.protocols:
             # self.logger.debug(msg=f"protocol_name:{protocol_name}")
-            meta = self.agent.link_man.get(protocol_name)["meta"]
+            link_data = self.agent.link_man.get(protocol_name)
+            if link_data is None:
+                self.logger.warning(f"get link data error for link:{protocol_name}")
+                self.logger.warning(f"self.agent.link_man:{self.agent.link_man}")
+                self.logger.warning(f"self.agent:{self.agent}")
+                continue
+            meta = link_data["meta"]
+            
             all_int_in[protocol_name] = {"meta": meta}
-            all_int_in[protocol_name]["adj-in"] = self._parse_import_table(protocol_name)[
-                "import"]
+            all_int_in[protocol_name]["adj-in"] = self._parse_import_table(protocol_name)
+            # self.logger.debug(msg=f"all_int_in:{all_int_in[protocol_name]['adj-in']}")
             # filter out the adj-in that does not match the roa
             if self.roa:
                 temp = {}
@@ -189,6 +120,7 @@ class EfpUrpfApp(SavApp):
                         else:
                             self.logger.warning(f"roa mismatch for {k}:{v}")
                 all_int_in[protocol_name]["adj-in"] = temp
+        # self.logger.debug(f"EFP-A all_int_in:{all_int_in}")
         for protocol_name, data in all_int_in.items():
             if data["meta"]["remote_role"] == "customer":
                 if self.aspa:
@@ -198,8 +130,10 @@ class EfpUrpfApp(SavApp):
                     if not aspa_check(data, self.aspa_info):
                         continue
                 for prefix, paths in data["adj-in"].items():
+                    # self.logger.debug(f"{prefix}, {paths}")
                     for path in paths:
                         X[path["origin_as"]] = set()
+        # self.logger.debug(f"EFP-A X:{X}")
         for origin_asn in X:
             for protocol_name, data in all_int_in.items():
                 for prefix, paths in data["adj-in"].items():
@@ -207,6 +141,7 @@ class EfpUrpfApp(SavApp):
                         if path["origin_as"] == origin_asn:
                             # self.logger.debug(f"prefix:{prefix}")
                             X[origin_asn].add(prefix)
+        # self.logger.debug(f"EFP-A X:{X}")
         new_rules = set()
         for protocol_name, data in all_int_in.items():
             if not data["meta"]["remote_role"] == "customer":
@@ -237,10 +172,10 @@ class EfpUrpfApp(SavApp):
         Q = set()
         all_int_in = []
         for protocol_name in self.protocols:
-            self.logger.debug(msg=f"protocol_name:{protocol_name}")
+            # self.logger.debug(msg=f"protocol_name:{protocol_name}")
             meta = self.agent.link_man.get(protocol_name)["meta"]
             data = {"meta": meta}
-            data["adj-in"] = self._parse_import_table(protocol_name)["import"]
+            data["adj-in"] = self._parse_import_table(protocol_name)
             all_int_in.append(data)
 
         for data in all_int_in:
