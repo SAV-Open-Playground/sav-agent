@@ -21,36 +21,41 @@ def iptables_command_execute(sender, prefix, neighbor_as, interface, **extra):
 def iptables_refresh(active_app):
     if active_app is None:
         return
+    #TODO dynamic changing
     with open('/root/savop/SavAgent_config.json', 'r') as file:
         config = json.load(file)
         enabled_sav_app = config.get("enabled_sav_app")
     if enabled_sav_app is None:
         return
-    # if enabled_sav_app != active_app:
-    #     return
     session = db.session
     rules = session.query(SavTable).filter(SavTable.source == active_app).all()
     session.close()
     if len(rules) == 0:
         return f"there is no {active_app} sav rules, so don't need to refresh iptables"
-    sav_rule = {}
-    for rule in rules:
-        print("test")
-        prefix, interface = rule.prefix, rule.interface
-        if interface == "*":
-            continue
-        if prefix not in sav_rule.keys():
-            sav_rule[prefix] = {interface}
-        else:
-            sav_rule[prefix].add(interface)
-    interface_set = set(get_host_interface_list())
-    for key, value in sav_rule.items():
-        sav_rule[key] = interface_set - value
-    # flush the SAVAGENT chain in iptables
+    # flush existing rules
     flush_chain_status = subprocess.call(['iptables', '-F', KEY_WORD])
-    for prefix, iface_set in sav_rule.items():
-        for iface in iface_set:
-            add_rule_status = subprocess.call(['iptables', '-A', KEY_WORD, '-i', iface, '-s', prefix, '-j', 'DROP'])
+    interface_set = set(get_host_interface_list())
+    # using whilt list mode for EFP-uRPF
+    if active_app in ["EFP-uRPF-A","EFP-uRPF-B"]:
+        for r in rules:
+            add_rule_status = subprocess.call(['iptables', '-A', KEY_WORD, '-i', r.interface, '-s', r.prefix, '-j', 'ACCEPT'])
+        for interface in interface_set:
+            add_rule_status = subprocess.call(['iptables', '-A', KEY_WORD, '-i', interface, '-s', '192.168.0.0/16', '-j', 'DROP'])
+    else:
+        sav_rule = {}
+        for rule in rules:
+            prefix, interface = rule.prefix, rule.interface
+            if interface == "*":
+                continue
+            if prefix not in sav_rule.keys():
+                sav_rule[prefix] = {interface}
+            else:
+                sav_rule[prefix].add(interface)
+        for key, value in sav_rule.items():
+            sav_rule[key] = interface_set - value
+        for prefix, iface_set in sav_rule.items():
+            for iface in iface_set:
+                add_rule_status = subprocess.call(['iptables', '-A', KEY_WORD, '-i', iface, '-s', prefix, '-j', 'DROP'])
     logger = get_logger("SavAgent")
     log_info = f"refresh {active_app} iptables successfully"
     logger.info(log_info)
