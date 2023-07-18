@@ -92,7 +92,7 @@ class IPTableManager():
         add list of rules to the STB
         currently only add ipv4 and inter-domain rules
         """
-        self.logger.debug(data_list)
+        # self.logger.debug(data_list)
         session = db.session
         src_apps = set()
         for data in data_list:
