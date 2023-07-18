@@ -25,13 +25,15 @@ dst, src, iface, trans_num = args.dst, args.src, args.iface, args.trans_num
 
 
 # udp=socket.socket(socket.AF_INET,socket.SOCK_DGRAM)
-#udp = socket.socket(socket.AF_INET, socket.SOCK_RAW, socket.IPPROTO_RAW)
-#interface = iface
-#udp.setsockopt(socket.SOL_SOCKET, 25, str(interface + '\0').encode('utf-8'))
+# udp = socket.socket(socket.AF_INET, socket.SOCK_RAW, socket.IPPROTO_RAW)
+# interface = iface
+# udp.setsockopt(socket.SOL_SOCKET, 25, str(interface + '\0').encode('utf-8'))
 for index in range(1, trans_num+1):
     data = "udp_packet_" + str(index)
-    p = IP(src=src, dst=dst) / UDP(sport=RandShort(), dport=12345) / Raw(data.encode("utf-8"))
-    print("send to server")
-    #udp.sendto(bytes(p), (dst, 12345))
-    send(p, iface=iface, inter=0.1, verbose=False)
+    p = Ether() / IP(src=src, dst=dst) / UDP(sport=RandShort(), dport=12345) / Raw(data.encode("utf-8"))
+    sendp(p, iface=iface, verbose=True)
+    #send(p,iface=iface)
+   #  udp.sendto(p,(dst,12345))
+    
+    
 #udp.close()

@@ -611,9 +611,9 @@ class SavAgent():
         prefix to AS_PATH, this function relaying on RPDPApp
         """
         # if we receive a bgp update, indicating the link is up
-        self.logger.debug(f"_process_bgp_update got:{msg}")
+        # self.logger.debug(f"_process_bgp_update got:{msg}")
         link_name = msg["protocol_name"]
-        self.link_man.get(key=link_name)["status"] = True
+        self.link_man.get(link_name)["status"] = True
         if not msg["is_native_bgp"]:
             # this msg is for rpdp_app
             self._process_rpdp_msg(msg)
