@@ -22,7 +22,7 @@ dst, trans_num = args.dst, args.trans_num
 
 udpsever = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 udpsever.bind((dst, 12345))
-udpsever.settimeout(8)
+udpsever.settimeout(3)
 
 content_list = []
 try:
