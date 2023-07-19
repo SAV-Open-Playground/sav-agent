@@ -8,7 +8,6 @@ import json
 from model import db
 from model import SavInformationBase, SavTable
 from tools import get_host_interface_list
-from sav_common import get_logger
 
 KEY_WORD = "SAVAGENT"
 
@@ -18,7 +17,7 @@ def iptables_command_execute(sender, prefix, neighbor_as, interface, **extra):
         ['iptables', '-A', KEY_WORD, '-i', interface, '-s', prefix, '-j', 'DROP'])
 
 
-def iptables_refresh(active_app):
+def iptables_refresh(active_app,logger):
     if active_app is None:
         return
     #TODO dynamic changing
@@ -56,7 +55,6 @@ def iptables_refresh(active_app):
         for prefix, iface_set in sav_rule.items():
             for iface in iface_set:
                 add_rule_status = subprocess.call(['iptables', '-A', KEY_WORD, '-i', iface, '-s', prefix, '-j', 'DROP'])
-    logger = get_logger("SavAgent")
     log_info = f"refresh {active_app} iptables successfully"
     logger.info(log_info)
     return log_info
@@ -138,7 +136,7 @@ class IPTableManager():
         # self.logger.debug(self.active_app)
         # if not (self.active_app in src_apps):
             # return
-        refresh_info = iptables_refresh(self.active_app)
+        refresh_info = iptables_refresh(self.active_app,self.logger)
         log_msg = f"IP TABLES CHANGED: {refresh_info}"
         self.logger.debug(log_msg)
 

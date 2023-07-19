@@ -107,7 +107,7 @@ def search_sib():
 
 @app.route('/refresh_proto/<string:active_app>/', methods=["POST", "GET"])
 def refresh_proto(active_app):
-    info = iptables_refresh(active_app=active_app)
+    info = iptables_refresh(active_app,LOGGER)
     return {"code": "0000", "message": f"{info}"}
 
 
