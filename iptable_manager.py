@@ -35,7 +35,7 @@ def iptables_refresh(active_app,logger):
     flush_chain_status = subprocess.call(['iptables', '-F', KEY_WORD])
     interface_set = set(get_host_interface_list())
     # using whilt list mode for EFP-uRPF
-    if active_app in ["EFP-uRPF-A","EFP-uRPF-B"]:
+    if active_app in ["EFP-uRPF-Algorithm-A_app","EFP-uRPF-Algorithm-B_app"]:
         for r in rules:
             add_rule_status = subprocess.call(['iptables', '-A', KEY_WORD, '-i', r.interface, '-s', r.prefix, '-j', 'ACCEPT'])
         for interface in interface_set:
