@@ -1,14 +1,17 @@
-#!/usr/bin/python3
-# -*- encoding: utf-8 -*-
+# -*-coding:utf-8 -*-
 """
-@Time    :   2023/01/10 08:04:55
-
-SavAgent manages two types of critical instances : SavApp and SavLink.
+@File    :   sav_agent.py
+@Time    :   2023/01/10
+@Author  :   Yuqian Shi
+@Version :   0.1
+@Contact :   yuqian.shi@outlook.com
+@Desc    :   the sav_agent.py is responsible for managing two types of critical instances : SavApp and SavLink.
 They are responsible for message transmission and message preprocessing.
 SavAgent also manages two types of critical data structure: SavGraph and SavTable.
 SavGraph is built on the known AS_PATHs.
 SAvTable is built on the sav messages.
 """
+
 import threading
 import subprocess
 from multiprocessing import Manager
