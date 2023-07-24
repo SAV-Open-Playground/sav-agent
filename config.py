@@ -1,9 +1,13 @@
-#!/usr/bin/python3
-# -*- encoding: utf-8 -*-
+# -*-coding:utf-8 -*-
 """
-@Time    :   2023/01/12 14:20:15
+@File    :   config.py
+@Time    :   2023/01/12
+@Author  :   Yuqian Shi
+@Version :   0.1
+@Contact :   yuqian.shi@outlook.com
+@Desc    :   the config.py is responsible for SQLALCHEMY config
 """
 import os
 DEBUG = True
-SQLALCHEMY_DATABASE_URI = f"sqlite:////root/savop/sib.sqlite"
+SQLALCHEMY_DATABASE_URI = "sqlite:////root/savop/sib.sqlite"
 SQLALCHEMY_TRACK_MODIFICATIONS = True

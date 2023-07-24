@@ -1,7 +1,11 @@
-#!/usr/bin/python3
-# -*- encoding: utf-8 -*-
+# -*-coding:utf-8 -*-
 '''
-@Time    :   2023/01/17 16:04:22
+@File    :   iptable_manager.py
+@Time    :   2023/01/17
+@Author  :   Yuqian Shi
+@Version :   0.1
+@Contact :   yuqian.shi@outlook.com
+@Desc    :   the iptable_manager.py is responsible for the execution of selected sav mechanism 
 '''
 import subprocess
 import json
@@ -11,11 +15,9 @@ from tools import get_host_interface_list
 
 KEY_WORD = "SAVAGENT"
 
-
 def iptables_command_execute(sender, prefix, neighbor_as, interface, **extra):
     add_rule_status = subprocess.call(
         ['iptables', '-A', KEY_WORD, '-i', interface, '-s', prefix, '-j', 'DROP'])
-
 
 def iptables_refresh(active_app,logger):
     if active_app is None:

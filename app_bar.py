@@ -1,12 +1,17 @@
+# -*-coding:utf-8 -*-
 """
-The procedure is applicable for ingress SAV filter design for customer and lateral peer interfaces.
+@File    :   app_bar.py
+@Time    :   2023/07/24
+@Author  :   Yuqian Shi
+@Version :   0.1
+@Contact :   yuqian.shi@outlook.com
+@Desc    :   the app_bar.py is responsible for BAR-SAV rule generation (when ROA and ASPA are available)
 """
 from sav_common import *
 
 class BarApp(SavApp):
     """
     a SavApp implementation of BAR-SAV (ASPA and ROA required)
-    
     """
     def __init__(self, agent, name="bar_app", logger=None):
         super(BarApp, self).__init__(agent, name, logger)
