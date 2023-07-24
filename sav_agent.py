@@ -25,6 +25,7 @@ from app_rpdp import RPDPApp
 from app_urpf import UrpfApp
 from app_efp_urpf import EfpUrpfApp
 from app_fp_urpf import FpUrpfApp
+from app_bar import BarApp
 
 
 def add_path(given_asn_path, data_dict):
@@ -55,12 +56,12 @@ def aggregate_asn_path(list_of_asn_path):
 class SavAgent():
     def __init__(self, logger=None, path_to_config=os.path.join(
             os.path.dirname(os.path.abspath(__file__)), "SavAgent_config.json")):
-        if not logger:
+        if logger is None:
             logger = get_logger("SavAgent")
         self.logger = logger
         self.config = self._config_validation(path_to_config)
         self._init_data()
-        self.cmds = Manager().list()
+        self.msgs = Manager().list()
         self._init_apps()
         # we have self.data["active_app"] after self._init_apps()
         self.sib_man = SIBManager(logger=self.logger)
@@ -102,7 +103,7 @@ class SavAgent():
         send message to another agent
         this function will decide to use grpc or reference router to send the message
         """
-        self.logger.debug(msg)
+        # self.logger.debug(msg)
         if not isinstance(msg, dict):
             raise TypeError("msg must be a dict object")
         # using grpc
@@ -201,13 +202,15 @@ class SavAgent():
                     self, name, self.logger, self.config.get("ca_host"), self.config.get("ca_port", 3000))
                 self.add_app(app_instance)
             elif name == "FP-uRPF":
-                app_instance = FpUrpfApp(
-                    self, logger=self.logger)
+                app_instance = FpUrpfApp(self, logger=self.logger)
                 self.add_app(app_instance)
             elif name == "rpdp_app":
                 app_instance = RPDPApp(self, logger=self.logger)
                 self.add_app(app_instance)
                 self.rpdp_app = app_instance
+            elif name == "BAR":
+                app_instance = BarApp(self, logger=self.logger)
+                self.add_app(app_instance)
             else:
                 self.logger.error(msg=f"unknown app name: {name}")
             if self.config["enabled_sav_app"] == name:
@@ -230,6 +233,7 @@ class SavAgent():
         if time.time()-read_time > stable_span:
             self.logger.debug("FIB STABILIZED")
             self.data["initial_bgp_stable"] = True
+            # self._notify_apps()
             self.logger.info(
                 f"INITIAL PREFIX-AS_PATH TABLE {self.rpdp_app.get_pp_v4_dict()}")
             del self.data["fib_for_stable_read_time"]
@@ -242,9 +246,9 @@ class SavAgent():
         """
         while True:
             if self.data["initial_bgp_stable"]:
-                if len(self.cmds) > 0:
+                if len(self.msgs) > 0:
                     try:
-                        msg = self.cmds.pop(0)
+                        msg = self.msgs.pop(0)
                         self._process_msg(msg)
                     except Exception as err:
                         self.logger.error(
@@ -253,6 +257,7 @@ class SavAgent():
             else:
                 self._if_fib_stable(
                     stable_span=self.config.get("fib_stable_threshold"))
+                # TODO add initial notify_apps?
                 time.sleep(0.1)
 
     def _send_link_init(self):
@@ -331,16 +336,17 @@ class SavAgent():
 
         return output
 
-    def put_msg(self, data):
+    def put_msg(self, msg):
         """
         should only be called via link
         """
         required_keys = ["msg", "msg_type", "source_app", "source_link"]
         for key in required_keys:
-            if not key in data:
-                raise KeyError(f"required key missing [{key}] in [{data}]")
-        self.cmds.append(data)
-        return
+            if not key in msg:
+                err_msg = f"required key missing [{key}] in [{msg}]"
+                self.logger.error(err_msgerr_msg)
+                raise KeyError()
+        self.msgs.append(msg)
 
     def _send_init_broadcast_on_link(self, link_name):
         link = self.link_man.get(link_name)
@@ -373,7 +379,7 @@ class SavAgent():
             if old_status != new_status:
                 self.link_man.data[link_name]["status"] = link_dict["status"]
         else:
-            self.logger.debug(msg)
+            # self.logger.debug(msg)
             # self.logger.debug(link_name)
             # self.logger.debug(link_dict)
             self.link_man.add(link_name, link_dict,msg["link_type"])
@@ -412,13 +418,13 @@ class SavAgent():
             # self.logger.warning(msg)
             msg["link_type"] = "native_bgp"
         if not self.link_man.exist(msg["protocol_name"]):
-            self.logger.debug(msg)
+            # self.logger.debug(msg)
             data_dict = self._get_new_link_dict(msg["protocol_name"])
             data_dict["meta"] = msg
-            self.logger.debug(msg["protocol_name"])
+            # self.logger.debug(msg["protocol_name"])
             self.link_man.add(msg["protocol_name"], data_dict,msg["link_type"])
         else:
-            self.logger.debug(msg["protocol_name"])
+            # self.logger.debug(msg["protocol_name"])
             self.link_man.add_meta(msg["protocol_name"], msg)
         self.sib_man.upsert("link_data", json.dumps(self.link_man.data))
 
@@ -624,7 +630,7 @@ class SavAgent():
         if len(adds) == 0 and len(dels) == 0:
             return
         changed_routes = []
-        self.logger.debug(adds)
+        # self.logger.debug(adds)
         for prefix, path in adds:
             changed_routes.append({prefix: path})
         # 
@@ -641,7 +647,6 @@ class SavAgent():
         who does not need other information
         """
         adds, dels = self._diff_fib("fib_for_apps")
-        self.logger.debug((adds, dels))
         add_rules = []
         del_rules = []
         for app_name in self.data['apps']:
@@ -650,7 +655,9 @@ class SavAgent():
             a, d = [], []
             if isinstance(app, UrpfApp):
                 a, d = app.fib_changed(adds, dels)
-            elif (isinstance(app, EfpUrpfApp) or isinstance(app, FpUrpfApp)):
+            elif (isinstance(app, EfpUrpfApp) 
+                  or isinstance(app, FpUrpfApp)
+                  or isinstance(app,BarApp)):
                 a, d = app.fib_changed()
             elif isinstance(app, RPDPApp):
                 pass
@@ -750,7 +757,7 @@ class SavAgent():
                   # TODO intra origin
 
     def _process_msg(self, input_msg):
-        self.logger.debug(f"processing msg: {input_msg['msg_type']}:{input_msg}")
+        # self.logger.debug(f"processing msg: {input_msg['msg_type']}:{input_msg}")
         msg, m_t = input_msg["msg"], input_msg["msg_type"]
         if m_t == "link_state_change":
             self._process_link_state_change(input_msg)
