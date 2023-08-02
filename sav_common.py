@@ -1,9 +1,14 @@
 #!/usr/bin/python3
-# -*- encoding: utf-8 -*-
+# -*-coding:utf-8 -*-
 """
+@File    :   sav_common.py
 @Time    :   2023/01/17 16:04:22
-common functions and classes for sav
+@Author  :   Yuqian Shi
+@Version :   0.1
+
+@Desc    :   The sav_common.py contains shared functions and classes
 """
+
 import json
 import os
 import time
@@ -37,8 +42,8 @@ RPDP_PEER_TYPE = RPDPPeer
 
 def parse_bird_table(table, logger=None):
     """
-        return table_name(string) and parsed_rows(dict)
-        """
+    return table_name(string) and parsed_rows(dict)
+    """
     # logger.debug(table)
     temp = table.split("\n")
     while "" in temp:
@@ -126,6 +131,20 @@ def sav_rule_tuple(prefix, interface_name, rule_source, as_number=-1):
         prefix = str(prefix)
     return (prefix, interface_name, rule_source, as_number)
 
+def command_executor(command):
+    return subprocess.run(command, shell=True, capture_output=True, encoding='utf-8')
+
+def get_host_interface_list():
+    """
+    return a list of 'clean' interface names
+    """
+    command = "ip link|grep -v 'link' | grep -v -E 'docker0|lo' | awk -F: '{ print $2 }' | sed 's/ //g'"
+    command_result = command_executor(command=command)
+    std_out = command_result.stdout
+    # self.logger.debug(command_result)
+    result = std_out.split("\n")[:-1]
+    result = list(map(lambda x: x.split('@')[0], result))
+    return [i for i in result if len(i) != 0]
 
 def get_logger(file_name):
     """

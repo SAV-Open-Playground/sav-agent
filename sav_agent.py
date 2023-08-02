@@ -4,7 +4,7 @@
 @Time    :   2023/01/10
 @Author  :   Yuqian Shi
 @Version :   0.1
-@Contact :   yuqian.shi@outlook.com
+
 @Desc    :   the sav_agent.py is responsible for managing two types of critical instances : SavApp and SavLink.
 They are responsible for message transmission and message preprocessing.
 SavAgent also manages two types of critical data structure: SavGraph and SavTable.
@@ -165,7 +165,7 @@ class SavAgent():
             self.sib_man.upsert("sav_graph", json.dumps((data_dict)))
             return
         self.logger.info(
-            f"SAV GRAPH LINK ADDED :{asn_a}-{asn_b}")
+            f"SAV GRAPH LINK  :{asn_a}-{asn_b}")
         # add node if not exist
         if not asn_a in data_dict["nodes"]:
             data_dict["nodes"][asn_a] = None
@@ -458,7 +458,7 @@ class SavAgent():
 
     def _process_sav_inter(self, msg, link):
         """
-        determine whether to rela or terminate the message.
+        determine whether to relay or terminate the message.
         """
         link_meta = link["meta"]
         scope_data = msg["sav_scope"]
@@ -572,7 +572,8 @@ class SavAgent():
                          "neighbor_as": link_meta["remote_as"],
                          "interface": msg["interface_name"],
                          "source_app": msg["app_name"],
-                         "source_link": msg["source_link"]
+                         "source_link": msg["source_link"],
+                         "local_role":link_meta["local_role"]
                          })
         self.ip_man.add(temp_list)
         if msg["is_interior"]:

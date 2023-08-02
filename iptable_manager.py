@@ -4,14 +4,14 @@
 @Time    :   2023/01/17
 @Author  :   Yuqian Shi
 @Version :   0.1
-@Contact :   yuqian.shi@outlook.com
+
 @Desc    :   the iptable_manager.py is responsible for the execution of selected sav mechanism 
 '''
 import subprocess
 import json
 from model import db
 from model import SavInformationBase, SavTable
-from tools import get_host_interface_list
+from sav_common import get_host_interface_list
 
 KEY_WORD = "SAVAGENT"
 
@@ -101,8 +101,8 @@ class IPTableManager():
         session = db.session
         src_apps = set()
         for data in data_list:
-            prefix, src_app, interface = data.get(
-            "prefix"), data.get("source_app"), data.get("interface")
+            prefix, src_app, interface,local_role = data.get(
+            "prefix"), data.get("source_app"), data.get("interface"),data.get("local_role")
             if (prefix is None) or (src_app is None) or (interface is None):
                 self.logger.error(f"Missing required fields [{data.keys()}]")
                 raise ValueError("Missing required field")
@@ -127,6 +127,7 @@ class IPTableManager():
             prefix=prefix,
             neighbor_as=neighbor_as,
             interface=interface,
+            local_role=local_role,
             source=src_app,
             direction=None)
             session.add(sib_row)

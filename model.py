@@ -51,13 +51,15 @@ class SavTable(Base):
     createtime = Column(DateTime, server_default=func.now())
     updatetime = Column(DateTime, server_default=func.now(),
                         onupdate=func.now())
+    source = Column(String(20), nullable=True)
 
-    def __init__(self, prefix, neighbor_as, interface, source=None, direction=None):
+    def __init__(self, prefix, neighbor_as, interface, local_role,source=None, direction=None):
         self.prefix = prefix
         self.neighbor_as = neighbor_as
         self.interface = interface
         self.source = source
         self.direction = direction
+        self.local_role = local_role
 
     def __repr__(self):
         return '<id %r>' % self.id
