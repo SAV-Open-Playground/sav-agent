@@ -4,7 +4,7 @@
 @Time    :   2023/01/12
 @Author  :   Yuqian Shi
 @Version :   0.1
-@Contact :   yuqian.shi@outlook.com
+
 @Desc    :   the config.py is responsible for SQLALCHEMY config
 """
 import os

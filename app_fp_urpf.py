@@ -1,3 +1,13 @@
+# -*-coding:utf-8 -*-
+"""
+@File    :   app_fp_urpf.py
+@Time    :   2023/07/24
+@Author  :   Yuqian Shi
+@Version :   0.1
+
+@Desc    :   the app_fp_urpf.py is responsible for Fp-uRPF-SAV rule generation
+"""
+
 import subprocess
 from sav_common import *
 
@@ -59,7 +69,7 @@ class FpUrpfApp(SavApp):
             table_name, table_data = parse_bird_table(
                 table, self.logger)
             result[table_name] = table_data
-        self.logger.debug(result)
+        # self.logger.debug(result)
         return result
 
     def fib_changed(self):

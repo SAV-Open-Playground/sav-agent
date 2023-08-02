@@ -1,3 +1,14 @@
+# -*-coding:utf-8 -*-
+"""
+@File    :   app_rpdp.py
+@Time    :   2023/07/24
+@Author  :   Yuqian Shi
+@Version :   0.1
+
+@Desc    :   the app_rpdp.py is responsible for RPDP-SAV rule generation
+             In this implementation, the SPA and SPD is encoded into standard BGP Update message
+"""
+
 from multiprocessing import Manager
 
 from sav_common import *
@@ -107,7 +118,10 @@ class RPDPApp(SavApp):
             table_name, table_data = self._parse_bird_table(table)
             result[table_name] = table_data
         return result
-
+    def _build_inter_sav_spa_nlri(self,origin_asn,prefix,route_type=2,flag=1):
+        return (route_type,origin_asn,prefix,flag)
+    def _build_inter_sav_spd(self,sn,origin_router_id,origin_asn,validation_asn,optional_data ,type=2,sub_type=2):
+        return (type,sub_type,sn,origin_router_id,origin_asn,validation_asn,optional_data)
     def _parse_bird_table(self, table):
         """
         return table_name (string) and parsed_rows (dict)

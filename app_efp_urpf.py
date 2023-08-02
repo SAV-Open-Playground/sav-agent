@@ -1,3 +1,13 @@
+# -*-coding:utf-8 -*-
+"""
+@File    :   app_efp_urpf.py
+@Time    :   2023/07/24
+@Author  :   Yuqian Shi
+@Version :   0.1
+
+@Desc    :   the app_efp_urpf.py is responsible for EFP-uRPF-SAV rule generation
+"""
+
 from multiprocessing import Manager
 import subprocess
 from sav_common import *
