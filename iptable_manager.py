@@ -15,14 +15,16 @@ from sav_common import get_host_interface_list
 
 KEY_WORD = "SAVAGENT"
 
+
 def iptables_command_execute(sender, prefix, neighbor_as, interface, **extra):
     add_rule_status = subprocess.call(
         ['iptables', '-A', KEY_WORD, '-i', interface, '-s', prefix, '-j', 'DROP'])
 
-def iptables_refresh(active_app,logger):
+
+def iptables_refresh(active_app, logger):
     if active_app is None:
         return
-    #TODO dynamic changing
+    # TODO dynamic changing
     with open('/root/savop/SavAgent_config.json', 'r') as file:
         config = json.load(file)
         enabled_sav_app = config.get("enabled_sav_app")
@@ -36,8 +38,8 @@ def iptables_refresh(active_app,logger):
     # flush existing rules
     flush_chain_status = subprocess.call(['iptables', '-F', KEY_WORD])
     interface_set = set(get_host_interface_list())
-    # using whilt list mode for EFP-uRPF
-    if active_app in ["EFP-uRPF-Algorithm-A_app","EFP-uRPF-Algorithm-B_app"]:
+    # using white list mode for EFP-uRPF
+    if active_app in ["EFP-uRPF-Algorithm-A_app", "EFP-uRPF-Algorithm-B_app"]:
         for r in rules:
             add_rule_status = subprocess.call(['iptables', '-A', KEY_WORD, '-i', r.interface, '-s', r.prefix, '-j', 'ACCEPT'])
         for interface in interface_set:
@@ -139,7 +141,7 @@ class IPTableManager():
         # self.logger.debug(self.active_app)
         # if not (self.active_app in src_apps):
             # return
-        refresh_info = iptables_refresh(self.active_app,self.logger)
+        refresh_info = iptables_refresh(self.active_app, self.logger)
         log_msg = f"IP TABLES CHANGED: {refresh_info}"
         self.logger.debug(log_msg)
 
