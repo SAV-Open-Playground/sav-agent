@@ -87,7 +87,7 @@ class BarApp(SavApp):
                 direct[link_data["meta"]["interface_name"]] =int(link_data["meta"]["remote_as"])
         # B:
         for interface,asn in direct.items():
-            allowed_prefix = get_p_by_asn(self.logger,asn,self.roa_cache,self.aspa_cache)
+            allowed_prefix = get_p_by_asn(asn,self.roa_cache,self.aspa_cache)
             for p,origin_as in allowed_prefix.items():
                 rule = sav_rule_tuple(p, interface, self.name, origin_as)
                 new_rules.add(rule)
