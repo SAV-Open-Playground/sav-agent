@@ -19,14 +19,8 @@ import requests
 import subprocess
 
 
-# AS number int
-# IP Address 
-# Network netaddr class
-# =============================== start_of_key_words ==========================================
-def is_asn(in_put):
-    if isinstance(in_put,int):
-        pass 
-    #TODO
+from data_structure import *
+
 class RPDPPeer():
     def __init__(self,asn,port,ip,is_as4) -> None:
         self.asn = asn
@@ -131,15 +125,21 @@ def sav_rule_tuple(prefix, interface_name, rule_source, as_number=-1):
         prefix = str(prefix)
     return (prefix, interface_name, rule_source, as_number)
 
-def command_executor(command):
+def run_cmd(command):
     return subprocess.run(command, shell=True, capture_output=True, encoding='utf-8')
-
+def keys_types_check(d,keys):
+    
+    for k,t in keys:
+        if not k in d:
+            raise KeyError(f"{k} missing in {d}")
+        if not isinstance(d[k],t):
+            raise TypeError(f"{k} should be {t} but {type(d[k])} found")
 def get_host_interface_list():
     """
     return a list of 'clean' interface names
     """
     command = "ip link|grep -v 'link' | grep -v -E 'docker0|lo' | awk -F: '{ print $2 }' | sed 's/ //g'"
-    command_result = command_executor(command=command)
+    command_result = run_cmd(command=command)
     std_out = command_result.stdout
     # self.logger.debug(command_result)
     result = std_out.split("\n")[:-1]
@@ -201,45 +201,6 @@ def ln(list_of_interface):
     for i in list_of_interface:
         result.append(i["meta"]["protocol_name"])
     return result
-
-
-def asn_to_hex(asn, as_session=False):
-    """
-        convert asn to hex
-        :param asn: asn
-        :return: hex value list (u8)
-    """
-    if as_session:
-        result = hex(int(asn))[2:]
-        temp = []
-        while len(result) >= 2:
-            temp.append(str(int(result[:2], 16)))
-            result = result[2:]
-        result = temp
-        while len(result) < 4:
-            result = ["0"] + result
-        return result
-
-    result = hex(int(asn))[2:]
-    temp = []
-    while len(result) >= 2:
-        temp.append(str(int(result[:2], 16)))
-        result = result[2:]
-    result = temp
-    return result
-
-
-def path_to_hex(asn_path, as4_session=False):
-    """
-        convert asn_path to hex
-        :param asn_path: list of asn
-        :return: hex value list (u8)
-    """
-    result = []
-    for path in list(map(lambda x: asn_to_hex(x, as4_session), asn_path)):
-        result += path
-    return result
-
 
 def get_kv_match(list_of_dict, key, value):
     result = []
@@ -496,7 +457,7 @@ def get_roa(logger,t_name= 'r4'):
             result[as_number].append(netaddr.IPNetwork(prefix))
             # result[as_number].append(prefix)
     return result
-def get_p_by_asn(logger,asn,roa,aspa):
+def get_p_by_asn(asn,roa,aspa):
     """
     return a a dict(key is prefix,value is origin as) of unique prefix that could be used as src in packet from this as using aspa an roa info
     customer and peer is considered
@@ -745,37 +706,18 @@ def check_agent_agent_msg(msg, logger):
     # raise an error if the given msg is not a valid agent to agent message
     origin_key = "sav_origin"
     path_key = "sav_path"
-    # logger.debug(json.dumps(msg,indent=2))
-    if not isinstance(msg["src"], str):
-        raise TypeError("src type error, should be a string")
-    if not isinstance(msg["dst"], str):
-        raise TypeError("dst type error, should be a string")
+    key_types = [("src",str),("dst",str),("msg_type",str),("sav_scope",list),
+                 ("sav_nlri",list),(origin_key,str),(path_key,list),("is_interior",bool)]
+    keys_types_check(msg,key_types)
     if not msg["msg_type"] in ['origin','relay']:
         raise ValueError(f"mst_type should be ether 'origin' or 'relay'")
-
-    if not isinstance(msg["sav_scope"], list):
-        raise TypeError("scope type error, should be a list")
-    if not isinstance(msg["sav_nlri"], list):
-        raise TypeError("sav_nlri type error, should be a list")
     
-    if not isinstance(msg[path_key], list):
-        raise TypeError("path type error, should be a list")
     for path in msg[path_key]:
         if not tell_str_is_interior(path):
-            logger.debug(msg[path_key])
-            logger.debug(path)
             raise ValueError(f"{path_key} should contain path value")
     
-    if not isinstance(msg[origin_key], str):
-        raise TypeError(f"{origin_key} type error")
-    
-    if not isinstance(msg["is_interior"], bool):
-        raise TypeError("is_interior type error, should be bool")
     if msg["is_interior"]:
         if not tell_str_is_interior(msg[origin_key]):
             raise ValueError(
                 "interior msg should have interior path and origin")
-
     return True
-
-
