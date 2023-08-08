@@ -1,11 +1,11 @@
 # -*-coding:utf-8 -*-
 '''
-@File    :   iptable_manager.py
+@File    :   db_manager.py
 @Time    :   2023/01/17
 @Author  :   Yuqian Shi
 @Version :   0.1
 
-@Desc    :   the iptable_manager.py is responsible for the execution of selected sav mechanism 
+@Desc    :   the db_manager.py is responsible for the execution of selected sav mechanism 
 '''
 import subprocess
 import json
