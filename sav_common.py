@@ -127,13 +127,14 @@ def sav_rule_tuple(prefix, interface_name, rule_source, as_number=-1):
 
 def run_cmd(command):
     return subprocess.run(command, shell=True, capture_output=True, encoding='utf-8')
-def keys_types_check(d,keys):
-    
-    for k,t in keys:
+
+def keys_types_check(d,key_types):
+    for k, t in key_types:
         if not k in d:
             raise KeyError(f"{k} missing in {d}")
         if not isinstance(d[k],t):
             raise TypeError(f"{k} should be {t} but {type(d[k])} found")
+
 def get_host_interface_list():
     """
     return a list of 'clean' interface names
@@ -141,7 +142,6 @@ def get_host_interface_list():
     command = "ip link|grep -v 'link' | grep -v -E 'docker0|lo' | awk -F: '{ print $2 }' | sed 's/ //g'"
     command_result = run_cmd(command=command)
     std_out = command_result.stdout
-    # self.logger.debug(command_result)
     result = std_out.split("\n")[:-1]
     result = list(map(lambda x: x.split('@')[0], result))
     return [i for i in result if len(i) != 0]
@@ -224,7 +224,7 @@ def scope_to_hex_str(scope, is_inter, is_as4=True):
     if is_inter:
         for path in scope:
             temp.append(str(len(path)))
-            temp += path_to_hex(path, is_as4)
+            temp += path2hex(path, is_as4)
         return ",".join(temp)
 
     for path in scope:
@@ -244,45 +244,7 @@ def save_json(path_to_json, json_obj):
         json_file.write(json.dumps(json_obj, indent=4))
 
 
-class InfoManager():
-    """
-    info manager manage the info of stored data,
-    base class for SavAgent and SavApp.
-    """
-    def __init__(self, data, logger):
-        self.logger = logger
-        self.data = data
-        if not isinstance(self.data, dict):
-            raise ValueError("data is not a dictionary")
-    def __init__(self, data, logger):
-        self.logger = logger
-        self.data = data
-        if not isinstance(self.data, dict):
-            raise ValueError("data is not a dictionary")
 
-    def add(self, msg):
-        raise NotImplementedError
-
-    def delete(self, key):
-        raise NotImplementedError
-
-    def get(self, key):
-        raise NotImplementedError
-
-    def update(self, key, value):
-        raise NotImplementedError
-
-    def add_update(self, key, value):
-        raise NotImplementedError
-
-    def is_up(self, key):
-        raise NotImplementedError
-
-    def get_all(self):
-        raise NotImplementedError
-
-    def get_all_up(self):
-        raise NotImplementedError
 
 
 class SavApp():
@@ -491,82 +453,7 @@ def element_exist_check(a,b):
 #     the intermedia between two sav agents
 #     """
     # def __init__(self,link_name,source_app,remote_addr,remote_as,local_addr,local_as,interface,type):
-class LinkManager(InfoManager):
-    """
-    LinkManager manage the link status
-    """
-# TODO: we have three types of link: native bgp, modified bgp and grpc
-    def add(self, link_name, link_dict,link_type):
-        if "rpki" in link_name:
-            return
-        # self.logger.debug(f"adding {link_name},{link_dict}")
-        if link_name in self.data:
-            self.logger.warning(f"key {link_name} already exists")
-            return
-        if not link_type in ["native_bgp", "modified_bgp","grpc"]:
-            self.logger.error(f'unknown link_type: {link_type}')
-        link_dict["link_type"] = link_type
-        self.data[link_name] = link_dict
 
-    def add_meta(self, link_name, meta):
-        old_meta = self.data[link_name]["meta"]
-        if len(old_meta) != 0:
-            if list(old_meta.keys()) != list(meta.keys()):
-                self.logger.warning(
-                    "meta conflict !\n old meta: {old_meta}\n new met: {meta}")
-                return
-            if old_meta != meta:
-                self.logger.warning(
-                    "meta conflict !\n old meta: {old_meta}\n new met: {meta}")
-                return
-            return
-        if link_name in self.data:
-            self.data[link_name]["meta"] = meta
-        # self.db.upsert("link", json.dumps(self.data))
-
-    def get(self, link_name):
-        return self.data.get(link_name)
-
-    def get_by(self, remote_as, is_interior):
-        """return a list of link objects that matches both remote_as,is_interior
-            return None if not found
-        """
-        result = []
-        for key in self.data:
-            link = self.data[key]
-            if (link["meta"]["remote_as"] == remote_as) and (
-                    link["meta"]["is_interior"] == is_interior):
-                result.append(link)
-        return result
-
-    def get_all_up(self,include_native_bgp = False):
-        """
-        return a list of all up link_names ,use get(link_name) to get link object
-        """
-        temp = []
-        for link_name in self.data:
-            link = self.data[link_name]
-            if link["status"]:
-                if link["link_type"] == "native_bgp":
-                        if include_native_bgp:
-                            temp.append(link_name)
-                else:
-                    temp.append(link_name)
-        return temp
-
-    def get_all_up_type(self, is_interior,include_native_bgp = False):
-        """
-        return a list of all up link_names with the correct type (is_interior or not),
-        use get(link_name) to get link object
-        """
-        result = []
-        for link_name in self.get_all_up(include_native_bgp):
-            if self.data[link_name]["meta"]["is_interior"] == is_interior:
-                result.append(link_name)
-        return result
-
-    def exist(self, link_name):
-        return link_name in self.data
 
 def get_agent_app_msg(link_meta, msg_meta, logger):
     """
@@ -695,7 +582,7 @@ def aspa_check(meta, aspa_info):
             return adj_provider_as in data["providers"]
     return False
 
-def check_agent_agent_msg(msg, logger):
+def check_agent_agent_msg(msg):
     """
     message structure between agent and agent,
     there are two types :'origin' and 'relay'

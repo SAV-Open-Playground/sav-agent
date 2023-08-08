@@ -11,7 +11,7 @@ import subprocess
 import json
 from model import db
 from model import SavInformationBase, SavTable
-from sav_common import get_host_interface_list
+from sav_common import*
 
 KEY_WORD = "SAVAGENT"
 
@@ -84,10 +84,7 @@ class IPTableManager():
         self.active_app = active_app
 
     def _command_executer(self, command):
-        return subprocess.run(command, shell=True, capture_output=True, encoding='utf-8')
-
-    def _get_host_interface_list(self):
-        return get_host_interface_list()
+        return 
 
     def _iptables_command_execute(self, command):
         command_result = self._command_executer(command=command)
@@ -107,7 +104,7 @@ class IPTableManager():
                 self.logger.error(f"Missing required fields [{data.keys()}]")
                 raise ValueError("Missing required field")
             neighbor_as = data.get("neighbor_as")
-            interface_list = self._get_host_interface_list()
+            interface_list = get_host_interface_list()
             interface_list.append("*")
             if interface not in interface_list:
                 self.logger.error(
@@ -235,3 +232,117 @@ class SIBManager():
             data.append({row.key: row.value})
         session.close()
         return data
+
+class InfoManager():
+    """
+    info manager manage the info of stored data,
+    base class for SavAgent and SavApp.
+    """
+    def __init__(self, data, logger):
+        self.logger = logger
+        self.data = data
+        if not isinstance(self.data, dict):
+            raise ValueError("data is not a dictionary")
+
+    def add(self, msg):
+        raise NotImplementedError
+
+    def delete(self, key):
+        raise NotImplementedError
+
+    def get(self, key):
+        raise NotImplementedError
+
+    def update(self, key, value):
+        raise NotImplementedError
+
+    def add_update(self, key, value):
+        raise NotImplementedError
+
+    def is_up(self, key):
+        raise NotImplementedError
+
+    def get_all(self):
+        raise NotImplementedError
+
+    def get_all_up(self):
+        raise NotImplementedError
+class LinkManager(InfoManager):
+    """
+    LinkManager manage the link status and preprocessing the msg from the link
+    """
+    # TODO: we have three types of link: native bgp, modified bgp and grpc
+    def __init__(self, data, logger=None):
+        super(LinkManager, self).__init__(data, logger)
+            
+    def add(self, link_name, link_dict,link_type):
+        if "rpki" in link_name:
+            return
+        # self.logger.debug(f"adding {link_name},{link_dict}")
+        if link_name in self.data:
+            self.logger.warning(f"key {link_name} already exists")
+            return
+        if not link_type in ["native_bgp", "modified_bgp","grpc"]:
+            self.logger.error(f'unknown link_type: {link_type}')
+        link_dict["link_type"] = link_type
+        self.data[link_name] = link_dict
+
+    def add_meta(self, link_name, meta):
+        old_meta = self.data[link_name]["meta"]
+        if len(old_meta) != 0:
+            if list(old_meta.keys()) != list(meta.keys()):
+                self.logger.warning(
+                    "meta conflict !\n old meta: {old_meta}\n new met: {meta}")
+                return
+            if old_meta != meta:
+                self.logger.warning(
+                    "meta conflict !\n old meta: {old_meta}\n new met: {meta}")
+                return
+            return
+        if link_name in self.data:
+            self.data[link_name]["meta"] = meta
+        # self.db.upsert("link", json.dumps(self.data))
+
+    def get(self, link_name):
+        return self.data.get(link_name)
+
+    def get_by(self, remote_as, is_interior):
+        """return a list of link objects that matches both remote_as,is_interior
+            return None if not found
+        """
+        result = []
+        for key in self.data:
+            link = self.data[key]
+            if (link["meta"]["remote_as"] == remote_as) and (
+                    link["meta"]["is_interior"] == is_interior):
+                result.append(link)
+        return result
+
+    def get_all_up(self,include_native_bgp = False):
+        """
+        return a list of all up link_names ,use get(link_name) to get link object
+        """
+        temp = []
+        for link_name in self.data:
+            link = self.data[link_name]
+            if link["status"]:
+                if link["link_type"] == "native_bgp":
+                        if include_native_bgp:
+                            temp.append(link_name)
+                else:
+                    temp.append(link_name)
+        return temp
+
+    def get_all_up_type(self, is_interior,include_native_bgp = False):
+        """
+        return a list of all up link_names with the correct type (is_interior or not),
+        use get(link_name) to get link object
+        """
+        result = []
+        for link_name in self.get_all_up(include_native_bgp):
+            if self.data[link_name]["meta"]["is_interior"] == is_interior:
+                result.append(link_name)
+        return result
+
+    def exist(self, link_name):
+        return link_name in self.data

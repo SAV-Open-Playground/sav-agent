@@ -22,21 +22,25 @@ class RPDPApp(SavApp):
         super(RPDPApp, self).__init__(agent, name, logger)
         self.prepared_cmd = Manager().list()
         self.pp_v4_dict = {}
-        # pp represents prefix-(AS)path
-        src_ip = agent.config.get("grpc_id")
-        link_man = agent.link_man
-        local_as = agent.config.get("local_as")
+        grpc_config = self.agent.config.get("grpc_config")
+        if grpc_config["enabled"]:
+            self._grpc_config(grpc_config)
+            
+            
+    def _grpc_config(self,grpc_config):
+        src_ip = grpc_config.get("id")
+        link_man = self.agent.link_man
+        local_as = grpc_config.get("local_as")
         # add grpc_links
-        for grpc_link in agent.config.get("grpc_links"):
-            dst = grpc_link["addr"].split(':')
+        for grpc_link in grpc_config.get("links"):
+            dst = grpc_link["remote_addr"].split(':')
             remote_as = grpc_link["remote_as"]
             dst_ip = dst[0]
-            dst_port = dst[1]
-            link_dict = agent._get_new_link_dict(name)
+            link_dict = self.agent._get_new_link_dict(self.name)
             link_dict["meta"] = {
                 "local_ip":src_ip,
                 "remote_ip":dst_ip,
-                "dst_addr":grpc_link["addr"],
+                "dst_addr":grpc_link["remote_addr"],
                 "is_interior":local_as!=remote_as,
                 "local_as":str(local_as),
                 "remote_as":str(remote_as),
@@ -45,7 +49,6 @@ class RPDPApp(SavApp):
             }
             link_dict["status"] = True
             link_man.add(f"grpc_link_{src_ip}_{dst_ip}",link_dict,"grpc")
-
     def get_pp_v4_dict(self):
         # retrun the bird prefix-(AS)path table in RPDPApp (no refreshing)
         return self.pp_v4_dict
@@ -120,8 +123,10 @@ class RPDPApp(SavApp):
         return result
     def _build_inter_sav_spa_nlri(self,origin_asn,prefix,route_type=2,flag=1):
         return (route_type,origin_asn,prefix,flag)
+    
     def _build_inter_sav_spd(self,sn,origin_router_id,origin_asn,validation_asn,optional_data ,type=2,sub_type=2):
         return (type,sub_type,sn,origin_router_id,origin_asn,validation_asn,optional_data)
+    
     def _parse_bird_table(self, table):
         """
         return table_name (string) and parsed_rows (dict)
@@ -216,7 +221,7 @@ class RPDPApp(SavApp):
         if msg["is_interior"]:
             as_path_code = "2"
             hex_str_msg["withdraws"] = "0,0"
-            hex_str_msg["sav_origin"] = ",".join(asn_to_hex(
+            hex_str_msg["sav_origin"] = ",".join(asn2hex(
                 msg["sav_origin"], is_as4))
             if m_t == "origin":
                 # insert origin for sav
@@ -229,7 +234,7 @@ class RPDPApp(SavApp):
                 return hex_str_msg
             elif m_t == "relay":
                 as_number = str(len(msg["sav_path"]))
-                temp = path_to_hex(msg["sav_path"], is_as4)
+                temp = path2hex(msg["sav_path"], is_as4)
                 hex_str_msg["as_path"] = ",".join(
                     [as_path_code, as_number]+temp)
                 hex_str_msg["as_path_len"] = len(
@@ -287,47 +292,39 @@ class RPDPApp(SavApp):
                 if len(path) > 0:
                     temp.append(path)
             msg["sav_scope"] = temp
-            if check_agent_agent_msg(msg, self.logger):
+            if check_agent_agent_msg(msg):
                 return msg
         except Exception as e:
             self.logger.error(e)
             self.logger.error("construct msg error")
 
     def recv_msg(self, msg):
-        # self.logger.debug("app {} got msg {}".format(self.name, msg))
-        m_t = msg["msg_type"]
-        if "channels" in msg:
-            # grpc_link is not handled here
-            if "rpdp" in msg["channels"]: 
-                link_type = "modified_bgp"
+        self.logger.debug("app {} got msg {}".format(self.name, msg))
+        try:
+            key_types = [("msg_type", str)]
+            keys_types_check(msg,key_types)
+            m_t = msg["msg_type"]
+            if m_t in ["bird_bgp_config", "bgp_update"]:
+                msg["source_app"] = self.name
+                msg["source_link"] = msg["msg"]["protocol_name"]
+                
+                if "channels" in msg["msg"]:
+                # grpc_link is not handled here
+                    if "rpdp" in msg["msg"]["channels"]: 
+                        link_type = "modified_bgp"
+                    else:
+                        # self.logger.warning(msg)
+                        link_type = "native_bgp"
+                # self.logger.debug(msg)
+                # self.put_link_up(msg["source_link"])
+                self.put_link_up(msg["source_link"],link_type)
+                if m_t == "bgp_update":
+                    msg["msg"] = self.preprocess_msg(msg["msg"])
+                self.agent.put_msg(msg)
             else:
-                link_type = "native_bgp"
-        if m_t == "link_state_change":
-            if msg["msg"] == "up":
-                self.put_link_up(msg["protocol_name"],link_type)
-            elif msg["msg"] == "down":
-                self.put_link_down(msg["protocol_name"])
-            else:
-                raise ValueError(f"unknown msg:{msg}")
-        elif m_t in ["bird_bgp_config", "bgp_update"]:
-            msg["source_app"] = self.name
-            msg["source_link"] = msg["msg"]["protocol_name"]
-            
-            if "channels" in msg["msg"]:
-            # grpc_link is not handled here
-                if "rpdp" in msg["msg"]["channels"]: 
-                    link_type = "modified_bgp"
-                else:
-                    # self.logger.warning(msg)
-                    link_type = "native_bgp"
-            # self.logger.debug(msg)
-            # self.put_link_up(msg["source_link"])
-            self.put_link_up(msg["source_link"],link_type)
-            if m_t == "bgp_update":
-                msg["msg"] = self.preprocess_msg(msg["msg"])
-            self.agent.put_msg(msg)
-        else:
-            self.logger.error(f"unknown msg_type: {m_t}\n msg :{msg}")
+                self.logger.error(f"unknown msg_type: {m_t}\n msg :{msg}")
+        except Exception as e:
+            self.logger.error(e)
 
     def preprocess_msg(self, msg):
         # as_path is easier to process in string format, so we keep it

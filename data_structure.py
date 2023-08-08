@@ -18,11 +18,11 @@ def is_asn(in_put):
 def asn2hex(asn, as_session=False):
     """
         convert asn to hex
-        :param asn: asn
+        :param asn: asn (str)
         :return: hex value list (u8)
     """
-    if not is_asn(asn):
-        raise TypeError("asn should be int and in 0,65535)")
+    # if not is_asn(asn):
+        # raise TypeError(f"asn should be int and in 0,65535),but got({asn},type:{type(asn)})")
     if as_session:
         result = hex(int(asn))[2:]
         temp = []

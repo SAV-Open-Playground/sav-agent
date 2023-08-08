@@ -14,7 +14,7 @@ from concurrent import futures
 import grpc
 import agent_msg_pb2
 import agent_msg_pb2_grpc
-from iptable_manager import iptables_refresh
+from managers import iptables_refresh
 
 LOGGER = get_logger("server")
 
@@ -38,14 +38,16 @@ class GrpcServer(agent_msg_pb2_grpc.AgentLinkServicer):
         self.logger = logger
 
     def Simple(self, req, context):
-        
         msg_str = req.json_str
-        self.logger.debug(f"grpc server got msg {msg_str} from {req.sender_id}")
-        my_id = self.agent.config.get("grpc_id")
+        # self.logger.debug(f"grpc server got msg {msg_str} from {req.sender_id}")
+        my_id = self.agent.config["grpc_config"]["id"]
         reply = f"got {msg_str}"
         try:
             msg_dict = json.loads(msg_str)
-            self.agent.grpc_app.recv_msg(msg_dict, req.sender_id)
+            # self.logger.debug(f"{msg_dict}")
+            self.agent.rpdp_app.recv_msg(msg_dict)
+            # self.agent.put_msg(msg_dict)
+            # self.agent.grpc_recv(msg_dict, req.sender_id)
         except Exception as err:
             self.logger.debug(msg_str)
             self.logger.error(f"grpc msg adding error: {err}")
@@ -55,11 +57,11 @@ class GrpcServer(agent_msg_pb2_grpc.AgentLinkServicer):
         return response
 
 
-if sa.config.get("grpc_enabled"):
+if sa.config["grpc_config"]["enabled"]:
     grpc_server = grpc.server(futures.ThreadPoolExecutor())
     agent_msg_pb2_grpc.add_AgentLinkServicer_to_server(
         GrpcServer(sa, LOGGER), grpc_server)
-    addr = sa.config.get("grpc_server_addr")
+    addr = sa.config["grpc_config"]["server_addr"]
     grpc_server.add_insecure_port(addr)
     grpc_server.start()
     LOGGER.debug(f"GRPC server running at {addr}")
@@ -76,17 +78,27 @@ def index():
         LOGGER.error(err)
         return {"code": "5001", "message": "Invalid Json String", "data": str(request.data)}
     try:
-        rpdp_app = sa.rpdp_app
         required_keys = ["msg_type", "msg"]
         for key in required_keys:
             if key not in data:
                 LOGGER.warning(f"{key} not found in {data.keys()}")
                 return {"code": "5002", "message": f"{key} not found!"}
-        if data["msg_type"] == "request_cmd":
-            cmd = rpdp_app.get_prepared_cmd()
+        m_t = data["msg_type"]
+        if m_t == "request_cmd":
+            cmd = sa.rpdp_app.get_prepared_cmd()
             return {"code": "2000", "data": cmd, "message": "success"}
-        # LOGGER.debug(data)
-        rpdp_app.recv_msg(data)
+        elif m_t =="link_state_change":
+            LOGGER.debug(f"link state change {data}")
+            if "rdpd" in data["channels"]:
+                link_type = "modified_bgp"
+            else:
+                link_type = "native_bgp"
+            if data["msg"]:
+                sa.rpdp_app.put_link_up(data["protocol_name"],link_type)
+            else:
+                sa.rpdp_app.put_link_down(data["protocol_name"])
+        else:
+            sa.rpdp_app.recv_msg(data)
         return {"code": "0000", "message": "success"}
     except Exception as err:
         LOGGER.error(err)
@@ -109,6 +121,17 @@ def search_sib():
 def refresh_proto(active_app):
     info = iptables_refresh(active_app,LOGGER)
     return {"code": "0000", "message": f"{info}"}
+
+@app.route('/update_config/', methods=["POST"])
+def update_config():
+    msg = "updated"
+    try:
+        data = json.loads(request.data)
+        sa.update_config(data)
+    except Exception as err:
+        LOGGER.error(err)
+        msg = err
+    return {"code": "0000", "message": msg}
 
 
 if __name__ == '__main__':

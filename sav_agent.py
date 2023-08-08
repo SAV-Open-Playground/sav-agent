@@ -18,12 +18,13 @@ from multiprocessing import Manager
 import copy
 import sys
 
-import grpc
-import agent_msg_pb2
-import agent_msg_pb2_grpc
+# import grpc
+# import agent_msg_pb2
+# import agent_msg_pb2_grpc
+# from concurrent import futures
 
 from sav_common import *
-from iptable_manager import IPTableManager, SIBManager
+from managers import IPTableManager, SIBManager,LinkManager
 from app_rpdp import RPDPApp
 from app_urpf import UrpfApp
 from app_efp_urpf import EfpUrpfApp
@@ -55,14 +56,14 @@ def aggregate_asn_path(list_of_asn_path):
             add_path(route, result[route[0]])
     return result
 
-
 class SavAgent():
     def __init__(self, logger=None, path_to_config=os.path.join(
             os.path.dirname(os.path.abspath(__file__)), "SavAgent_config.json")):
         if logger is None:
             logger = get_logger("SavAgent")
         self.logger = logger
-        self.config = self._config_validation(path_to_config)
+        self.config = {}
+        self.update_config(path_to_config)
         self._init_data()
         self.msgs = Manager().list()
         self._init_apps()
@@ -72,31 +73,53 @@ class SavAgent():
         self.sib_man.upsert("config", json.dumps(self.config))
         self.sib_man.upsert("active_app", json.dumps(self.data["active_app"]))
         self._start()
+        self.path_to_config = path_to_config
+        # self.grpc_server = None
 
-    def _config_validation(self, path_to_config):
+    def update_config(self, path_to_config):
         """
-        return dictionary object if is a valid config file. Otherwise, raise ValueError
+        return dictionary object if is a valid config file (only check type not value). 
+        Otherwise, raise ValueError
+        
+        we should ALWAYS check self.config for latest values
+        
         """
-        config = read_json(path_to_config)
-        required_keys = ["apps","grpc_links","grpc_id","grpc_server_addr","enabled_sav_app"]
-        for key in required_keys:
-            if key not in config:
-                self.logger.error(f"{key} is a must")
-                raise ValueError("key missing in config")
-    
-        grpc_keys = ["remote_as","addr","remote_id"]
-        for link in config["grpc_links"]:
-            for key in grpc_keys:
-                if key not in link:
-                    self.logger.error(f"{key} is a must,{link}")
-                    raise ValueError("key missing in config")
+        try:
+            config = read_json(path_to_config)
+            required_keys = [("apps",list),("grpc_config",dict),
+                            ("enabled_sav_app",str),("location",str)]
+            keys_types_check(config,required_keys)
+            
+            
+            keys_types_check(config["grpc_config"],[("enabled",bool)])
+            if config["grpc_config"]["enabled"]:
+                grpc_keys = [("server_addr",str),("id",str),("local_as",int),
+                            ("enabled",bool),("links",list)]
+                keys_types_check(config["grpc_config"],grpc_keys)
 
-        return config
-
+            self.logger.debug(f"CONFIG UPDATE\n old:{self.config},\n new:{config}")
+            self.config = config
+        except Exception as e:
+            self.logger.error("invalid config file")
+        # if config["grpc_config"]["enabled"]:
+        #     grpc_server = grpc.server(futures.ThreadPoolExecutor())
+        #     agent_msg_pb2_grpc.add_AgentLinkServicer_to_server(
+        #     GrpcServer(self), grpc_server)
+        #     addr = config["grpc_config"]["server_addr"]
+        #     grpc_server.add_insecure_port(addr)
+        #     grpc_server.start()
+        #     self.grpc_server = grpc_server
+        #     self.logger.debug(dir(self.grpc_server))
+        #     self.logger.debug(f"GRPC server running at {addr}")
+        # else:
+        #     if not self.grpc_server is None:
+        #         self.grpc_server.stop(0)
+        #         self.grpc_server.wait_for_termination()
+        #         self.grpc_server = None
+        #         self.logger.debug(f"GRPC server stopped")
     def _find_grpc_remote(self, remote_ip):
-        self.logger.debug(self.config["grpc_links"])
-        for grpc_link in self.config["grpc_links"]:
-            remote_addr = grpc_link["addr"]
+        for grpc_link in self.config["grpc_config"]["links"]:
+            remote_addr = grpc_link["remote_addr"]
             if remote_addr.startswith(remote_ip):
                 return (remote_addr,grpc_link["remote_id"])
         raise ValueError(f"remote_ip {remote_ip} not found in grpc_links")
@@ -106,18 +129,20 @@ class SavAgent():
         send message to another agent
         this function will decide to use grpc or reference router to send the message
         """
-        # self.logger.debug(msg)
         if not isinstance(msg, dict):
             raise TypeError("msg must be a dict object")
         # using grpc
-        if link["meta"]["link_type"]=="grpc":
+        if link["link_type"]=="grpc":
             try:
+                msg["sav_nlri"] =list(map(prefix2str,msg["sav_nlri"]))
                 str_msg = json.dumps(msg)
                 remote_ip = link.get("meta").get("remote_ip")
                 remote_addr,remote_id = self._find_grpc_remote(remote_ip)
+                self.logger.debug(f"{remote_addr},{remote_id}")
                 with grpc.insecure_channel(remote_addr) as channel:
                     stub = agent_msg_pb2_grpc.AgentLinkStub(channel)
-                    agent_msg = agent_msg_pb2.AgentMsg(sender_id=self.config.get("grpc_id"),
+                    self.logger.debug(f"{self.config['grpc_config']['id']},{str_msg}")
+                    agent_msg = agent_msg_pb2.AgentMsg(sender_id=self.config["grpc_config"]["id"],
                                                        json_str=str_msg)
                     rep = stub.Simple(agent_msg)
                     expected_str = f"got {str_msg}"
@@ -181,7 +206,6 @@ class SavAgent():
         elif value_asn not in data_dict["links"][key_asn]:
             data_dict["links"][key_asn].append(value_asn)
         self.sib_man.upsert("sav_graph", json.dumps((data_dict)))
-
 
     def _init_apps(self):
         # bird and grpc are must
@@ -262,7 +286,9 @@ class SavAgent():
                     stable_span=self.config.get("fib_stable_threshold"))
                 # TODO add initial notify_apps?
                 time.sleep(0.1)
-
+    def grpc_recv(self, msg,sender):
+        self.logger.debug(f"agent recv via grpc: {msg} from {sender}")
+    
     def _send_link_init(self):
         """
         decide whether to send initial broadcast of each link
@@ -343,12 +369,10 @@ class SavAgent():
         """
         should only be called via link
         """
-        required_keys = ["msg", "msg_type", "source_app", "source_link"]
-        for key in required_keys:
-            if not key in msg:
-                err_msg = f"required key missing [{key}] in [{msg}]"
-                self.logger.error(err_msgerr_msg)
-                raise KeyError()
+        key_types = [("msg_type",str), ("source_app",str), ("source_link",str)]
+        if not "msg" in msg:
+            raise KeyError(f"msg missing in msg:{msg}")
+        keys_types_check(msg,key_types)
         self.msgs.append(msg)
 
     def _send_init_broadcast_on_link(self, link_name):
@@ -372,6 +396,17 @@ class SavAgent():
         """
         in this function, we manage the link state
         """
+            
+        # key_types = [("protocol_name",str),("channels",str),("msg",str)]
+        # keys_types_check(msg,key_types)
+        # if "rpdp" in msg["channels"]: 
+        #     link_type = "modified_bgp"
+        # else:
+        #     link_type = "native_bgp"
+        # if msg["msg"] == "up":
+        #     self.put_link_up(msg["protocol_name"],link_type)
+        # elif msg["msg"] == "down":
+        #     self.put_link_down(msg["protocol_name"])
         link_name = msg["source_link"]
         link_dict = self._get_new_link_dict(msg["source_app"])
         link_dict["status"] = msg["msg"]
@@ -381,12 +416,13 @@ class SavAgent():
             new_status = link_dict["status"]
             if old_status != new_status:
                 self.link_man.data[link_name]["status"] = link_dict["status"]
+            else:
+                return # no change
         else:
-            # self.logger.debug(msg)
-            # self.logger.debug(link_name)
-            # self.logger.debug(link_dict)
             self.link_man.add(link_name, link_dict,msg["link_type"])
+        self.logger.debug(f"link {link_name} ({link_dict['link_type']}) is {link_dict['status']}")
         self.sib_man.upsert("link_data", json.dumps(self.link_man.data))
+        
 
     def _process_link_config(self, msg):
         """
@@ -741,8 +777,6 @@ class SavAgent():
                     # self.logger.debug(paths_for_as)
                     msg = self.rpdp_app._construct_msg(
                         link, paths_for_as, "origin", True)
-                    # self.logger.error(link)
-                    self.logger.debug(msg)
                     self._send_msg_to_agent(msg, link)
                     # self.get_app(link["app"]).send_msg(msg)
         else:
