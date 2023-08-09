@@ -19,7 +19,7 @@ import requests
 import subprocess
 
 
-from data_structure import *
+from sav_data_structure import *
 
 class RPDPPeer():
     def __init__(self,asn,port,ip,is_as4) -> None:
@@ -129,6 +129,10 @@ def run_cmd(command,shell=True, capture_output=True, encoding='utf-8'):
     return subprocess.run(command, shell=shell, capture_output=capture_output, encoding=encoding)
 
 def keys_types_check(d,key_types):
+    """
+    raise KeyError if key is missing
+    raise TypeError if key is not the right type
+    """
     for k, t in key_types:
         if not k in d:
             raise KeyError(f"{k} missing in {d}")
@@ -153,7 +157,7 @@ def get_logger(file_name):
     maxsize = 1024*1024*500
     backup_num = 5
     level = logging.WARN
-    level = logging.DEBUG
+    # level = logging.DEBUG
     logger = logging.getLogger(__name__)
     logger.setLevel(level)
     handler = logging.handlers.RotatingFileHandler(os.path.dirname(os.path.abspath(

@@ -301,10 +301,10 @@ class LinkManager(InfoManager):
             return
         link_dict_keys = [("meta", dict)]
         keys_types_check(link_dict, link_dict_keys)
-        meta_keys = [("remote_as", int), ("local_as", int)]
-        keys_types_check(link_dict["meta"], meta_keys)
+        self._is_good_meta(link_dict["meta"])
         link_dict["link_type"] = link_type
         self.data[link_name] = link_dict
+        self.logger.debug(f"link added: {link_dict['meta']['protocol_name']} ")
         self.logger.debug(f"link added: {link_name} ")
 
     def add_meta(self, link_name, meta):
@@ -381,7 +381,16 @@ class LinkManager(InfoManager):
 
     def exist(self, link_name):
         return link_name in self.data
-
+    def _is_good_meta(self,meta):
+        key_types = [("remote_as", int),("remote_ip", str),
+                     ("local_role", str),("local_ip", str),
+                     ("interface_name", str),("link_type", str),
+                     ("protocol_name", str),("as4_session", bool),
+                     ("remote_id", str),("is_interior", bool)]
+        keys_types_check(meta,key_types)
+        if not meta["link_type"] in ["native_bgp", "modified_bgp", "grpc"]:
+            raise ValueError(f'unknown link_type: {meta["link_type"]}')
+        return True
 
 def get_new_link_dict(app_name):
     """
@@ -395,7 +404,17 @@ def get_new_link_dict(app_name):
 
 def get_new_link_meta():
     """
-    generate a new link meta dict for adding
+    generate a new link meta dict for adding,dummy data provided, remember to change it
     """
-    meta = {"remote_as": 0, "local_as": 0}
+    meta = {"remote_as": 0,
+            "remote_ip": "",
+            "local_role": "",
+            "local_ip": "",
+            "interface_name": "",
+            "protocol_name": "",
+            "as4_session": True,
+            "remote_id": "10.0.1.2",
+            "is_interior": True,
+            "link_type": "native_bgp"
+            }
     return meta

@@ -83,7 +83,7 @@ class BarApp(SavApp):
         direct = {}
         # A:
         for link_name,link_data in links_data.items():
-            link_meta = link_data["meta"]
+            # link_meta = link_data["meta"]
             # self.logger.debug(list(link_data.keys()))
             if "bgp" in link_data["link_type"]:
                 if link_data["meta"]["local_role"] in["peer","provider"]:

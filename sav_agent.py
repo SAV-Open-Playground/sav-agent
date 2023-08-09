@@ -121,8 +121,9 @@ class SavAgent():
                         "as4_session":True, # True by default
                         "protocol_name":"grpc",
                         "local_role":grpc_link["local_role"],
-                        "dst_id":grpc_link["remote_id"],
-                        "local_interface":grpc_link["local_interface"]
+                        "remote_id":grpc_link["remote_id"],
+                        "interface_name":grpc_link["interface_name"],
+                        "link_type":"grpc"
                     }
                     
                     dst_id = grpc_link["remote_id"]
@@ -132,27 +133,11 @@ class SavAgent():
                     else:
                         self.link_man.add(f"grpc_link_{src_id}_{dst_id}",link_dict,"grpc")
                     self.logger.debug(f"CONFIG UPDATE\n old:{self.config},\n new:{config}")
-                    self.config = config
+            self.config = config
         except Exception as e:
             self.logger.debug(e)
             self.logger.error("invalid config file")
             
-        # if config["grpc_config"]["enabled"]:
-        #     grpc_server = grpc.server(futures.ThreadPoolExecutor())
-        #     agent_msg_pb2_grpc.add_AgentLinkServicer_to_server(
-        #     GrpcServer(self), grpc_server)
-        #     addr = config["grpc_config"]["server_addr"]
-        #     grpc_server.add_insecure_port(addr)
-        #     grpc_server.start()
-        #     self.grpc_server = grpc_server
-        #     self.logger.debug(dir(self.grpc_server))
-        #     self.logger.debug(f"GRPC server running at {addr}")
-        # else:
-        #     if not self.grpc_server is None:
-        #         self.grpc_server.stop(0)
-        #         self.grpc_server.wait_for_termination()
-        #         self.grpc_server = None
-        #         self.logger.debug(f"GRPC server stopped")
     def _find_grpc_remote(self, remote_ip):
         for grpc_link in self.config["grpc_config"]["links"]:
             remote_addr = grpc_link["remote_addr"]
@@ -256,6 +241,7 @@ class SavAgent():
         self.rpdp_app = None
         # we enable grpc as default
         self.data["active_app"] = None
+        # self.logger.debug(self.config)
         if len(self.config["apps"])==0:
             self.logger.warning("no apps found, quiting")
             sys.exit(0)
@@ -475,14 +461,14 @@ class SavAgent():
         # the router_id we have is a int presentation of ipv4 address,
         # now convert it to standard ipv4 string
         # now we transform bird internal router id to ipv4
-        msg["router_id"] = str(hex(int(msg["router_id"])))[2:]
-        while len(msg["router_id"]) < 8:
-            msg["router_id"] = "0" + msg["router_id"]
+        msg["remote_id"] = str(hex(int(msg["router_id"])))[2:]
+        while len(msg["remote_id"]) < 8:
+            msg["remote_id"] = "0" + msg["remote_id"]
         temp = []
-        while len(msg["router_id"]) > 1:
-            temp.append(str(int(msg["router_id"][:2], 16)))
-            msg["router_id"] = msg["router_id"][2:]
-        msg["router_id"] = ".".join(temp)
+        while len(msg["remote_id"]) > 1:
+            temp.append(str(int(msg["remote_id"][:2], 16)))
+            msg["remote_id"] = msg["remote_id"][2:]
+        msg["remote_id"] = ".".join(temp)
         if "rpdp" in msg["channels"]:
             msg["link_type"] = "modified_bgp"
         else:
@@ -491,7 +477,7 @@ class SavAgent():
         if not self.link_man.exist(msg["protocol_name"]):
             # self.logger.debug(msg)
             data_dict = get_new_link_dict(msg["protocol_name"])
-
+            self.logger.debug(msg)
             data_dict["meta"] = msg
             # self.logger.debug(msg["protocol_name"])
             self.link_man.add(msg["protocol_name"], data_dict,msg["link_type"])
@@ -683,7 +669,8 @@ class SavAgent():
                 # generate msg for this link
                 remote_as = link["meta"]["remote_as"]
                 if remote_as not in inter_paths:
-                    # may happen when broadcasting
+                    # may happen when broadcasting, essentially is because the next as is not in the intended path
+                    #TODO
                     self.logger.debug(f"inter_paths:{inter_paths}")
                     self.logger.debug(f"remote_as:{remote_as}")
                 else:

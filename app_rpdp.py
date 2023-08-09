@@ -240,7 +240,7 @@ class RPDPApp(SavApp):
             if "bgp" in link["link_type"]:
                 pass
             else:
-                msg["dst_id"] = link["meta"]["dst_id"]
+                msg["dst_id"] = link["meta"]["remote_id"]
                 msg["src_id"] = self.agent.config["grpc_config"]["id"]
             if msg_type == "origin":
                 if is_inter:
@@ -298,7 +298,7 @@ class RPDPApp(SavApp):
             self.logger.error(e)
     def process_grpc_msg(self, msg):
         link_meta = self.agent.link_man.get(msg["source_link"])["meta"]
-        msg["msg"]["interface_name"] = link_meta["local_interface"]
+        msg["msg"]["interface_name"] = link_meta["interface_name"]
         self.process_rpdp_msg(msg)
     def preprocess_msg(self, msg):
         # as_path is easier to process in string format, so we keep it
@@ -343,7 +343,7 @@ class RPDPApp(SavApp):
         # if we receive a inter-domain msg via inter-domain link
         if link_meta["is_interior"]:
             for path in scope_data:
-                next_as = (path.pop(0))
+                next_as = int(path.pop(0)) # for modified bgp
                 if (link_meta["local_as"] != next_as) :
                     self.logger.debug(f"next_as {next_as}({type(next_as)}) local_as {link_meta['local_as']}({type(link_meta['local_as'])})")
                     path.append(next_as)
@@ -440,6 +440,10 @@ class RPDPApp(SavApp):
             if not input_msg["msg_type"] == "grpc_msg":
                 msg["sav_path"] = msg["as_path"]
                 del msg["as_path"]
+                temp = []
+                for path in msg["sav_scope"]:
+                    temp.append(list(map(int,path)))
+                msg["sav_scope"] = temp
             self.process_rpdp_inter(msg, this_link)
         else:
             self.logger.error("INTRA MSG RECEIVED")

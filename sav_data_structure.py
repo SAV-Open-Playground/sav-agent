@@ -41,6 +41,16 @@ def asn2hex(asn, as_session=False):
     return result
 # IP 
 
+# prefix
+def isprefix(in_put):
+    return isinstance(in_put,netaddr.IPNetwork)
+def prefix2str(prefix):
+    """
+    convert netaddr prefix to string
+    """
+    if not isinstance(prefix, netaddr.IPNetwork):
+        raise TypeError("prefix should be netaddr.IPNetwork,but get {}".format(type(prefix)))
+    return str(prefix.ip) + "/" + str(prefix.prefixlen)
 # Path
 def path2hex(asn_path, as4_session=False):
     """
@@ -53,17 +63,9 @@ def path2hex(asn_path, as4_session=False):
         result += path
     return result
 
-# prefix
-def isprefix(in_put):
-    return isinstance(in_put,netaddr.IPNetwork)
 
-def prefix2str(prefix):
-    """
-    convert netaddr prefix to string
-    """
-    if not isinstance(prefix, netaddr.IPNetwork):
-        raise TypeError("prefix should be netaddr.IPNetwork,but get {}".format(type(prefix)))
-    return str(prefix.ip) + "/" + str(prefix.prefixlen)
+
+
 
 # SPA
 def inter_spa2nlri_hex(msg):
@@ -73,8 +75,15 @@ def inter_spa2nlri_hex(msg):
         :return: nlri in json
     """
     msg = {
-        "type":2,
+        
+        "length":0,# length to the en
     }
     
-def inter_nlri2json(msg):
-    pass 
+def get_inter_spa(origin_as,prefixes):
+    msg = {
+        "type":2,
+        "origin_as":origin_as,
+        "prefixes":prefixes,
+        "flag":1
+    }
+    return msg
