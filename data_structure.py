@@ -62,7 +62,7 @@ def prefix2str(prefix):
     convert netaddr prefix to string
     """
     if not isinstance(prefix, netaddr.IPNetwork):
-        raise TypeError("prefix should be netaddr.IPNetwork")
+        raise TypeError("prefix should be netaddr.IPNetwork,but get {}".format(type(prefix)))
     return str(prefix.ip) + "/" + str(prefix.prefixlen)
 
 # SPA

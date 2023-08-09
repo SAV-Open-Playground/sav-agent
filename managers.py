@@ -11,18 +11,20 @@ import subprocess
 import json
 from model import db
 from model import SavInformationBase, SavTable
-from sav_common import*
+from sav_common import *
 
 KEY_WORD = "SAVAGENT"
+
 
 def iptables_command_execute(sender, prefix, neighbor_as, interface, **extra):
     add_rule_status = subprocess.call(
         ['iptables', '-A', KEY_WORD, '-i', interface, '-s', prefix, '-j', 'DROP'])
 
-def iptables_refresh(active_app,logger):
+
+def iptables_refresh(active_app, logger):
     if active_app is None:
         return
-    #TODO dynamic changing
+    # TODO dynamic changing
     with open('/root/savop/SavAgent_config.json', 'r') as file:
         config = json.load(file)
         enabled_sav_app = config.get("enabled_sav_app")
@@ -37,11 +39,13 @@ def iptables_refresh(active_app,logger):
     flush_chain_status = subprocess.call(['iptables', '-F', KEY_WORD])
     interface_set = set(get_host_interface_list())
     # using whilt list mode for EFP-uRPF
-    if active_app in ["EFP-uRPF-Algorithm-A_app","EFP-uRPF-Algorithm-B_app"]:
+    if active_app in ["EFP-uRPF-Algorithm-A_app", "EFP-uRPF-Algorithm-B_app"]:
         for r in rules:
-            add_rule_status = subprocess.call(['iptables', '-A', KEY_WORD, '-i', r.interface, '-s', r.prefix, '-j', 'ACCEPT'])
+            add_rule_status = subprocess.call(
+                ['iptables', '-A', KEY_WORD, '-i', r.interface, '-s', r.prefix, '-j', 'ACCEPT'])
         for interface in interface_set:
-            add_rule_status = subprocess.call(['iptables', '-A', KEY_WORD, '-i', interface, '-s', '192.168.0.0/16', '-j', 'DROP'])
+            add_rule_status = subprocess.call(
+                ['iptables', '-A', KEY_WORD, '-i', interface, '-s', '192.168.0.0/16', '-j', 'DROP'])
     else:
         sav_rule = {}
         for rule in rules:
@@ -56,7 +60,8 @@ def iptables_refresh(active_app,logger):
             sav_rule[key] = interface_set - value
         for prefix, iface_set in sav_rule.items():
             for iface in iface_set:
-                add_rule_status = subprocess.call(['iptables', '-A', KEY_WORD, '-i', iface, '-s', prefix, '-j', 'DROP'])
+                add_rule_status = subprocess.call(
+                    ['iptables', '-A', KEY_WORD, '-i', iface, '-s', prefix, '-j', 'DROP'])
     log_info = f"refresh {active_app} iptables successfully"
     logger.info(log_info)
     return log_info
@@ -84,12 +89,13 @@ class IPTableManager():
         self.active_app = active_app
 
     def _command_executer(self, command):
-        return 
+        return
 
     def _iptables_command_execute(self, command):
         command_result = self._command_executer(command=command)
         return command_result.returncode
-    def add(self,data_list):
+
+    def add(self, data_list):
         """
         add list of rules to the STB
         currently only add ipv4 and inter-domain rules
@@ -98,8 +104,8 @@ class IPTableManager():
         session = db.session
         src_apps = set()
         for data in data_list:
-            prefix, src_app, interface,local_role = data.get(
-            "prefix"), data.get("source_app"), data.get("interface"),data.get("local_role")
+            prefix, src_app, interface, local_role = data.get(
+                "prefix"), data.get("source_app"), data.get("interface"), data.get("local_role")
             if (prefix is None) or (src_app is None) or (interface is None):
                 self.logger.error(f"Missing required fields [{data.keys()}]")
                 raise ValueError("Missing required field")
@@ -116,29 +122,29 @@ class IPTableManager():
                 SavTable.source == src_app)
             if rules_in_table.count() != 0:
                 # self.logger.warning("rule exists")
-                self.logger.debug(rules_in_table)
-                self.logger.debug(data)
+                # self.logger.debug(rules_in_table)
+                # self.logger.debug(data)
                 log_msg = f"SAV RULE EXISTS: {data}"
                 # self.logger.info(log_msg)
                 return
             src_apps.add(src_app)
             sib_row = SavTable(
-            prefix=prefix,
-            neighbor_as=neighbor_as,
-            interface=interface,
-            local_role=local_role,
-            source=src_app,
-            direction=None)
+                prefix=prefix,
+                neighbor_as=neighbor_as,
+                interface=interface,
+                local_role=local_role,
+                source=src_app,
+                direction=None)
             session.add(sib_row)
             session.commit()
             log_msg = f"SAV RULE ADDED: {data}"
-            self.logger.info(log_msg)
+            self.logger.warn(log_msg)
         session.close()
         # self.logger.debug(src_apps)
         # self.logger.debug(self.active_app)
         # if not (self.active_app in src_apps):
-            # return
-        refresh_info = iptables_refresh(self.active_app,self.logger)
+        # return
+        refresh_info = iptables_refresh(self.active_app, self.logger)
         log_msg = f"IP TABLES CHANGED: {refresh_info}"
         self.logger.debug(log_msg)
 
@@ -235,11 +241,13 @@ class SIBManager():
         session.close()
         return data
 
+
 class InfoManager():
     """
     info manager manage the info of stored data,
     base class for SavAgent and SavApp.
     """
+
     def __init__(self, data, logger):
         self.logger = logger
         self.data = data
@@ -269,25 +277,35 @@ class InfoManager():
 
     def get_all_up(self):
         raise NotImplementedError
+
+
 class LinkManager(InfoManager):
     """
     LinkManager manage the link status and preprocessing the msg from the link
+    link_name is key MUST not be same
     """
     # TODO: we have three types of link: native bgp, modified bgp and grpc
+
     def __init__(self, data, logger=None):
         super(LinkManager, self).__init__(data, logger)
-            
-    def add(self, link_name, link_dict,link_type):
+
+    def add(self, link_name, link_dict, link_type):
         if "rpki" in link_name:
             return
         # self.logger.debug(f"adding {link_name},{link_dict}")
         if link_name in self.data:
             self.logger.warning(f"key {link_name} already exists")
             return
-        if not link_type in ["native_bgp", "modified_bgp","grpc"]:
+        if not link_type in ["native_bgp", "modified_bgp", "grpc"]:
             self.logger.error(f'unknown link_type: {link_type}')
+            return
+        link_dict_keys = [("meta", dict)]
+        keys_types_check(link_dict, link_dict_keys)
+        meta_keys = [("remote_as", int), ("local_as", int)]
+        keys_types_check(link_dict["meta"], meta_keys)
         link_dict["link_type"] = link_type
         self.data[link_name] = link_dict
+        self.logger.debug(f"link added: {link_name} ")
 
     def add_meta(self, link_name, meta):
         old_meta = self.data[link_name]["meta"]
@@ -313,9 +331,10 @@ class LinkManager(InfoManager):
 
     def get_by(self, remote_as, is_interior):
         """return a list of link objects that matches both remote_as,is_interior
-            return None if not found
         """
         result = []
+        if not is_asn(remote_as):
+            raise ValueError(f"{remote_as} is not a valid asn")
         for key in self.data:
             link = self.data[key]
             if (link["meta"]["remote_as"] == remote_as) and (
@@ -323,7 +342,7 @@ class LinkManager(InfoManager):
                 result.append(link)
         return result
 
-    def get_all_up(self,include_native_bgp = False):
+    def get_all_up(self, include_native_bgp=False):
         """
         return a list of all up link_names ,use get(link_name) to get link object
         """
@@ -332,13 +351,13 @@ class LinkManager(InfoManager):
             link = self.data[link_name]
             if link["status"]:
                 if link["link_type"] == "native_bgp":
-                        if include_native_bgp:
-                            temp.append(link_name)
+                    if include_native_bgp:
+                        temp.append(link_name)
                 else:
                     temp.append(link_name)
         return temp
 
-    def get_all_up_type(self, is_interior,include_native_bgp = False):
+    def get_all_up_type(self, is_interior, include_native_bgp=False):
         """
         return a list of all up link_names with the correct type (is_interior or not),
         use get(link_name) to get link object
@@ -349,5 +368,34 @@ class LinkManager(InfoManager):
                 result.append(link_name)
         return result
 
+    def get_all_grpc(self):
+        """
+        return a list of all grpc link_names
+        """
+        result = []
+        for link_name in self.data:
+            link = self.data[link_name]
+            if link["link_type"] == "grpc":
+                result.append(link_name)
+        return result
+
     def exist(self, link_name):
         return link_name in self.data
+
+
+def get_new_link_dict(app_name):
+    """
+    generate a new link dict for adding
+    """
+
+    link_dict = {"status": False, "initial_broadcast": False,
+                 "app": app_name, "meta": get_new_link_meta()}
+    return link_dict
+
+
+def get_new_link_meta():
+    """
+    generate a new link meta dict for adding
+    """
+    meta = {"remote_as": 0, "local_as": 0}
+    return meta

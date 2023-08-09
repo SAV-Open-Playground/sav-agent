@@ -152,6 +152,7 @@ def get_logger(file_name):
     """
     maxsize = 1024*1024*500
     backup_num = 5
+    level = logging.WARN
     level = logging.DEBUG
     logger = logging.getLogger(__name__)
     logger.setLevel(level)
@@ -577,33 +578,33 @@ def aspa_check(meta, aspa_info):
     adj_provider_as = f"AS{meta['meta']['local_as']}(v4)"
     adj_customer_as = meta["meta"]["remote_as"]
     for data in aspa_info:
-        if data["customer"] == int(adj_customer_as):
+        if data["customer"] == adj_customer_as:
             return adj_provider_as in data["providers"]
     return False
 
-def check_agent_agent_msg(msg):
-    """
-    message structure between agent and agent,
-    there are two types :'origin' and 'relay'
-    """
-    # self.as4_session = link_meta["as4_session"]
-    # self.protocol_name = link_meta["protocol_name"]
-    # check src dst
-    # raise an error if the given msg is not a valid agent to agent message
-    origin_key = "sav_origin"
-    path_key = "sav_path"
-    key_types = [("src",str),("dst",str),("msg_type",str),("sav_scope",list),
-                 ("sav_nlri",list),(origin_key,str),(path_key,list),("is_interior",bool)]
-    keys_types_check(msg,key_types)
-    if not msg["msg_type"] in ['origin','relay']:
-        raise ValueError(f"mst_type should be ether 'origin' or 'relay'")
+# def check_agent_agent_msg(msg):
+#     """
+#     message structure between agent and agent,
+#     there are two types :'origin' and 'relay'
+#     """
+#     # self.as4_session = link_meta["as4_session"]
+#     # self.protocol_name = link_meta["protocol_name"]
+#     # check src dst
+#     # raise an error if the given msg is not a valid agent to agent message
+#     origin_key = "sav_origin"
+#     path_key = "sav_path"
+#     key_types = [("src",str),("dst",str),("msg_type",str),("sav_scope",list),
+#                  ("sav_nlri",list),(origin_key,str),(path_key,list),("is_interior",bool)]
+#     keys_types_check(msg,key_types)
+#     if not msg["msg_type"] in ['origin','relay']:
+#         raise ValueError(f"mst_type should be ether 'origin' or 'relay'")
     
-    for path in msg[path_key]:
-        if not tell_str_is_interior(path):
-            raise ValueError(f"{path_key} should contain path value")
+#     for path in msg[path_key]:
+#         if not tell_str_is_interior(path):
+#             raise ValueError(f"{path_key} should contain path value")
     
-    if msg["is_interior"]:
-        if not tell_str_is_interior(msg[origin_key]):
-            raise ValueError(
-                "interior msg should have interior path and origin")
-    return True
+#     if msg["is_interior"]:
+#         if not tell_str_is_interior(msg[origin_key]):
+#             raise ValueError(
+#                 "interior msg should have interior path and origin")
+#     return True

@@ -22,33 +22,7 @@ class RPDPApp(SavApp):
         super(RPDPApp, self).__init__(agent, name, logger)
         self.prepared_cmd = Manager().list()
         self.pp_v4_dict = {}
-        grpc_config = self.agent.config.get("grpc_config")
-        if grpc_config["enabled"]:
-            self._grpc_config(grpc_config)
-            
-            
-    def _grpc_config(self,grpc_config):
-        src_ip = grpc_config.get("id")
-        link_man = self.agent.link_man
-        local_as = grpc_config.get("local_as")
-        # add grpc_links
-        for grpc_link in grpc_config.get("links"):
-            dst = grpc_link["remote_addr"].split(':')
-            remote_as = grpc_link["remote_as"]
-            dst_ip = dst[0]
-            link_dict = self.agent._get_new_link_dict(self.name)
-            link_dict["meta"] = {
-                "local_ip":src_ip,
-                "remote_ip":dst_ip,
-                "dst_addr":grpc_link["remote_addr"],
-                "is_interior":local_as!=remote_as,
-                "local_as":str(local_as),
-                "remote_as":str(remote_as),
-                "as4_session":True, # True by default
-                "protocol_name":"grpc",
-            }
-            link_dict["status"] = True
-            link_man.add(f"grpc_link_{src_ip}_{dst_ip}",link_dict,"grpc")
+
     def get_pp_v4_dict(self):
         # retrun the bird prefix-(AS)path table in RPDPApp (no refreshing)
         return self.pp_v4_dict
@@ -256,13 +230,18 @@ class RPDPApp(SavApp):
         """
         try:
             msg = {
-                "src": link["meta"]["local_ip"],
-                "dst": link["meta"]["remote_ip"],
-                "msg_type": msg_type,
-                "is_interior": is_inter,
-                "as4_session": link["meta"]["as4_session"],
-                "protocol_name": link["meta"]["protocol_name"],
-            }
+                    "src": link["meta"]["local_ip"],
+                    "dst": link["meta"]["remote_ip"],
+                    "msg_type": msg_type,
+                    "is_interior": is_inter,
+                    "as4_session": link["meta"]["as4_session"],
+                    "protocol_name": link["meta"]["protocol_name"],
+                }
+            if "bgp" in link["link_type"]:
+                pass
+            else:
+                msg["dst_id"] = link["meta"]["dst_id"]
+                msg["src_id"] = self.agent.config["grpc_config"]["id"]
             if msg_type == "origin":
                 if is_inter:
                     msg["sav_origin"] = link["meta"]["local_as"]
@@ -285,8 +264,9 @@ class RPDPApp(SavApp):
                 if len(path) > 0:
                     temp.append(path)
             msg["sav_scope"] = temp
-            if check_agent_agent_msg(msg):
-                return msg
+            msg["sav_origin"] = str(msg["sav_origin"])
+            # if check_agent_agent_msg(msg):
+            return msg
         except Exception as e:
             self.logger.error(e)
             self.logger.error("construct msg error")
@@ -316,7 +296,10 @@ class RPDPApp(SavApp):
                 self.agent.put_msg(msg)
         except Exception as e:
             self.logger.error(e)
-
+    def process_grpc_msg(self, msg):
+        link_meta = self.agent.link_man.get(msg["source_link"])["meta"]
+        msg["msg"]["interface_name"] = link_meta["local_interface"]
+        self.process_rpdp_msg(msg)
     def preprocess_msg(self, msg):
         # as_path is easier to process in string format, so we keep it
         # process routes
@@ -360,11 +343,12 @@ class RPDPApp(SavApp):
         # if we receive a inter-domain msg via inter-domain link
         if link_meta["is_interior"]:
             for path in scope_data:
-                next_as = path.pop(0)
+                next_as = (path.pop(0))
                 if (link_meta["local_as"] != next_as) :
+                    self.logger.debug(f"next_as {next_as}({type(next_as)}) local_as {link_meta['local_as']}({type(link_meta['local_as'])})")
                     path.append(next_as)
                     self.logger.error(
-                        f"as number mismatch msg:{path} local_as {link_meta['local_as']}")
+                        f"as number mismatch msg:{path} local_as {link_meta['local_as']},next_as {next_as}")
                     return
                 if len(path) == 0:
                     self.agent._log_info_for_front(msg, "terminate")
@@ -405,7 +389,7 @@ class RPDPApp(SavApp):
                 return
         for next_as in relay_scope:
             inter_links = self.agent.link_man.get_by(next_as, True)
-            # native_ggp link may included
+            # native_bgp link may included
             inter_links = [i for i in inter_links if i["link_type"]!="native_bgp"]
             relay_msg["sav_scope"] = relay_scope[next_as]
             relay_msg["sav_path"] = msg["sav_path"] + [link_meta["local_as"]]
@@ -426,16 +410,18 @@ class RPDPApp(SavApp):
                 if link_meta["is_interior"]:
                     self.logger.debug(
                         f"unable to find interior link for as:{next_as}, no SAV ?")
-    def process_rpdp_msg(self,msg):
+    def process_rpdp_msg(self,input_msg):
         """
         process dpdp message, only inter-domain is supported
         regarding the nlri part, the processing is the same
         """
-        self.logger.debug(msg)
-        link_name = msg["source_link"]
+        self.logger.debug(input_msg)
+        link_name = input_msg["source_link"]
+        # self.logger.debug(link_name)
+        # self.logger.debug((self.agent.link_man.data.keys()))
         this_link = self.agent.link_man.get(link_name)
         link_meta = this_link["meta"]
-        msg = msg["msg"]
+        msg = input_msg["msg"]
         msg["is_interior"] = tell_str_is_interior(msg["sav_origin"])
         prefixes = msg["sav_nlri"]
         temp_list = []
@@ -451,8 +437,9 @@ class RPDPApp(SavApp):
         self.agent.ip_man.add(temp_list)
         if msg["is_interior"]:
             # in inter-domain, sav_path is as_path
-            msg["sav_path"] = msg["as_path"]
-            del msg["as_path"]
+            if not input_msg["msg_type"] == "grpc_msg":
+                msg["sav_path"] = msg["as_path"]
+                del msg["as_path"]
             self.process_rpdp_inter(msg, this_link)
         else:
             self.logger.error("INTRA MSG RECEIVED")

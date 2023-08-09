@@ -31,7 +31,6 @@ sa = SavAgent(
     logger=LOGGER, path_to_config=r"/root/savop/SavAgent_config.json")
 # flask is used as a tunnel between reference_router and agent
 
-
 class GrpcServer(agent_msg_pb2_grpc.AgentLinkServicer):
     def __init__(self, agent, logger):
         super(GrpcServer, self).__init__()
@@ -40,16 +39,17 @@ class GrpcServer(agent_msg_pb2_grpc.AgentLinkServicer):
 
     def Simple(self, req, context):
         msg_str = req.json_str
+        req_src_ip = context.peer().split(":")[1]
         # self.logger.debug(f"grpc server got msg {msg_str} from {req.sender_id}")
         my_id = self.agent.config["grpc_config"]["id"]
         reply = f"got {msg_str}"
         try:
-            msg_dict = json.loads(msg_str)
-            self.logger.debug(f"{msg_dict}")
+            msg_dict = {"msg":json.loads(msg_str)}
+            req_dst_ip = msg_dict['msg']['dst_ip']
             msg_dict["source_app"] = sa.rpdp_app.name
-            msg_dict["source_link"] =None
-            self.agent.rpdp_app.recv_msg(msg_dict)
-            # self.agent.put_msg(msg_dict)
+            msg_dict["source_link"] =f"grpc_link_{self.agent.config['grpc_config']['id']}_{req.sender_id}"
+            msg_dict["msg_type"] = "grpc_msg"
+            self.agent.put_msg(msg_dict)
             # self.agent.grpc_recv(msg_dict, req.sender_id)
         except Exception as err:
             self.logger.debug(msg_str)
@@ -138,6 +138,15 @@ def update_config():
     try:
         data = json.loads(request.data)
         sa.update_config(data)
+        if sa.config["grpc_config"]["enabled"]:
+            grpc_server.stop(0)
+            grpc_server = grpc.server(futures.ThreadPoolExecutor())
+            agent_msg_pb2_grpc.add_AgentLinkServicer_to_server(
+            GrpcServer(sa, LOGGER), grpc_server)
+            addr = sa.config["grpc_config"]["server_addr"]
+            grpc_server.add_insecure_port(addr)
+            grpc_server.start()
+            LOGGER.debug(f"GRPC server updated at {addr}")
     except Exception as err:
         LOGGER.error(err)
         msg = err
