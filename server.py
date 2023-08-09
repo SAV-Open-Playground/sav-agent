@@ -27,7 +27,8 @@ app_config = {
 }
 app.config.from_object(app_config)
 # ensure the instance folder exists
-sa = SavAgent(logger=LOGGER, path_to_config=r"/root/savop/SavAgent_config.json")
+sa = SavAgent(
+    logger=LOGGER, path_to_config=r"/root/savop/SavAgent_config.json")
 # flask is used as a tunnel between reference_router and agent
 
 
@@ -44,7 +45,9 @@ class GrpcServer(agent_msg_pb2_grpc.AgentLinkServicer):
         reply = f"got {msg_str}"
         try:
             msg_dict = json.loads(msg_str)
-            # self.logger.debug(f"{msg_dict}")
+            self.logger.debug(f"{msg_dict}")
+            msg_dict["source_app"] = sa.rpdp_app.name
+            msg_dict["source_link"] =None
             self.agent.rpdp_app.recv_msg(msg_dict)
             # self.agent.put_msg(msg_dict)
             # self.agent.grpc_recv(msg_dict, req.sender_id)
@@ -73,34 +76,39 @@ def index():
     the entrypoint for reference_router
     """
     try:
-        data = json.loads(request.data)
+        msg = json.loads(request.data)
     except Exception as err:
         LOGGER.error(err)
         return {"code": "5001", "message": "Invalid Json String", "data": str(request.data)}
     try:
         required_keys = ["msg_type", "msg"]
         for key in required_keys:
-            if key not in data:
-                LOGGER.warning(f"{key} not found in {data.keys()}")
+            if key not in msg:
+                LOGGER.warning(f"{key} not found in {msg.keys()}")
                 return {"code": "5002", "message": f"{key} not found!"}
-        m_t = data["msg_type"]
+        m_t = msg["msg_type"]
         if m_t == "request_cmd":
             cmd = sa.rpdp_app.get_prepared_cmd()
             return {"code": "2000", "data": cmd, "message": "success"}
-        elif m_t =="link_state_change":
-            LOGGER.debug(f"link state change {data}")
-            if "rdpd" in data["channels"]:
-                link_type = "modified_bgp"
-            else:
-                link_type = "native_bgp"
-            if data["msg"]:
-                sa.rpdp_app.put_link_up(data["protocol_name"],link_type)
-            else:
-                sa.rpdp_app.put_link_down(data["protocol_name"])
+        msg["source_app"] = sa.rpdp_app.name
+        if m_t =="link_state_change":
+            msg["source_link"] = msg["protocol_name"]
         else:
-            sa.rpdp_app.recv_msg(data)
+            msg["source_link"] = msg["msg"]["protocol_name"]
+            if not m_t =="link_state_change":
+                link_type = "native_bgp"
+                if "rpdp" in msg["msg"]["channels"]:
+                    link_type = "modified_bgp"
+        sa.put_msg(msg)
+            # if data["msg"]:
+            #     sa.rpdp_app.put_link_up(data["protocol_name"],link_type)
+            # else:
+            #     sa.rpdp_app.put_link_down(data["protocol_name"])
+        # else:
+            # sa.rpdp_app.recv_http_msg(data)
         return {"code": "0000", "message": "success"}
     except Exception as err:
+        LOGGER.error(msg)
         LOGGER.error(err)
         return {"code": "5004", "message": str(err), "data": str(request.data)}
 
@@ -113,18 +121,20 @@ def search_sib():
     sib_tables = db.session.query(SavInformationBase).all()
     data = {}
     for row in sib_tables:
-        data[row.key]=json.loads(row.value)
+        data[row.key] = json.loads(row.value)
     return json.dumps(data, indent=2)
 
 
 @app.route('/refresh_proto/<string:active_app>/', methods=["POST", "GET"])
 def refresh_proto(active_app):
-    info = iptables_refresh(active_app,LOGGER)
+    info = iptables_refresh(active_app, LOGGER)
     return {"code": "0000", "message": f"{info}"}
+
 
 @app.route('/update_config/', methods=["POST"])
 def update_config():
     msg = "updated"
+    LOGGER.error("should not happen")
     try:
         data = json.loads(request.data)
         sa.update_config(data)

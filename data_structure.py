@@ -21,8 +21,6 @@ def asn2hex(asn, as_session=False):
         :param asn: asn (str)
         :return: hex value list (u8)
     """
-    # if not is_asn(asn):
-        # raise TypeError(f"asn should be int and in 0,65535),but got({asn},type:{type(asn)})")
     if as_session:
         result = hex(int(asn))[2:]
         temp = []
@@ -66,3 +64,17 @@ def prefix2str(prefix):
     if not isinstance(prefix, netaddr.IPNetwork):
         raise TypeError("prefix should be netaddr.IPNetwork")
     return str(prefix.ip) + "/" + str(prefix.prefixlen)
+
+# SPA
+def inter_spa2nlri_hex(msg):
+    """
+        convert inter-spa to nlri
+        :param msg: inter-spa message
+        :return: nlri in json
+    """
+    msg = {
+        "type":2,
+    }
+    
+def inter_nlri2json(msg):
+    pass 

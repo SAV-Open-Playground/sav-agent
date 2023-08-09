@@ -115,9 +115,11 @@ class IPTableManager():
                 SavTable.interface == interface,
                 SavTable.source == src_app)
             if rules_in_table.count() != 0:
-                self.logger.warning("rule exists")
+                # self.logger.warning("rule exists")
+                self.logger.debug(rules_in_table)
+                self.logger.debug(data)
                 log_msg = f"SAV RULE EXISTS: {data}"
-                self.logger.info(log_msg)
+                # self.logger.info(log_msg)
                 return
             src_apps.add(src_app)
             sib_row = SavTable(
@@ -304,7 +306,10 @@ class LinkManager(InfoManager):
         # self.db.upsert("link", json.dumps(self.data))
 
     def get(self, link_name):
-        return self.data.get(link_name)
+        if link_name not in self.data:
+            self.logger.debug(f"all link names:{self.data.keys()}")
+            raise KeyError(f"link {link_name} not found")
+        return self.data[link_name]
 
     def get_by(self, remote_as, is_interior):
         """return a list of link objects that matches both remote_as,is_interior

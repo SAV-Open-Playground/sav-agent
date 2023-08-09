@@ -125,8 +125,8 @@ def sav_rule_tuple(prefix, interface_name, rule_source, as_number=-1):
         prefix = str(prefix)
     return (prefix, interface_name, rule_source, as_number)
 
-def run_cmd(command):
-    return subprocess.run(command, shell=True, capture_output=True, encoding='utf-8')
+def run_cmd(command,shell=True, capture_output=True, encoding='utf-8'):
+    return subprocess.run(command, shell=shell, capture_output=capture_output, encoding=encoding)
 
 def keys_types_check(d,key_types):
     for k, t in key_types:
@@ -152,12 +152,12 @@ def get_logger(file_name):
     """
     maxsize = 1024*1024*500
     backup_num = 5
-
+    level = logging.DEBUG
     logger = logging.getLogger(__name__)
-    logger.setLevel(logging.DEBUG)
+    logger.setLevel(level)
     handler = logging.handlers.RotatingFileHandler(os.path.dirname(os.path.abspath(
         __file__))+f"/../logs/{file_name}.log", maxBytes=maxsize, backupCount=backup_num)
-    handler.setLevel(logging.DEBUG)
+    handler.setLevel(level)
 
     formatter = logging.Formatter("[%(asctime)s]  [%(filename)s:%(lineno)s-%(funcName)s] [%(levelname)s] %(message)s")
     formatter.converter = time.gmtime
@@ -368,8 +368,7 @@ def birdc_get_import(logger, protocol_name, channel_name="ipv4"):
         cmd = f"show route all import table {protocol_name}.{channel_name}"
         data = birdc_cmd(logger,cmd)
         if data.startswith("No import table in channel"):
-            logger.warning(data)
-            logger.debug(f"{protocol_name}.{channel_name}")
+            logger.warning(data[:-1])
             return {"import": {}}
         if data is None:
             return {"import": {}}
