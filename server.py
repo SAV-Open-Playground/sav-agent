@@ -14,7 +14,7 @@ from concurrent import futures
 import grpc
 import agent_msg_pb2
 import agent_msg_pb2_grpc
-from iptable_manager import iptables_refresh
+from iptable_manager import iptables_refresh, router_acl_refresh
 
 LOGGER = get_logger("server")
 
@@ -107,7 +107,13 @@ def search_sib():
 
 @app.route('/refresh_proto/<string:active_app>/', methods=["POST", "GET"])
 def refresh_proto(active_app):
-    info = iptables_refresh(active_app,LOGGER)
+    tool = request.args.get('tool')
+    if (tool is None) or (tool == "iptables"):
+        info = iptables_refresh(active_app, LOGGER)
+    elif tool == "acl":
+        info = router_acl_refresh(active_app, LOGGER)
+    else:
+        return {"code": "-1", "message": "the tool parameter don't exits! Please checkout your parameter"}
     return {"code": "0000", "message": f"{info}"}
 
 

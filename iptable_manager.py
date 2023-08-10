@@ -14,11 +14,85 @@ from model import SavInformationBase, SavTable
 from sav_common import get_host_interface_list
 
 KEY_WORD = "SAVAGENT"
+DATA_PATH = "/root/sav-agent/data"
 
 
 def iptables_command_execute(sender, prefix, neighbor_as, interface, **extra):
     add_rule_status = subprocess.call(
         ['iptables', '-A', KEY_WORD, '-i', interface, '-s', prefix, '-j', 'DROP'])
+
+
+def command_executor(command):
+    return subprocess.run(command, shell=True, capture_output=True, encoding='utf-8')
+
+
+def huawei_acl_generator(acl_sav_rule):
+    status = command_executor(command=f'cat /dev/null > {DATA_PATH}/huawei_acl_rule.txt')
+    status = command_executor(command=f'echo "system-view" >> {DATA_PATH}/huawei_acl_rule.txt')
+    for iface, prefix_set in acl_sav_rule.items():
+        status = command_executor(command=f'echo "acl name sav_{iface}" >> {DATA_PATH}/huawei_acl_rule.txt')
+        for prefix in prefix_set:
+            status = command_executor(command=f'echo "rule deny {prefix} 0.0.0.255" >> {DATA_PATH}/huawei_acl_rule.txt')
+        status = command_executor(command=f'echo "quit" >> {DATA_PATH}/huawei_acl_rule.txt')
+        status = command_executor(command=f'echo "interface Ethernet {iface}" >> {DATA_PATH}/huawei_acl_rule.txt')
+        status = command_executor(command=f'echo acl sav_{iface} inbound >> {DATA_PATH}/huawei_acl_rule.txt')
+        status = command_executor(command=f'echo "quit" >> {DATA_PATH}/huawei_acl_rule.txt')
+    status = command_executor(command=f'echo "save" >> {DATA_PATH}/huawei_acl_rule.txt')
+
+
+def h3c_acl_generator(acl_sav_rule):
+    status = command_executor(command=f'cat /dev/null > {DATA_PATH}/h3c_acl_rule.txt')
+    status = command_executor(command=f'echo "system-view" >> {DATA_PATH}/h3c_acl_rule.txt')
+    for iface, prefix_set in acl_sav_rule.items():
+        status = command_executor(command=f'echo "acl name sav_{iface}" >> {DATA_PATH}/h3c_acl_rule.txt')
+        for prefix in prefix_set:
+            status = command_executor(command=f'echo "rule deny {prefix} 0.0.0.255" >> {DATA_PATH}/h3c_acl_rule.txt')
+        status = command_executor(command=f'echo "quit" >> {DATA_PATH}/h3c_acl_rule.txt')
+        status = command_executor(command=f'echo "interface Ethernet {iface}" >> {DATA_PATH}/h3c_acl_rule.txt')
+        status = command_executor(command=f'echo acl sav_{iface} inbound >> {DATA_PATH}/h3c_acl_rule.txt')
+        status = command_executor(command=f'echo "quit" >> {DATA_PATH}/h3c_acl_rule.txt')
+    status = command_executor(command=f'echo "save" >> {DATA_PATH}/h3c_acl_rule.txt')
+
+
+def router_acl_refresh(active_app, logger):
+    if active_app is None:
+        return
+    # TODO dynamic changing
+    with open('/root/savop/SavAgent_config.json', 'r') as file:
+        config = json.load(file)
+        enabled_sav_app = config.get("enabled_sav_app")
+    if enabled_sav_app is None:
+        return
+    session = db.session
+    rules = session.query(SavTable).filter(SavTable.source == active_app).all()
+    session.close()
+    if len(rules) == 0:
+        return f"there is no {active_app} sav rules, so don't need to refresh ACL"
+    interface_set = set(get_host_interface_list())
+    sav_rule = {}
+    for rule in rules:
+        prefix, interface = rule.prefix.split("/")[0], rule.interface
+        if interface == "*":
+            continue
+        if prefix not in sav_rule.keys():
+            sav_rule[prefix] = {interface}
+        else:
+            sav_rule[prefix].add(interface)
+    for key, value in sav_rule.items():
+        sav_rule[key] = interface_set - value
+    acl_sav_rule = {}
+    for prefix, iface_set in sav_rule.items():
+        for iface in iface_set:
+            if iface not in acl_sav_rule:
+                acl_sav_rule[iface] = {prefix}
+            else:
+                acl_sav_rule[iface].add(prefix)
+    # acl rule generator
+    huawei_acl_generator(acl_sav_rule=acl_sav_rule)
+    h3c_acl_generator(acl_sav_rule=acl_sav_rule)
+    log_info = f"refresh sav_{active_app} acl successfully"
+    logger.info(log_info)
+    return log_info
 
 
 def iptables_refresh(active_app, logger):
@@ -137,12 +211,9 @@ class IPTableManager():
             log_msg = f"SAV RULE ADDED: {data}"
             self.logger.info(log_msg)
         session.close()
-        # self.logger.debug(src_apps)
-        # self.logger.debug(self.active_app)
-        # if not (self.active_app in src_apps):
-            # return
-        refresh_info = iptables_refresh(self.active_app, self.logger)
-        log_msg = f"IP TABLES CHANGED: {refresh_info}"
+        # refresh_info = iptables_refresh(self.active_app, self.logger)
+        # log_msg = f"IP TABLES CHANGED: {refresh_info}"
+        router_acl_refresh(self.active_app, self.logger)
         self.logger.debug(log_msg)
 
     def delete(self, input_id):
