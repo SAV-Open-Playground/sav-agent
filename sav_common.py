@@ -157,7 +157,7 @@ def get_logger(file_name):
     maxsize = 1024*1024*500
     backup_num = 5
     level = logging.WARN
-    # level = logging.DEBUG
+    level = logging.DEBUG
     logger = logging.getLogger(__name__)
     logger.setLevel(level)
     handler = logging.handlers.RotatingFileHandler(os.path.dirname(os.path.abspath(
