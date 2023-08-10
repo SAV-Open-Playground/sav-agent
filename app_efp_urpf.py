@@ -9,7 +9,6 @@
 """
 
 from multiprocessing import Manager
-import subprocess
 from sav_common import *
 
 

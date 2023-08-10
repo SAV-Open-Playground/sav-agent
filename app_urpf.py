@@ -134,7 +134,7 @@ class UrpfApp(SavApp):
         if msg["is_interior"]:
             as_path_code = "2"
             hex_str_msg["withdraws"] = "0,0"
-            hex_str_msg["sav_origin"] = ",".join(asn_to_hex(
+            hex_str_msg["sav_origin"] = ",".join(asn2hex(
                 msg["sav_origin"], is_as4))
             if m_t == "origin":
                 # insert origin for sav
@@ -147,7 +147,7 @@ class UrpfApp(SavApp):
                 return hex_str_msg
             elif m_t == "relay":
                 as_number = str(len(msg["sav_path"]))
-                temp = path_to_hex(msg["sav_path"], is_as4)
+                temp = path2hex(msg["sav_path"], is_as4)
                 hex_str_msg["as_path"] = ",".join(
                     [as_path_code, as_number]+temp)
                 hex_str_msg["as_path_len"] = len(

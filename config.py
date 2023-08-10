@@ -7,7 +7,6 @@
 
 @Desc    :   the config.py is responsible for SQLALCHEMY config
 """
-import os
 DEBUG = True
 SQLALCHEMY_DATABASE_URI = "sqlite:////root/savop/sib.sqlite"
 SQLALCHEMY_TRACK_MODIFICATIONS = True
