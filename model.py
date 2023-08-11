@@ -52,6 +52,7 @@ class SavTable(Base):
     updatetime = Column(DateTime, server_default=func.now(),
                         onupdate=func.now())
     source = Column(String(20), nullable=True)
+    local_role = Column(String(10), nullable=False)
 
     def __init__(self, prefix, neighbor_as, interface, local_role,source=None, direction=None):
         self.prefix = prefix

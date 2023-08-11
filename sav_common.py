@@ -19,14 +19,8 @@ import requests
 import subprocess
 
 
-# AS number int
-# IP Address 
-# Network netaddr class
-# =============================== start_of_key_words ==========================================
-def is_asn(in_put):
-    if isinstance(in_put,int):
-        pass 
-    #TODO
+from sav_data_structure import *
+
 class RPDPPeer():
     def __init__(self,asn,port,ip,is_as4) -> None:
         self.asn = asn
@@ -131,17 +125,27 @@ def sav_rule_tuple(prefix, interface_name, rule_source, as_number=-1):
         prefix = str(prefix)
     return (prefix, interface_name, rule_source, as_number)
 
-def command_executor(command):
-    return subprocess.run(command, shell=True, capture_output=True, encoding='utf-8')
+def run_cmd(command,shell=True, capture_output=True, encoding='utf-8'):
+    return subprocess.run(command, shell=shell, capture_output=capture_output, encoding=encoding)
+
+def keys_types_check(d,key_types):
+    """
+    raise KeyError if key is missing
+    raise TypeError if key is not the right type
+    """
+    for k, t in key_types:
+        if not k in d:
+            raise KeyError(f"{k} missing in {d}")
+        if not isinstance(d[k],t):
+            raise TypeError(f"{k} should be {t} but {type(d[k])} found")
 
 def get_host_interface_list():
     """
     return a list of 'clean' interface names
     """
     command = "ip link|grep -v 'link' | grep -v -E 'docker0|lo' | awk -F: '{ print $2 }' | sed 's/ //g'"
-    command_result = command_executor(command=command)
+    command_result = run_cmd(command=command)
     std_out = command_result.stdout
-    # self.logger.debug(command_result)
     result = std_out.split("\n")[:-1]
     result = list(map(lambda x: x.split('@')[0], result))
     return [i for i in result if len(i) != 0]
@@ -152,12 +156,13 @@ def get_logger(file_name):
     """
     maxsize = 1024*1024*500
     backup_num = 5
-
+    level = logging.WARN
+    level = logging.DEBUG
     logger = logging.getLogger(__name__)
-    logger.setLevel(logging.DEBUG)
+    logger.setLevel(level)
     handler = logging.handlers.RotatingFileHandler(os.path.dirname(os.path.abspath(
         __file__))+f"/../logs/{file_name}.log", maxBytes=maxsize, backupCount=backup_num)
-    handler.setLevel(logging.DEBUG)
+    handler.setLevel(level)
 
     formatter = logging.Formatter("[%(asctime)s]  [%(filename)s:%(lineno)s-%(funcName)s] [%(levelname)s] %(message)s")
     formatter.converter = time.gmtime
@@ -202,45 +207,6 @@ def ln(list_of_interface):
         result.append(i["meta"]["protocol_name"])
     return result
 
-
-def asn_to_hex(asn, as_session=False):
-    """
-        convert asn to hex
-        :param asn: asn
-        :return: hex value list (u8)
-    """
-    if as_session:
-        result = hex(int(asn))[2:]
-        temp = []
-        while len(result) >= 2:
-            temp.append(str(int(result[:2], 16)))
-            result = result[2:]
-        result = temp
-        while len(result) < 4:
-            result = ["0"] + result
-        return result
-
-    result = hex(int(asn))[2:]
-    temp = []
-    while len(result) >= 2:
-        temp.append(str(int(result[:2], 16)))
-        result = result[2:]
-    result = temp
-    return result
-
-
-def path_to_hex(asn_path, as4_session=False):
-    """
-        convert asn_path to hex
-        :param asn_path: list of asn
-        :return: hex value list (u8)
-    """
-    result = []
-    for path in list(map(lambda x: asn_to_hex(x, as4_session), asn_path)):
-        result += path
-    return result
-
-
 def get_kv_match(list_of_dict, key, value):
     result = []
     for data_dict in list_of_dict:
@@ -263,7 +229,7 @@ def scope_to_hex_str(scope, is_inter, is_as4=True):
     if is_inter:
         for path in scope:
             temp.append(str(len(path)))
-            temp += path_to_hex(path, is_as4)
+            temp += path2hex(path, is_as4)
         return ",".join(temp)
 
     for path in scope:
@@ -283,45 +249,7 @@ def save_json(path_to_json, json_obj):
         json_file.write(json.dumps(json_obj, indent=4))
 
 
-class InfoManager():
-    """
-    info manager manage the info of stored data,
-    base class for SavAgent and SavApp.
-    """
-    def __init__(self, data, logger):
-        self.logger = logger
-        self.data = data
-        if not isinstance(self.data, dict):
-            raise ValueError("data is not a dictionary")
-    def __init__(self, data, logger):
-        self.logger = logger
-        self.data = data
-        if not isinstance(self.data, dict):
-            raise ValueError("data is not a dictionary")
 
-    def add(self, msg):
-        raise NotImplementedError
-
-    def delete(self, key):
-        raise NotImplementedError
-
-    def get(self, key):
-        raise NotImplementedError
-
-    def update(self, key, value):
-        raise NotImplementedError
-
-    def add_update(self, key, value):
-        raise NotImplementedError
-
-    def is_up(self, key):
-        raise NotImplementedError
-
-    def get_all(self):
-        raise NotImplementedError
-
-    def get_all_up(self):
-        raise NotImplementedError
 
 
 class SavApp():
@@ -445,8 +373,7 @@ def birdc_get_import(logger, protocol_name, channel_name="ipv4"):
         cmd = f"show route all import table {protocol_name}.{channel_name}"
         data = birdc_cmd(logger,cmd)
         if data.startswith("No import table in channel"):
-            logger.warning(data)
-            logger.debug(f"{protocol_name}.{channel_name}")
+            logger.warning(data[:-1])
             return {"import": {}}
         if data is None:
             return {"import": {}}
@@ -496,7 +423,7 @@ def get_roa(logger,t_name= 'r4'):
             result[as_number].append(netaddr.IPNetwork(prefix))
             # result[as_number].append(prefix)
     return result
-def get_p_by_asn(logger,asn,roa,aspa):
+def get_p_by_asn(asn,roa,aspa):
     """
     return a a dict(key is prefix,value is origin as) of unique prefix that could be used as src in packet from this as using aspa an roa info
     customer and peer is considered
@@ -530,82 +457,7 @@ def element_exist_check(a,b):
 #     the intermedia between two sav agents
 #     """
     # def __init__(self,link_name,source_app,remote_addr,remote_as,local_addr,local_as,interface,type):
-class LinkManager(InfoManager):
-    """
-    LinkManager manage the link status
-    """
-# TODO: we have three types of link: native bgp, modified bgp and grpc
-    def add(self, link_name, link_dict,link_type):
-        if "rpki" in link_name:
-            return
-        # self.logger.debug(f"adding {link_name},{link_dict}")
-        if link_name in self.data:
-            self.logger.warning(f"key {link_name} already exists")
-            return
-        if not link_type in ["native_bgp", "modified_bgp","grpc"]:
-            self.logger.error(f'unknown link_type: {link_type}')
-        link_dict["link_type"] = link_type
-        self.data[link_name] = link_dict
 
-    def add_meta(self, link_name, meta):
-        old_meta = self.data[link_name]["meta"]
-        if len(old_meta) != 0:
-            if list(old_meta.keys()) != list(meta.keys()):
-                self.logger.warning(
-                    "meta conflict !\n old meta: {old_meta}\n new met: {meta}")
-                return
-            if old_meta != meta:
-                self.logger.warning(
-                    "meta conflict !\n old meta: {old_meta}\n new met: {meta}")
-                return
-            return
-        if link_name in self.data:
-            self.data[link_name]["meta"] = meta
-        # self.db.upsert("link", json.dumps(self.data))
-
-    def get(self, link_name):
-        return self.data.get(link_name)
-
-    def get_by(self, remote_as, is_interior):
-        """return a list of link objects that matches both remote_as,is_interior
-            return None if not found
-        """
-        result = []
-        for key in self.data:
-            link = self.data[key]
-            if (link["meta"]["remote_as"] == remote_as) and (
-                    link["meta"]["is_interior"] == is_interior):
-                result.append(link)
-        return result
-
-    def get_all_up(self,include_native_bgp = False):
-        """
-        return a list of all up link_names ,use get(link_name) to get link object
-        """
-        temp = []
-        for link_name in self.data:
-            link = self.data[link_name]
-            if link["status"]:
-                if link["link_type"] == "native_bgp":
-                        if include_native_bgp:
-                            temp.append(link_name)
-                else:
-                    temp.append(link_name)
-        return temp
-
-    def get_all_up_type(self, is_interior,include_native_bgp = False):
-        """
-        return a list of all up link_names with the correct type (is_interior or not),
-        use get(link_name) to get link object
-        """
-        result = []
-        for link_name in self.get_all_up(include_native_bgp):
-            if self.data[link_name]["meta"]["is_interior"] == is_interior:
-                result.append(link_name)
-        return result
-
-    def exist(self, link_name):
-        return link_name in self.data
 
 def get_agent_app_msg(link_meta, msg_meta, logger):
     """
@@ -730,52 +582,33 @@ def aspa_check(meta, aspa_info):
     adj_provider_as = f"AS{meta['meta']['local_as']}(v4)"
     adj_customer_as = meta["meta"]["remote_as"]
     for data in aspa_info:
-        if data["customer"] == int(adj_customer_as):
+        if data["customer"] == adj_customer_as:
             return adj_provider_as in data["providers"]
     return False
 
-def check_agent_agent_msg(msg, logger):
-    """
-    message structure between agent and agent,
-    there are two types :'origin' and 'relay'
-    """
-    # self.as4_session = link_meta["as4_session"]
-    # self.protocol_name = link_meta["protocol_name"]
-    # check src dst
-    # raise an error if the given msg is not a valid agent to agent message
-    origin_key = "sav_origin"
-    path_key = "sav_path"
-    # logger.debug(json.dumps(msg,indent=2))
-    if not isinstance(msg["src"], str):
-        raise TypeError("src type error, should be a string")
-    if not isinstance(msg["dst"], str):
-        raise TypeError("dst type error, should be a string")
-    if not msg["msg_type"] in ['origin','relay']:
-        raise ValueError(f"mst_type should be ether 'origin' or 'relay'")
-
-    if not isinstance(msg["sav_scope"], list):
-        raise TypeError("scope type error, should be a list")
-    if not isinstance(msg["sav_nlri"], list):
-        raise TypeError("sav_nlri type error, should be a list")
+# def check_agent_agent_msg(msg):
+#     """
+#     message structure between agent and agent,
+#     there are two types :'origin' and 'relay'
+#     """
+#     # self.as4_session = link_meta["as4_session"]
+#     # self.protocol_name = link_meta["protocol_name"]
+#     # check src dst
+#     # raise an error if the given msg is not a valid agent to agent message
+#     origin_key = "sav_origin"
+#     path_key = "sav_path"
+#     key_types = [("src",str),("dst",str),("msg_type",str),("sav_scope",list),
+#                  ("sav_nlri",list),(origin_key,str),(path_key,list),("is_interior",bool)]
+#     keys_types_check(msg,key_types)
+#     if not msg["msg_type"] in ['origin','relay']:
+#         raise ValueError(f"mst_type should be ether 'origin' or 'relay'")
     
-    if not isinstance(msg[path_key], list):
-        raise TypeError("path type error, should be a list")
-    for path in msg[path_key]:
-        if not tell_str_is_interior(path):
-            logger.debug(msg[path_key])
-            logger.debug(path)
-            raise ValueError(f"{path_key} should contain path value")
+#     for path in msg[path_key]:
+#         if not tell_str_is_interior(path):
+#             raise ValueError(f"{path_key} should contain path value")
     
-    if not isinstance(msg[origin_key], str):
-        raise TypeError(f"{origin_key} type error")
-    
-    if not isinstance(msg["is_interior"], bool):
-        raise TypeError("is_interior type error, should be bool")
-    if msg["is_interior"]:
-        if not tell_str_is_interior(msg[origin_key]):
-            raise ValueError(
-                "interior msg should have interior path and origin")
-
-    return True
-
-
+#     if msg["is_interior"]:
+#         if not tell_str_is_interior(msg[origin_key]):
+#             raise ValueError(
+#                 "interior msg should have interior path and origin")
+#     return True

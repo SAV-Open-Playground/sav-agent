@@ -82,12 +82,18 @@ class BarApp(SavApp):
         links_data = self.agent.link_man.data
         direct = {}
         # A:
-        for link_nam,link_data in links_data.items():
-            if link_data["meta"]["local_role"] in["peer","provider"]:
-                direct[link_data["meta"]["interface_name"]] =int(link_data["meta"]["remote_as"])
+        for link_name,link_data in links_data.items():
+            # link_meta = link_data["meta"]
+            # self.logger.debug(list(link_data.keys()))
+            if "bgp" in link_data["link_type"]:
+                if link_data["meta"]["local_role"] in["peer","provider"]:
+                    direct[link_data["meta"]["interface_name"]] =link_data["meta"]["remote_as"]
+            else:
+                # self.logger.debug(link_data)
+                pass
         # B:
         for interface,asn in direct.items():
-            allowed_prefix = get_p_by_asn(self.logger,asn,self.roa_cache,self.aspa_cache)
+            allowed_prefix = get_p_by_asn(asn,self.roa_cache,self.aspa_cache)
             for p,origin_as in allowed_prefix.items():
                 rule = sav_rule_tuple(p, interface, self.name, origin_as)
                 new_rules.add(rule)

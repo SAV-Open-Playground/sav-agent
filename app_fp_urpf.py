@@ -8,7 +8,6 @@
 @Desc    :   the app_fp_urpf.py is responsible for Fp-uRPF-SAV rule generation
 """
 
-import subprocess
 from sav_common import *
 
 

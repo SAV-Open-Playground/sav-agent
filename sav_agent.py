@@ -21,9 +21,10 @@ import sys
 import grpc
 import agent_msg_pb2
 import agent_msg_pb2_grpc
+from concurrent import futures
 
 from sav_common import *
-from iptable_manager import IPTableManager, SIBManager
+from managers import *
 from app_rpdp import RPDPApp
 from app_urpf import UrpfApp
 from app_efp_urpf import EfpUrpfApp
@@ -62,7 +63,10 @@ class SavAgent():
         if logger is None:
             logger = get_logger("SavAgent")
         self.logger = logger
-        self.config = self._config_validation(path_to_config)
+        self.config = {}
+        self.link_man = None
+        self.temp_for_link_man = []  # will be deleted after __init__
+        self.update_config(path_to_config)
         self._init_data()
         self.msgs = Manager().list()
         self._init_apps()
@@ -72,33 +76,77 @@ class SavAgent():
         self.sib_man.upsert("config", json.dumps(self.config))
         self.sib_man.upsert("active_app", json.dumps(self.data["active_app"]))
         self._start()
+        self.path_to_config = path_to_config
+        # self.grpc_server = None
 
-    def _config_validation(self, path_to_config):
+    def update_config(self, path_to_config):
         """
-        return dictionary object if is a valid config file. Otherwise, raise ValueError
-        """
-        config = read_json(path_to_config)
-        required_keys = ["apps","grpc_links","grpc_id","grpc_server_addr","enabled_sav_app"]
-        for key in required_keys:
-            if key not in config:
-                self.logger.error(f"{key} is a must")
-                raise ValueError("key missing in config")
-    
-        grpc_keys = ["remote_as","addr","remote_id"]
-        for link in config["grpc_links"]:
-            for key in grpc_keys:
-                if key not in link:
-                    self.logger.error(f"{key} is a must,{link}")
-                    raise ValueError("key missing in config")
+        return dictionary object if is a valid config file (only check type not value). 
+        Otherwise, raise ValueError
 
-        return config
+        we should ALWAYS check self.config for latest values
+
+        """
+        try:
+            config = read_json(path_to_config)
+            required_keys = [("apps", list), ("grpc_config", dict),
+                             ("enabled_sav_app", str), ("location", str)]
+            keys_types_check(config, required_keys)
+
+            grpc_config = config["grpc_config"]
+            keys_types_check(grpc_config, [("enabled", bool)])
+            if grpc_config["enabled"]:
+                grpc_keys = [("server_addr", str), ("id", str), ("local_as", int),
+                             ("enabled", bool), ("links", list)]
+                keys_types_check(grpc_config, grpc_keys)
+            if not self.link_man is None:
+                for link_name in self.link_man.get_all_grpc():
+                    self.link_man.delete(link_name)
+
+            if grpc_config["enabled"]:
+                src_id = grpc_config.get("id")
+                local_as = grpc_config.get("local_as")
+                # add grpc_links
+                for grpc_link in grpc_config.get("links"):
+                    dst = grpc_link["remote_addr"].split(':')
+                    remote_as = grpc_link["remote_as"]
+                    dst_ip = dst[0]
+                    link_dict = get_new_link_dict("rpdp_app")
+                    link_dict["meta"] = {
+                        "local_ip": "unknown",
+                        "remote_ip": dst_ip,
+                        "dst_addr": grpc_link["remote_addr"],
+                        "is_interior": local_as != remote_as,
+                        "local_as": local_as,
+                        "remote_as": remote_as,
+                        "as4_session": True,  # True by default
+                        "protocol_name": "grpc",
+                        "local_role": grpc_link["local_role"],
+                        "remote_id": grpc_link["remote_id"],
+                        "interface_name": grpc_link["interface_name"],
+                        "link_type": "grpc"
+                    }
+
+                    dst_id = grpc_link["remote_id"]
+                    link_dict["status"] = True
+                    if self.link_man is None:
+                        self.temp_for_link_man.append(
+                            (f"grpc_link_{src_id}_{dst_id}", link_dict, "grpc"))
+                    else:
+                        self.link_man.add(
+                            f"grpc_link_{src_id}_{dst_id}", link_dict, "grpc")
+                    self.logger.debug(
+                        f"CONFIG UPDATE\n old:{self.config},\n new:{config}")
+            self.config = config
+        except Exception as e:
+            self.logger.debug(e)
+            self.logger.error("invalid config file")
 
     def _find_grpc_remote(self, remote_ip):
-        self.logger.debug(self.config["grpc_links"])
-        for grpc_link in self.config["grpc_links"]:
-            remote_addr = grpc_link["addr"]
+        for grpc_link in self.config["grpc_config"]["links"]:
+            remote_addr = grpc_link["remote_addr"]
             if remote_addr.startswith(remote_ip):
-                return (remote_addr,grpc_link["remote_id"])
+                return (remote_addr, grpc_link["remote_id"])
         raise ValueError(f"remote_ip {remote_ip} not found in grpc_links")
 
     def _send_msg_to_agent(self, msg, link):
@@ -106,33 +154,43 @@ class SavAgent():
         send message to another agent
         this function will decide to use grpc or reference router to send the message
         """
-        # self.logger.debug(msg)
         if not isinstance(msg, dict):
             raise TypeError("msg must be a dict object")
         # using grpc
-        if link["meta"]["link_type"]=="grpc":
+        # self.logger.debug(f"{link}")
+        if link["link_type"] == "grpc":
             try:
-                str_msg = json.dumps(msg)
+                self.logger.debug(f"{msg['sav_nlri']}")
+                if isinstance(msg["sav_nlri"][0], netaddr.IPNetwork):
+                    msg["sav_nlri"] = list(map(prefix2str, msg["sav_nlri"]))
+
                 remote_ip = link.get("meta").get("remote_ip")
-                remote_addr,remote_id = self._find_grpc_remote(remote_ip)
+                remote_addr, remote_id = self._find_grpc_remote(remote_ip)
+                # self.logger.debug(f"sending to {remote_addr},{remote_id}")
+                msg["dst_ip"] = remote_ip
+                str_msg = json.dumps(msg)
                 with grpc.insecure_channel(remote_addr) as channel:
                     stub = agent_msg_pb2_grpc.AgentLinkStub(channel)
-                    agent_msg = agent_msg_pb2.AgentMsg(sender_id=self.config.get("grpc_id"),
+                    # self.logger.debug(f"{self.config['grpc_config']['id']},{str_msg}")
+                    agent_msg = agent_msg_pb2.AgentMsg(sender_id=self.config["grpc_config"]["id"],
                                                        json_str=str_msg)
                     rep = stub.Simple(agent_msg)
                     expected_str = f"got {str_msg}"
-                    if rep.json_str == expected_str and rep.sender_id == remote_id:
-                        return
-                    else:
-                        self.logger.error(f"{rep}")
-                        self.logger.error(f"expected sender:{remote_id}, got {rep.sender_id}")
-                        self.logger.error(f"expected string:{expected_str}, got {rep.json_str}")
+                    if not rep.json_str == expected_str:
+                        raise ValueError(
+                            f"expected {expected_str}, got {rep.json_str}")
+                    if not rep.sender_id == remote_id:
+                        self.logger.debug(
+                            f"sending to {remote_addr},{remote_id}")
+                        raise ValueError(
+                            f"expected {remote_id}, got {rep.sender_id}")
             except Exception as e:
                 self.logger.error(e)
-        elif link["meta"]["link_type"]=="modified_bgp":
-        # using reference router
-            self.get_app(link["app"]).send_msg(msg)
-        elif link["meta"]["link_type"]=="native_bgp":
+        elif link["meta"]["link_type"] == "modified_bgp":
+            # using reference router
+            self.rpdp_app.send_msg(msg)
+
+        elif link["meta"]["link_type"] == "native_bgp":
             # this should not happen
             self.logger.error(link)
             self.logger.error(msg)
@@ -152,6 +210,9 @@ class SavAgent():
         # value is list of directly connected as numbers, link is undirected
         self.data["sav_graph"] = {"nodes": {}, "links": {}}
         self.link_man = LinkManager(self.data["links"], logger=self.logger)
+        for link_name, link_dict, link_type in self.temp_for_link_man:
+            self.link_man.add(link_name, link_dict, link_type)
+            self.temp_for_link_man = []
         self.data["apps"] = {}
         self.data["fib_for_stable"] = []
         self.data["fib_for_apps"] = []
@@ -182,13 +243,12 @@ class SavAgent():
             data_dict["links"][key_asn].append(value_asn)
         self.sib_man.upsert("sav_graph", json.dumps((data_dict)))
 
-
     def _init_apps(self):
         # bird and grpc are must
         self.rpdp_app = None
-        # we enable grpc as default
         self.data["active_app"] = None
-        if len(self.config["apps"])==0:
+        # self.logger.debug(self.config)
+        if len(self.config["apps"]) == 0:
             self.logger.warning("no apps found, quiting")
             sys.exit(0)
         for name in self.config["apps"]:
@@ -223,7 +283,7 @@ class SavAgent():
             self.logger.error(msg)
             raise ValueError(msg)
         self.logger.debug(
-            msg=f"initialized optional apps: {list(self.data['apps'].keys())},using {self.data['active_app']}")
+            msg=f"initialized apps: {list(self.data['apps'].keys())},using {self.data['active_app']}")
 
     def _if_fib_stable(self, stable_span=5):
         """
@@ -262,6 +322,9 @@ class SavAgent():
                     stable_span=self.config.get("fib_stable_threshold"))
                 # TODO add initial notify_apps?
                 time.sleep(0.1)
+
+    def grpc_recv(self, msg, sender):
+        self.logger.debug(f"agent recv via grpc: {msg} from {sender}")
 
     def _send_link_init(self):
         """
@@ -313,7 +376,7 @@ class SavAgent():
         prefixes = get_kv_match(prefixes, "Gateway", "0.0.0.0")
         local_prefixes = list(map(lambda x: netaddr.IPNetwork(
             x["Destination"]+"/"+x["Genmask"]), prefixes))
-        local_prefixes_for_upsert = json.dumps(list(map(str,local_prefixes)))
+        local_prefixes_for_upsert = json.dumps(list(map(str, local_prefixes)))
         self.sib_man.upsert("local_prefixes", local_prefixes_for_upsert)
         # self.logger.debug(local_prefixes)
         return local_prefixes
@@ -343,12 +406,11 @@ class SavAgent():
         """
         should only be called via link
         """
-        required_keys = ["msg", "msg_type", "source_app", "source_link"]
-        for key in required_keys:
-            if not key in msg:
-                err_msg = f"required key missing [{key}] in [{msg}]"
-                self.logger.error(err_msgerr_msg)
-                raise KeyError()
+        key_types = [("msg_type", str), ("source_app", str),
+                     ("source_link", str)]
+        if not "msg" in msg:
+            raise KeyError(f"msg missing in msg:{msg}")
+        keys_types_check(msg, key_types)
         self.msgs.append(msg)
 
     def _send_init_broadcast_on_link(self, link_name):
@@ -356,24 +418,19 @@ class SavAgent():
         if not link["status"]:
             self.logger.debug(f"link {link_name} is down, not sending")
             return
-        self.logger.debug(
-            f"sending initial broadcast on link {link_name}")
+        self.logger.debug(f"sending initial broadcast on link {link_name}")
         self._send_origin(link_name, None)
-
-    def _get_new_link_dict(self, app_name):
-        """
-        generate a new link dict for adding
-        """
-        link_dict = {"status": False, "initial_broadcast": False,
-                     "app": app_name, "meta": {}}
-        return link_dict
 
     def _process_link_state_change(self, msg):
         """
         in this function, we manage the link state
         """
+        # self.logger.debug(f"{msg}")
+        if not msg['source_link'].startswith("savbgp"):
+            self.logger.debug(f"not savgp link({msg['source_link']}), ignore")
+            return
         link_name = msg["source_link"]
-        link_dict = self._get_new_link_dict(msg["source_app"])
+        link_dict = get_new_link_dict(msg["source_app"])
         link_dict["status"] = msg["msg"]
         if link_name in self.link_man.data:
             old_d = self.link_man.get(link_name)
@@ -381,11 +438,11 @@ class SavAgent():
             new_status = link_dict["status"]
             if old_status != new_status:
                 self.link_man.data[link_name]["status"] = link_dict["status"]
+            else:
+                return  # no change
         else:
-            # self.logger.debug(msg)
-            # self.logger.debug(link_name)
-            # self.logger.debug(link_dict)
-            self.link_man.add(link_name, link_dict,msg["link_type"])
+            self.link_man.add(link_name, link_dict, msg["link_type"])
+        self.logger.debug(f"link {link_name} is {link_dict['status']}")
         self.sib_man.upsert("link_data", json.dumps(self.link_man.data))
 
     def _process_link_config(self, msg):
@@ -393,6 +450,8 @@ class SavAgent():
         in this function, we add the config to corresponding link
         """
         # self.logger.debug(msg)
+        msg["remote_as"] = int(msg["remote_as"])
+        msg["local_as"] = int(msg["local_as"])
         if msg["remote_as"] == msg["local_as"]:
             msg["is_interior"] = False
         else:
@@ -407,14 +466,14 @@ class SavAgent():
         # the router_id we have is a int presentation of ipv4 address,
         # now convert it to standard ipv4 string
         # now we transform bird internal router id to ipv4
-        msg["router_id"] = str(hex(int(msg["router_id"])))[2:]
-        while len(msg["router_id"]) < 8:
-            msg["router_id"] = "0" + msg["router_id"]
+        msg["remote_id"] = str(hex(int(msg["router_id"])))[2:]
+        while len(msg["remote_id"]) < 8:
+            msg["remote_id"] = "0" + msg["remote_id"]
         temp = []
-        while len(msg["router_id"]) > 1:
-            temp.append(str(int(msg["router_id"][:2], 16)))
-            msg["router_id"] = msg["router_id"][2:]
-        msg["router_id"] = ".".join(temp)
+        while len(msg["remote_id"]) > 1:
+            temp.append(str(int(msg["remote_id"][:2], 16)))
+            msg["remote_id"] = msg["remote_id"][2:]
+        msg["remote_id"] = ".".join(temp)
         if "rpdp" in msg["channels"]:
             msg["link_type"] = "modified_bgp"
         else:
@@ -422,10 +481,12 @@ class SavAgent():
             msg["link_type"] = "native_bgp"
         if not self.link_man.exist(msg["protocol_name"]):
             # self.logger.debug(msg)
-            data_dict = self._get_new_link_dict(msg["protocol_name"])
+            data_dict = get_new_link_dict(msg["protocol_name"])
+            self.logger.debug(msg)
             data_dict["meta"] = msg
             # self.logger.debug(msg["protocol_name"])
-            self.link_man.add(msg["protocol_name"], data_dict,msg["link_type"])
+            self.link_man.add(msg["protocol_name"],
+                              data_dict, msg["link_type"])
         else:
             # self.logger.debug(msg["protocol_name"])
             self.link_man.add_meta(msg["protocol_name"], msg)
@@ -456,92 +517,6 @@ class SavAgent():
             self.logger.info(
                 f"RELAY TERMINATED MSG ON INTRA-LINK: {link_name}, msg:{msg1}")
 
-    def _process_sav_inter(self, msg, link):
-        """
-        determine whether to relay or terminate the message.
-        """
-        link_meta = link["meta"]
-        scope_data = msg["sav_scope"]
-        relay_msg = {
-            "sav_nlri": msg["sav_nlri"],
-            "sav_origin": msg["sav_origin"]
-        }
-        new_path = msg["sav_path"]+[link_meta["local_as"]]
-        for i in range(len(new_path)-1):
-            self.add_sav_link(new_path[i], new_path[i+1])
-        self._log_info_for_front(msg=None, log_type="sav_graph")
-        relay_scope = {}
-        intra_links = self.link_man.get_all_up_type(is_interior=False)
-        # if we receive a inter-domain msg via inter-domain link
-        if link_meta["is_interior"]:
-            for path in scope_data:
-                next_as = path.pop(0)
-                if (link_meta["local_as"] != next_as) :
-                    path.append(next_as)
-                    self.logger.error(
-                        f"as number mismatch msg:{path} local_as {link_meta['local_as']}")
-                    return
-                if len(path) == 0:
-                    self._log_info_for_front(msg, "terminate")
-
-                    # AS_PATH:{msg['sav_path']} at AS {m['local_as']}")
-                    for link_name in intra_links:
-                        link = self.link_man.get(link_name)
-                        relay_msg["sav_path"] = msg["sav_path"]
-                        relay_msg["sav_scope"] = scope_data
-                        relay_msg = self.rpdp_app._construct_msg(
-                            link, relay_msg, "relay", True)
-                        msg1 = relay_msg
-                        msg1['sav_nlri'] = list(map(str, msg1['sav_nlri']))
-                        self._log_info_for_front(
-                            msg, "relay_terminate", link_name)
-                        self.logger.debgug("")
-                        self._send_msg_to_agent(msg, link)
-                        # self.get_app(link["app"]).send_msg(relay_msg)
-                else:
-                    if path[0] in relay_scope:
-                        # TODO here we may add incorrect AS(AS that we donnot have SAV link) 
-                        relay_scope[path[0]].append(path)
-                    else:
-                        relay_scope[path[0]] = [path]
-        # if we receive a inter-domain msg via intra-domain link
-        else:
-            self.logger.error("THIS SHOULD NOT HAPPEN ,no msg should be intra")
-            if len(scope_data) > 0:
-                # in demo we only rely this to inter-links
-                for path in scope_data:
-                    if path[0] in relay_scope:
-                        relay_scope[path[0]].append(path)
-                    else:
-                        relay_scope[path[0]] = [path]
-            else:
-                # if receiving inter-domain msg via intra-domain link
-                # and there is no scope data, it means we terminate the msg here
-                return
-        for next_as in relay_scope:
-            inter_links = self.link_man.get_by(next_as, True)
-            # native_ggp link may included
-            inter_links = [i for i in inter_links if i["link_type"]!="native_bgp"]
-            relay_msg["sav_scope"] = relay_scope[next_as]
-            relay_msg["sav_path"] = msg["sav_path"] + [link_meta["local_as"]]
-            for link in inter_links:
-                relay_msg["sav_scope"] = relay_scope[next_as]
-                relay_msg = self.rpdp_app._construct_msg(
-                    link, relay_msg, "relay", True)
-                self._send_msg_to_agent(relay_msg, link)
-                # self.get_app(link["app"]).send_msg(relay_msg)
-            if link_meta["is_interior"] and msg["is_interior"]:
-                for link_name in intra_links:
-                    link = self.link_man.get(link_name)
-                    relay_msg = self._construct_msg(
-                        link, relay_msg, "relay", True)
-                    self._send_msg_to_agent(relay_msg, link)
-                    # self.get_app(link["app"]).send_msg(relay_msg)
-            if len(inter_links) == 0:
-                if link_meta["is_interior"]:
-                    self.logger.debug(
-                        f"unable to find interior link for as:{next_as}, no SAV ?")
-
     def _process_sav_intra(self, msg, link_meta):
         """
         doing nothing but logging
@@ -551,40 +526,6 @@ class SavAgent():
         if link_meta["is_interior"]:
             self.logger.error("intra-msg received on inter-link!")
 
-    def _process_rpdp_msg(self, msg):
-        """
-        process sav message, only inter-domain is supported
-        dpdp
-        regarding the nlri part, the processing is the same
-        """
-        self.logger.debug(msg)
-        this_link = self.link_man.get(msg["source_link"])
-        link_meta = this_link["meta"]
-        msg["src"] = link_meta["remote_ip"]
-        msg["dst"] = link_meta["local_ip"]
-        self._log_info_for_front(msg, "got_msg")
-        # self.rpdp_app.preprocess_msg(msg)
-        msg["is_interior"] = tell_str_is_interior(msg["sav_origin"])
-        prefixes = msg["sav_nlri"]
-        temp_list = []
-        for prefix in prefixes:
-            temp_list.append({"prefix": str(prefix),
-                         "neighbor_as": link_meta["remote_as"],
-                         "interface": msg["interface_name"],
-                         "source_app": msg["app_name"],
-                         "source_link": msg["source_link"],
-                         "local_role":link_meta["local_role"]
-                         })
-        self.ip_man.add(temp_list)
-        if msg["is_interior"]:
-            # in inter-domain, sav_path is as_path
-            msg["sav_path"] = msg["as_path"]
-            del msg["as_path"]
-            self._process_sav_inter(msg, this_link)
-        else:
-            self.logger.error("INTRA MSG RECEIVED")
-            self._process_sav_intra(msg, link_meta)
-
     def _diff_fib(self, sub_type):
         """
         return list of added and deleted rows
@@ -593,7 +534,6 @@ class SavAgent():
         if sub_type not in self.data:
             self.logger.error(f"unknown sub_type :{sub_type}")
         last_fib = self.data.get(sub_type)
-        
 
         this_fib = self.get_fib()
         # self.logger.debug(f"last fib:{last_fib}, this_fib:{this_fib}")
@@ -616,34 +556,36 @@ class SavAgent():
 
     def _process_bgp_update(self, msg):
         """
-        process bgp update message, could be native bgp update message or sav message
-        if native bgp update message, we use AS_PATH attribute to update the table of
-        prefix to AS_PATH, this function relaying on RPDPApp
+        process  bgp update message
         """
-        # if we receive a bgp update, indicating the link is up
-        # self.logger.debug(f"_process_bgp_update got:{msg}")
-        link_name = msg["protocol_name"]
-        self.link_man.get(link_name)["status"] = True
-        if not msg["is_native_bgp"]:
-            # this msg is for rpdp_app
-            self._process_rpdp_msg(msg)
-            return
-        # send route changed info to apps
-        # relying on bird app to get the as path of each prefix to send
+        # self.logger.debug(f"{msg}")
+        if 'rpdp' in msg["msg"]["channels"]:
+            self.rpdp_app.recv_http_msg(msg)
+        else:
+            self._process_native_bgp_update(msg)
+
+    def _process_grpc_msg(self, msg):
+        self.rpdp_app.process_grpc_msg(msg)
+
+    def _process_native_bgp_update(self, msg):
+        """
+        the msg is not used here
+        """
+
         adds, dels = self.rpdp_app.diff_pp_v4()
         if len(adds) == 0 and len(dels) == 0:
             return
         changed_routes = []
-        # self.logger.debug(adds)
+        self.logger.debug(adds)
         for prefix, path in adds:
             changed_routes.append({prefix: path})
-        # 
         self.logger.info(
             f"UPDATED LOCAL PREFIX-AS_PATH TABLE {self.rpdp_app.get_pp_v4_dict()}")
         self._send_origin(None, changed_routes)
         self.logger.info(f"_send_origin finished")
         self._notify_apps()
         self.logger.info(f"_notify_apps finished")
+
     def _notify_apps(self):
         """
         rpdp logic is handled in other function
@@ -659,9 +601,9 @@ class SavAgent():
             a, d = [], []
             if isinstance(app, UrpfApp):
                 a, d = app.fib_changed(adds, dels)
-            elif (isinstance(app, EfpUrpfApp) 
+            elif (isinstance(app, EfpUrpfApp)
                   or isinstance(app, FpUrpfApp)
-                  or isinstance(app,BarApp)):
+                  or isinstance(app, BarApp)):
                 a, d = app.fib_changed()
             elif isinstance(app, RPDPApp):
                 pass
@@ -669,18 +611,32 @@ class SavAgent():
                 self.logger.error(f":{type(app)}")
             for rule in a:
                 row = {"prefix": rule[0],
-                         "interface": rule[1],
-                         "source_app": rule[2],
-                         "neighbor_as": rule[3]
-                         }
-                add_rules.append(row)
+                       "interface": rule[1],
+                       "source_app": rule[2],
+                       "neighbor_as": rule[3]
+                       }
+                if rule[1] == "*":
+                    temp = self.link_man.get_all_up_by_link_types(
+                        ["native_bgp", "modified_bgp"])
+                    # TODO currently we only apply to bgp interfaces
+                    for link_dict in temp:
+                        row["local_role"] = link_dict["meta"]["local_role"]
+                        add_rules.append(row)
+                else:
+                    temp = self.link_man.get_bgp_by_interface(rule[1])
+                    if len(temp) != 1:
+                        self.logger.error(
+                            f"multiple bgp on interface [{rule[1]}],{len(rule[1])}")
+                    temp = temp[0]["meta"]
+                    row["local_role"] = temp["local_role"]
+                    add_rules.append(row)
+            # TODO d
             del_rules.extend(d)
         self.ip_man.add(add_rules)
         for row in del_rules:
+            self.logger.debug(f"TODO: deleting rule: {row}")
             pass  # TODO: delete
-            # self.ip_man.
-
-
+        
 
     def _send_origin(self, input_link_name=None, input_paths=None):
         """
@@ -703,15 +659,16 @@ class SavAgent():
             link = self.link_man.get(link_name)
             if link["link_type"] != "native_bgp":
                 if link["meta"]["is_interior"]:
-                    inter_links.append(link)
+                    inter_links.append((link_name, link))
                 else:
-                    intra_links.append(link)
+                    intra_links.append((link_name, link))
         inter_paths = []
         intra_paths = []
         if input_paths is None:
             ppv4 = self.rpdp_app.get_pp_v4_dict()
+            # self.logger.debug(ppv4)
             for prefix in ppv4:
-                for path in ppv4[prefix]:
+                for path in ppv4[prefix]["as_path"]:
                     inter_paths.append({prefix: path})
                 # prepare data for inter-msg TODO: intra-msg broadcast
         else:
@@ -720,29 +677,29 @@ class SavAgent():
                     path_data = list(map(str, path[prefix]))
                     # transfrom the data first
                     if tell_str_is_interior(",".join(path_data)):
+                        # self.logger.debug(f"{path}")
                         inter_paths.append(path)
                     else:
                         intra_paths.append(path)
-        # self.logger.debug(intra_paths)
-        # self.logger.debug(inter_paths)
+        # self.logger.debug(f"intra_paths:{intra_paths}")
+        # self.logger.debug(f"inter_paths:{inter_paths}")
         inter_paths = aggregate_asn_path(inter_paths)
+        # self.logger.debug(f"inter_paths:{inter_paths}")
         if len(inter_links) > 0 and len(inter_paths) > 0:
             # we send origin to all links no matter inter or intra
-            for link in inter_links:
+            for link_name, link in inter_links:
                 # generate msg for this link
-                remote_as = int(link["meta"]["remote_as"])
-                if not link["initial_broadcast"]:
-                    self._send_init_broadcast_on_link(link_name)
+                remote_as = link["meta"]["remote_as"]
                 if remote_as not in inter_paths:
-                    # may happen when broadcasting
-                    pass
+                    # may happen when broadcasting, essentially is because the next as is not in the intended path
+                    # TODO
+                    self.logger.debug(f"inter_paths:{inter_paths}")
+                    self.logger.debug(f"remote_as:{remote_as}")
                 else:
                     paths_for_as = inter_paths[remote_as]
                     # self.logger.debug(paths_for_as)
                     msg = self.rpdp_app._construct_msg(
                         link, paths_for_as, "origin", True)
-                    # self.logger.error(link)
-                    self.logger.debug(msg)
                     self._send_msg_to_agent(msg, link)
                     # self.get_app(link["app"]).send_msg(msg)
         else:
@@ -768,9 +725,12 @@ class SavAgent():
         elif m_t == "bird_bgp_config":
             self._process_link_config(msg)
         elif m_t == "bgp_update":
-            msg["source_link"] = msg["protocol_name"]
-            msg["app_name"] = input_msg["source_app"]
-            self._process_bgp_update(msg)
+            self._process_bgp_update(input_msg)
+        elif m_t == "native_bgp_update":
+            self._process_native_bgp_update(input_msg)
+        elif m_t == "grpc_msg":
+            self._process_grpc_msg(input_msg)
+
         else:
             self.logger.warning(f"unknown msg type: [{m_t}]\n{input_msg}")
 
