@@ -1,11 +1,11 @@
 # -*-coding:utf-8 -*-
 '''
-@File    :   db_manager.py
+@File    :   managers.py
 @Time    :   2023/01/17
 @Author  :   Yuqian Shi
 @Version :   0.1
 
-@Desc    :   the db_manager.py is responsible for the execution of selected sav mechanism 
+@Desc    :   the managers.py is responsible for the execution of selected sav mechanism and other manager classes
 '''
 import subprocess
 import json
@@ -23,20 +23,29 @@ def iptables_command_execute(sender, prefix, neighbor_as, interface, **extra):
 
 def iptables_refresh(active_app, logger):
     if active_app is None:
+        logger.debug("active app is None")
         return
     # TODO dynamic changing
-    with open('/root/savop/SavAgent_config.json', 'r') as file:
-        config = json.load(file)
+    with open('/root/savop/SavAgent_config.json', 'r') as f:
+        config = json.load(f)
         enabled_sav_app = config.get("enabled_sav_app")
     if enabled_sav_app is None:
+        logger.debug("enabled_sav_app app is None")
         return
     session = db.session
     rules = session.query(SavTable).filter(SavTable.source == active_app).all()
     session.close()
     if len(rules) == 0:
         return f"there is no {active_app} sav rules, so don't need to refresh iptables"
+    for r in rules:
+        logger.debug(f" 'direction':{r.direction}, 'id':{r.id}, 'interface':{r.interface}, 'metadata':{r.metadata}, \
+            'neighbor_as':{r.neighbor_as}, 'prefix':{r.prefix}, 'source':{r.source}, 'local_role:{r.local_role}")
     # flush existing rules
     flush_chain_status = subprocess.call(['iptables', '-F', KEY_WORD])
+    if flush_chain_status != 0:
+        logger.error(f"flush {active_app} iptables failed")
+    
+        
     interface_set = set(get_host_interface_list())
     # using whilt list mode for EFP-uRPF
     if active_app in ["EFP-uRPF-Algorithm-A_app", "EFP-uRPF-Algorithm-B_app"]:
@@ -177,7 +186,8 @@ class IPTableManager():
                          "interface": row.interface,
                          "source": row.source,
                          "direction": row.direction,
-                         "createtime": row.createtime})
+                         "createtime": row.createtime,
+                         "local_role": row.local_role})
         session.close()
         return data
 
@@ -367,7 +377,15 @@ class LinkManager(InfoManager):
             if self.data[link_name]["meta"]["is_interior"] == is_interior:
                 result.append(link_name)
         return result
-
+    def get_all_up_by_link_types(self, link_types):
+        """
+        return a list of all up link_objects with the correct link_type (e.g. [grpc]),
+        """
+        result = []
+        for link_name in self.get_all_up():
+            if self.data[link_name]["link_type"] in link_types:
+                result.append(self.data[link_name])
+        return result
     def get_all_grpc(self):
         """
         return a list of all grpc link_names
@@ -378,7 +396,18 @@ class LinkManager(InfoManager):
             if link["link_type"] == "grpc":
                 result.append(link_name)
         return result
-
+    
+    def get_bgp_by_interface(self,interface_name):
+        """
+        return a list of bgp(modified or native) link_dict that has the same interface_name
+        """
+        result = []
+        for link_name in self.data:
+            link = self.data[link_name]
+            if link["link_type"] in ["native_bgp", "modified_bgp"]:
+                if link["meta"]["interface_name"] == interface_name:
+                    result.append(link)
+        return result
     def exist(self, link_name):
         return link_name in self.data
     def _is_good_meta(self,meta):

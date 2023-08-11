@@ -100,12 +100,6 @@ def index():
                 if "rpdp" in msg["msg"]["channels"]:
                     link_type = "modified_bgp"
         sa.put_msg(msg)
-            # if data["msg"]:
-            #     sa.rpdp_app.put_link_up(data["protocol_name"],link_type)
-            # else:
-            #     sa.rpdp_app.put_link_down(data["protocol_name"])
-        # else:
-            # sa.rpdp_app.recv_http_msg(data)
         return {"code": "0000", "message": "success"}
     except Exception as err:
         LOGGER.error(msg)
