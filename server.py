@@ -14,7 +14,7 @@ from concurrent import futures
 import grpc
 import agent_msg_pb2
 import agent_msg_pb2_grpc
-from iptable_manager import iptables_refresh, router_acl_refresh
+from managers import iptables_refresh, router_acl_refresh
 
 LOGGER = get_logger("server")
 
