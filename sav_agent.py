@@ -89,8 +89,7 @@ class SavAgent():
         """
         try:
             config = read_json(path_to_config)
-            required_keys = [("apps", list), ("grpc_config", dict),
-                             ("enabled_sav_app", str), ("location", str)]
+            required_keys = [("apps", list), ("grpc_config", dict), ("location", str)]
             keys_types_check(config, required_keys)
 
             grpc_config = config["grpc_config"]
