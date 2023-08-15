@@ -5,11 +5,8 @@
 @Author  :   Yuqian Shi
 @Version :   0.1
 
-@Desc    :   the sav_agent.py is responsible for managing two types of critical instances : SavApp and SavLink.
-They are responsible for message transmission and message preprocessing.
-SavAgent also manages two types of critical data structure: SavGraph and SavTable.
-SavGraph is built on the known AS_PATHs.
-SAvTable is built on the sav messages.
+@Desc    :   the sav_agent.py 
+This is a benchmark to test the performance of BIRD
 """
 
 import threading
@@ -21,7 +18,6 @@ import sys
 import grpc
 import agent_msg_pb2
 import agent_msg_pb2_grpc
-from concurrent import futures
 
 from sav_common import *
 from managers import *
@@ -30,7 +26,6 @@ from app_urpf import UrpfApp
 from app_efp_urpf import EfpUrpfApp
 from app_fp_urpf import FpUrpfApp
 from app_bar import BarApp
-
 
 def add_path(given_asn_path, data_dict):
     for path in data_dict:
@@ -66,6 +61,7 @@ class SavAgent():
         self.config = {}
         self.link_man = None
         self.temp_for_link_man = []  # will be deleted after __init__
+        self.path_to_config = path_to_config
         self.update_config(path_to_config)
         self._init_data()
         self.msgs = Manager().list()
@@ -76,14 +72,12 @@ class SavAgent():
         self.sib_man.upsert("config", json.dumps(self.config))
         self.sib_man.upsert("active_app", json.dumps(self.data["active_app"]))
         self._start()
-        self.path_to_config = path_to_config
         # self.grpc_server = None
 
     def update_config(self, path_to_config):
         """
         return dictionary object if is a valid config file (only check type not value). 
         Otherwise, raise ValueError
-
         we should ALWAYS check self.config for latest values
 
         """
@@ -125,7 +119,6 @@ class SavAgent():
                         "interface_name": grpc_link["interface_name"],
                         "link_type": "grpc"
                     }
-
                     dst_id = grpc_link["remote_id"]
                     link_dict["status"] = True
                     if self.link_man is None:
@@ -214,8 +207,11 @@ class SavAgent():
             self.temp_for_link_man = []
         self.data["apps"] = {}
         self.data["fib_for_stable"] = []
+        self.data["fib_for_stable_read_time"] = time.time()
         self.data["fib_for_apps"] = []
         self.data["initial_bgp_stable"] = False
+        
+        self.rec_count = 1
 
     def add_sav_link(self, asn_a, asn_b):
         data_dict = self.data["sav_graph"]
@@ -292,6 +288,7 @@ class SavAgent():
             return
         self._diff_fib("fib_for_stable")
         read_time = self.data.get("fib_for_stable_read_time", time.time())
+        # self.logger.debug(f"{self.data['fib_for_stable_read_time']},,{read_time}")
         if time.time()-read_time > stable_span:
             self.logger.debug("FIB STABILIZED")
             self.data["initial_bgp_stable"] = True
@@ -301,6 +298,7 @@ class SavAgent():
             del self.data["fib_for_stable_read_time"]
             del self.data["fib_for_stable"]
             return
+        # self.logger.debug("FIB NOT STABILIZED")
 
     def _run(self):
         """
@@ -335,7 +333,7 @@ class SavAgent():
             link = self.link_man.get(link_name)
             if len(link["meta"]) > 0:
                 if link["initial_broadcast"] is False:
-                    self._send_init_broadcast_on_link(link_name)
+                    # self._send_init_broadcast_on_link(link_name)
                     link["initial_broadcast"] = True
 
     def add_app(self, app):
@@ -373,11 +371,10 @@ class SavAgent():
         # end of filter
         # get local prefix by gateway is 0.0.0.0
         prefixes = get_kv_match(prefixes, "Gateway", "0.0.0.0")
-        local_prefixes = list(map(lambda x: netaddr.IPNetwork(
-            x["Destination"]+"/"+x["Genmask"]), prefixes))
+        prefixes = list(set(map(lambda x:x["Destination"]+"/"+x["Genmask"],prefixes))) # may have replicas, they have different metrics
+        local_prefixes = list(map(netaddr.IPNetwork,prefixes))
         local_prefixes_for_upsert = json.dumps(list(map(str, local_prefixes)))
         self.sib_man.upsert("local_prefixes", local_prefixes_for_upsert)
-        # self.logger.debug(local_prefixes)
         return local_prefixes
 
     def get_fib(self):
@@ -481,7 +478,7 @@ class SavAgent():
         if not self.link_man.exist(msg["protocol_name"]):
             # self.logger.debug(msg)
             data_dict = get_new_link_dict(msg["protocol_name"])
-            self.logger.debug(msg)
+            # self.logger.debug(msg)
             data_dict["meta"] = msg
             # self.logger.debug(msg["protocol_name"])
             self.link_man.add(msg["protocol_name"],
@@ -515,7 +512,6 @@ class SavAgent():
         elif log_type == "relay_terminate":
             self.logger.info(
                 f"RELAY TERMINATED MSG ON INTRA-LINK: {link_name}, msg:{msg1}")
-
     def _process_sav_intra(self, msg, link_meta):
         """
         doing nothing but logging
@@ -547,7 +543,6 @@ class SavAgent():
             if not row in this_fib:
                 if "192" in row["Destination"]:
                     dels.append(row)
-
         if len(adds + dels) > 0:
             self.data[sub_type] = this_fib
             self.data[f"{sub_type}_read_time"] = time.time()
@@ -558,10 +553,18 @@ class SavAgent():
         process  bgp update message
         """
         # self.logger.debug(f"{msg}")
-        if 'rpdp' in msg["msg"]["channels"]:
-            self.rpdp_app.recv_http_msg(msg)
-        else:
+        msg["msg"]["is_native_bgp"] = not (len(msg["msg"]["sav_nlri"]) > 0)
+        if msg["msg"]["is_native_bgp"]:
+            # self.logger.debug(f"got BGP packet ({self.rec_count}) at {time.time()}")
             self._process_native_bgp_update(msg)
+        else:
+            # self.logger.debug(f"got RPDP packet ({self.rec_count}) at {time.time()}")
+            self.rpdp_app.recv_http_msg(msg)
+            
+        # self.logger.debug(f"finished PROCESSING ({self.rec_count}) at {time.time()}")
+        self.rec_count +=1
+        if self.rec_count==10000:
+            self.rec_count = 1
 
     def _process_grpc_msg(self, msg):
         self.rpdp_app.process_grpc_msg(msg)

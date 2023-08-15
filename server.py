@@ -129,6 +129,7 @@ def refresh_proto(active_app):
     return {"code": "0000", "message": f"{info}"}
 
 
+
 @app.route('/update_config/', methods=["POST"])
 def update_config():
     msg = "updated"
@@ -153,3 +154,4 @@ def update_config():
 
 if __name__ == '__main__':
     app.run(host="0.0.0.0", port=8888)
+# python3 sav-agent/test_sender.py

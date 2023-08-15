@@ -96,7 +96,7 @@ def router_acl_refresh(active_app, logger):
 
 
 def iptable_static_refresh(active_app, logger, rules):
-    interface_set = get_host_interface_list()
+    interface_set = set(get_host_interface_list())
     # using white list mode for EFP-uRPF
     if active_app in ["EFP-uRPF-Algorithm-A_app", "EFP-uRPF-Algorithm-B_app"]:
         for r in rules:
@@ -176,8 +176,9 @@ def iptables_refresh(active_app, logger, limit_rate=None):
     if len(rules) == 0:
         return f"there is no {active_app} sav rules, so don't need to refresh iptables"
     for r in rules:
-        logger.debug(f" 'direction':{r.direction}, 'id':{r.id}, 'interface':{r.interface}, 'metadata':{r.metadata}, \
-            'neighbor_as':{r.neighbor_as}, 'prefix':{r.prefix}, 'source':{r.source}, 'local_role:{r.local_role}")
+        # logger.debug(f" 'direction':{r.direction}, 'id':{r.id}, 'interface':{r.interface}, 'metadata':{r.metadata}, \
+            # 'neighbor_as':{r.neighbor_as}, 'prefix':{r.prefix}, 'source':{r.source}, 'local_role:{r.local_role}")
+        pass
     # flush existing rules
     flush_chain_status = subprocess.call(['iptables', '-F', KEY_WORD])
     if flush_chain_status != 0:
@@ -272,7 +273,6 @@ class IPTableManager():
             log_msg = f"SAV RULE ADDED: {data}"
             self.logger.warn(log_msg)
         session.close()
-        # self.logger.debug(src_apps)
         # self.logger.debug(self.active_app)
         # if not (self.active_app in src_apps):
         # return
