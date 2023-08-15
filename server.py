@@ -27,8 +27,7 @@ app_config = {
 }
 app.config.from_object(app_config)
 # ensure the instance folder exists
-sa = SavAgent(
-    logger=LOGGER, path_to_config=r"/root/savop/SavAgent_config.json")
+sa = SavAgent(logger=LOGGER, path_to_config=r"/root/savop/SavAgent_config.json")
 # flask is used as a tunnel between reference_router and agent
 
 class GrpcServer(agent_msg_pb2_grpc.AgentLinkServicer):
@@ -47,7 +46,7 @@ class GrpcServer(agent_msg_pb2_grpc.AgentLinkServicer):
             msg_dict = {"msg":json.loads(msg_str)}
             req_dst_ip = msg_dict['msg']['dst_ip']
             msg_dict["source_app"] = sa.rpdp_app.name
-            msg_dict["source_link"] =f"grpc_link_{self.agent.config['grpc_config']['id']}_{req.sender_id}"
+            msg_dict["source_link"] = f"grpc_link_{self.agent.config['grpc_config']['id']}_{req.sender_id}"
             msg_dict["msg_type"] = "grpc_msg"
             self.agent.put_msg(msg_dict)
             # self.agent.grpc_recv(msg_dict, req.sender_id)
@@ -55,8 +54,7 @@ class GrpcServer(agent_msg_pb2_grpc.AgentLinkServicer):
             self.logger.debug(msg_str)
             self.logger.error(f"grpc msg adding error: {err}")
 
-        response = agent_msg_pb2.AgentMsg(sender_id=my_id,
-                                          json_str=reply)
+        response = agent_msg_pb2.AgentMsg(sender_id=my_id, json_str=reply)
         return response
 
 
