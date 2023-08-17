@@ -106,14 +106,13 @@ class EfpUrpfApp(SavApp):
         # self.logger.debug(f"EFP-A old_rules:{old_rules}")
         for protocol_name in self.protocols:
             # self.logger.debug(msg=f"protocol_name:{protocol_name}")
-            link_data = self.agent.link_man.get(protocol_name)
-            if link_data is None:
+            link_data = self.agent.link_man.get_by_kv("protocol_name", protocol_name)
+            if len(link_data) !=1:
                 self.logger.warning(f"get link data error for link:{protocol_name}")
                 self.logger.warning(f"self.agent.link_man:{self.agent.link_man}")
                 self.logger.warning(f"self.agent:{self.agent}")
                 continue
-            meta = link_data["meta"]
-            
+            meta = self.agent.link_man.data[link_data[0]]
             all_int_in[protocol_name] = {"meta": meta}
             all_int_in[protocol_name]["adj-in"] = self._parse_import_table(protocol_name)
             # self.logger.debug(msg=f"all_int_in:{all_int_in[protocol_name]['adj-in']}")
@@ -131,6 +130,7 @@ class EfpUrpfApp(SavApp):
                 all_int_in[protocol_name]["adj-in"] = temp
         # self.logger.debug(f"EFP-A all_int_in:{all_int_in}")
         for protocol_name, data in all_int_in.items():
+            # self.logger.debug(data)
             if data["meta"]["remote_role"] == "customer":
                 if self.aspa:
                     # self.logger.debug(data)
@@ -182,8 +182,12 @@ class EfpUrpfApp(SavApp):
         all_int_in = []
         for protocol_name in self.protocols:
             # self.logger.debug(msg=f"protocol_name:{protocol_name}")
-            meta = self.agent.link_man.get(protocol_name)["meta"]
-            data = {"meta": meta}
+            link_name = self.agent.link_man.get_by_kv("protocol_name", protocol_name)
+            if len(link_name)!=1:
+                self.logger.error(f"get link data error for link:{protocol_name}")
+                raise ValueError(f"get link data error for link:{protocol_name}")
+            link_name = link_name[0]
+            data = {"meta": self.agent.link_man.data[link_name]}
             data["adj-in"] = self._parse_import_table(protocol_name)
             all_int_in.append(data)
 

@@ -43,7 +43,8 @@ class BarApp(SavApp):
         all_protos = [i['Name'] for i in data]
         result = set()
         for proto_name in all_protos:
-            meta = self.agent.link_man.get(proto_name)["meta"]
+            self.logger.debug(proto_name)
+            meta = self.agent.link_man.data.get(proto_name)
             if meta["remote_role"] in ["customer","peer"]:
                 result.add(meta["remote_as"])
         return result
@@ -55,7 +56,6 @@ class BarApp(SavApp):
         return self.procedure_x()
     def cal_cc_using_aspa(self):
         local_as = self.agent.config["local_as"]
-        
         aspa = self.aspa_cache
         result = [local_as]
         added = True
@@ -83,11 +83,11 @@ class BarApp(SavApp):
         direct = {}
         # A:
         for link_name,link_data in links_data.items():
-            # link_meta = link_data["meta"]
+            # link_meta = link_data
             # self.logger.debug(list(link_data.keys()))
             if "bgp" in link_data["link_type"]:
-                if link_data["meta"]["local_role"] in["peer","provider"]:
-                    direct[link_data["meta"]["interface_name"]] =link_data["meta"]["remote_as"]
+                if link_data["local_role"] in["peer","provider"]:
+                    direct[link_data["interface_name"]] =link_data["remote_as"]
             else:
                 # self.logger.debug(link_data)
                 pass

@@ -17,41 +17,54 @@ KEY_WORD = "SAVAGENT"
 DATA_PATH = "/root/sav-agent/data"
 
 
-def iptables_command_execute(sender, prefix, neighbor_as, interface, **extra):
-    add_rule_status = subprocess.call(
-        ['iptables', '-A', KEY_WORD, '-i', interface, '-s', prefix, '-j', 'DROP'])
-
-
 def command_executor(command):
     return subprocess.run(command, shell=True, capture_output=True, encoding='utf-8')
 
 
 def huawei_acl_generator(acl_sav_rule):
-    status = command_executor(command=f'cat /dev/null > {DATA_PATH}/huawei_acl_rule.txt')
-    status = command_executor(command=f'echo "system-view" >> {DATA_PATH}/huawei_acl_rule.txt')
+    status = command_executor(
+        command=f'cat /dev/null > {DATA_PATH}/huawei_acl_rule.txt')
+    status = command_executor(
+        command=f'echo "system-view" >> {DATA_PATH}/huawei_acl_rule.txt')
     for iface, prefix_set in acl_sav_rule.items():
-        status = command_executor(command=f'echo "acl name sav_{iface}" >> {DATA_PATH}/huawei_acl_rule.txt')
+        status = command_executor(
+            command=f'echo "acl name sav_{iface}" >> {DATA_PATH}/huawei_acl_rule.txt')
         for prefix in prefix_set:
-            status = command_executor(command=f'echo "rule deny {prefix} 0.0.0.255" >> {DATA_PATH}/huawei_acl_rule.txt')
-        status = command_executor(command=f'echo "quit" >> {DATA_PATH}/huawei_acl_rule.txt')
-        status = command_executor(command=f'echo "interface Ethernet {iface}" >> {DATA_PATH}/huawei_acl_rule.txt')
-        status = command_executor(command=f'echo acl sav_{iface} inbound >> {DATA_PATH}/huawei_acl_rule.txt')
-        status = command_executor(command=f'echo "quit" >> {DATA_PATH}/huawei_acl_rule.txt')
-    status = command_executor(command=f'echo "save" >> {DATA_PATH}/huawei_acl_rule.txt')
+            status = command_executor(
+                command=f'echo "rule deny {prefix} 0.0.0.255" >> {DATA_PATH}/huawei_acl_rule.txt')
+        status = command_executor(
+            command=f'echo "quit" >> {DATA_PATH}/huawei_acl_rule.txt')
+        status = command_executor(
+            command=f'echo "interface Ethernet {iface}" >> {DATA_PATH}/huawei_acl_rule.txt')
+        status = command_executor(
+            command=f'echo acl sav_{iface} inbound >> {DATA_PATH}/huawei_acl_rule.txt')
+        status = command_executor(
+            command=f'echo "quit" >> {DATA_PATH}/huawei_acl_rule.txt')
+    status = command_executor(
+        command=f'echo "save" >> {DATA_PATH}/huawei_acl_rule.txt')
 
 
 def h3c_acl_generator(acl_sav_rule):
-    status = command_executor(command=f'cat /dev/null > {DATA_PATH}/h3c_acl_rule.txt')
-    status = command_executor(command=f'echo "system-view" >> {DATA_PATH}/h3c_acl_rule.txt')
+    status = command_executor(
+        command=f'cat /dev/null > {DATA_PATH}/h3c_acl_rule.txt')
+    status = command_executor(
+        command=f'echo "system-view" >> {DATA_PATH}/h3c_acl_rule.txt')
     for iface, prefix_set in acl_sav_rule.items():
-        status = command_executor(command=f'echo "acl name sav_{iface}" >> {DATA_PATH}/h3c_acl_rule.txt')
+        status = command_executor(
+            command=f'echo "acl name sav_{iface}" >> {DATA_PATH}/h3c_acl_rule.txt')
         for prefix in prefix_set:
-            status = command_executor(command=f'echo "rule deny {prefix} 0.0.0.255" >> {DATA_PATH}/h3c_acl_rule.txt')
-        status = command_executor(command=f'echo "quit" >> {DATA_PATH}/h3c_acl_rule.txt')
-        status = command_executor(command=f'echo "interface Ethernet {iface}" >> {DATA_PATH}/h3c_acl_rule.txt')
-        status = command_executor(command=f'echo acl sav_{iface} inbound >> {DATA_PATH}/h3c_acl_rule.txt')
-        status = command_executor(command=f'echo "quit" >> {DATA_PATH}/h3c_acl_rule.txt')
-    status = command_executor(command=f'echo "save" >> {DATA_PATH}/h3c_acl_rule.txt')
+            status = command_executor(
+                command=f'echo "rule deny {prefix} 0.0.0.255" >> {DATA_PATH}/h3c_acl_rule.txt')
+        status = command_executor(
+            command=f'echo "quit" >> {DATA_PATH}/h3c_acl_rule.txt')
+        status = command_executor(
+            command=f'echo "interface Ethernet {iface}" >> {DATA_PATH}/h3c_acl_rule.txt')
+        status = command_executor(
+            command=f'echo acl sav_{iface} inbound >> {DATA_PATH}/h3c_acl_rule.txt')
+        status = command_executor(
+            command=f'echo "quit" >> {DATA_PATH}/h3c_acl_rule.txt')
+    status = command_executor(
+        command=f'echo "save" >> {DATA_PATH}/h3c_acl_rule.txt')
 
 
 def router_acl_refresh(active_app, logger):
@@ -177,7 +190,7 @@ def iptables_refresh(active_app, logger, limit_rate=None):
         return f"there is no {active_app} sav rules, so don't need to refresh iptables"
     for r in rules:
         # logger.debug(f" 'direction':{r.direction}, 'id':{r.id}, 'interface':{r.interface}, 'metadata':{r.metadata}, \
-            # 'neighbor_as':{r.neighbor_as}, 'prefix':{r.prefix}, 'source':{r.source}, 'local_role:{r.local_role}")
+        # 'neighbor_as':{r.neighbor_as}, 'prefix':{r.prefix}, 'source':{r.source}, 'local_role:{r.local_role}")
         pass
     # flush existing rules
     flush_chain_status = subprocess.call(['iptables', '-F', KEY_WORD])
@@ -219,9 +232,9 @@ class IPTableManager():
             print(init_tc_command)
             init_tc_status = self._command_executor(command=init_tc_command)
 
-
     def _command_executor(self, command):
-        command_result = subprocess.run(command, shell=True, capture_output=True, encoding='utf-8')
+        command_result = subprocess.run(
+            command, shell=True, capture_output=True, encoding='utf-8')
         return command_result.returncode
 
     def _iptables_command_execute(self, command):
@@ -271,7 +284,7 @@ class IPTableManager():
             session.add(sib_row)
             session.commit()
             log_msg = f"SAV RULE ADDED: {data}"
-            self.logger.warn(log_msg)
+            self.logger.info(log_msg)
         session.close()
         # self.logger.debug(self.active_app)
         # if not (self.active_app in src_apps):
@@ -416,47 +429,48 @@ class LinkManager(InfoManager):
     """
     LinkManager manage the link status and preprocessing the msg from the link
     link_name is key MUST not be same
+    the link_name should be link_type_src_ip_dst_ip
     """
     # TODO: we have three types of link: native bgp, modified bgp and grpc
 
     def __init__(self, data, logger=None):
         super(LinkManager, self).__init__(data, logger)
 
-    def add(self, link_name, link_dict, link_type):
-        if "rpki" in link_name:
-            return
-        # self.logger.debug(f"adding {link_name},{link_dict}")
+    def add(self, meta_dict):
+        self._is_good_meta(meta_dict)
+        # self.logger.debug(f"adding {meta_dict}")
+        link_type = meta_dict["link_type"]
+        link_name = self._get_link_name(meta_dict)
+        # self.logger.debug(f"adding {link_name}")
         if link_name in self.data:
             self.logger.warning(f"key {link_name} already exists")
             return
-        if not link_type in ["native_bgp", "modified_bgp", "grpc"]:
+        if not link_type in ["native_bgp", "modified_bgp",]:
             self.logger.error(f'unknown link_type: {link_type}')
             return
-        link_dict_keys = [("meta", dict)]
-        keys_types_check(link_dict, link_dict_keys)
-        self._is_good_meta(link_dict["meta"])
-        link_dict["link_type"] = link_type
-        self.data[link_name] = link_dict
-        self.logger.debug(f"link added: {link_dict['meta']['protocol_name']} ")
+        self.data[link_name] = meta_dict
         self.logger.debug(f"link added: {link_name} ")
 
-    def add_meta(self, link_name, meta):
-        old_meta = self.data[link_name]["meta"]
-        if len(old_meta) != 0:
-            if list(old_meta.keys()) != list(meta.keys()):
-                self.logger.warning(
-                    "meta conflict !\n old meta: {old_meta}\n new met: {meta}")
-                return
-            if old_meta != meta:
-                self.logger.warning(
-                    "meta conflict !\n old meta: {old_meta}\n new met: {meta}")
-                return
-            return
-        if link_name in self.data:
-            self.data[link_name]["meta"] = meta
-        # self.db.upsert("link", json.dumps(self.data))
+    def _get_link_name(self, meta_dict):
+        return f"{meta_dict['link_type']}_{meta_dict['local_ip']}_{meta_dict['remote_ip']}"
+        # return meta_dict["protocol_name"]
 
-    def get(self, link_name):
+
+    def update_link(self, meta_dict):
+        self._is_good_meta(meta_dict)
+        link_name = self._get_link_name(meta_dict)
+        old_meta = self.data[link_name]
+        if old_meta["status"] == meta_dict["status"]:
+            return 
+        self.data[link_name] = meta_dict
+        self.logger.debug(f"link updated: {self.data[link_name]} ")
+
+    def get_by_name_type(self, link_name,link_type=None):
+        if link_type == 'grpc':
+            self.logger.debug(link_name)
+        elif link_type == "quic":
+            self.logger.debug(link_name)
+        self.logger.debug(link_name)
         if link_name not in self.data:
             self.logger.debug(f"all link names:{self.data.keys()}")
             raise KeyError(f"link {link_name} not found")
@@ -470,18 +484,27 @@ class LinkManager(InfoManager):
             raise ValueError(f"{remote_as} is not a valid asn")
         for key in self.data:
             link = self.data[key]
-            if (link["meta"]["remote_as"] == remote_as) and (
-                    link["meta"]["is_interior"] == is_interior):
+            if (link["remote_as"] == remote_as) and (
+                    link["is_interior"] == is_interior):
                 result.append(link)
         return result
-
+    def get_by_kv(self, k,v):
+        """return a list of link_names that matches the key and value
+        """
+        result = []
+        for link_name,meta in self.data.items():
+            if not k in meta:
+                raise ValueError(f"{k} is not a valid key")
+            if meta[k] == v:
+                result.append(link_name)
+        return result
     def get_all_up(self, include_native_bgp=False):
         """
         return a list of all up link_names ,use get(link_name) to get link object
         """
         temp = []
-        for link_name in self.data:
-            link = self.data[link_name]
+        for link_name,link in self.data.items():
+            # self.logger.debug(link)
             if link["status"]:
                 if link["link_type"] == "native_bgp":
                     if include_native_bgp:
@@ -497,30 +520,11 @@ class LinkManager(InfoManager):
         """
         result = []
         for link_name in self.get_all_up(include_native_bgp):
-            if self.data[link_name]["meta"]["is_interior"] == is_interior:
+            if self.data[link_name]["is_interior"] == is_interior:
                 result.append(link_name)
         return result
-    def get_all_up_by_link_types(self, link_types):
-        """
-        return a list of all up link_objects with the correct link_type (e.g. [grpc]),
-        """
-        result = []
-        for link_name in self.get_all_up():
-            if self.data[link_name]["link_type"] in link_types:
-                result.append(self.data[link_name])
-        return result
-    def get_all_grpc(self):
-        """
-        return a list of all grpc link_names
-        """
-        result = []
-        for link_name in self.data:
-            link = self.data[link_name]
-            if link["link_type"] == "grpc":
-                result.append(link_name)
-        return result
-    
-    def get_bgp_by_interface(self,interface_name):
+
+    def get_bgp_by_interface(self, interface_name):
         """
         return a list of bgp(modified or native) link_dict that has the same interface_name
         """
@@ -528,45 +532,44 @@ class LinkManager(InfoManager):
         for link_name in self.data:
             link = self.data[link_name]
             if link["link_type"] in ["native_bgp", "modified_bgp"]:
-                if link["meta"]["interface_name"] == interface_name:
+                if link["interface_name"] == interface_name:
                     result.append(link)
         return result
+
     def exist(self, link_name):
         return link_name in self.data
-    def _is_good_meta(self,meta):
-        key_types = [("remote_as", int),("remote_ip", str),
-                     ("local_role", str),("local_ip", str),
-                     ("interface_name", str),("link_type", str),
-                     ("protocol_name", str),("as4_session", bool),
-                     ("remote_id", str),("is_interior", bool)]
-        keys_types_check(meta,key_types)
-        if not meta["link_type"] in ["native_bgp", "modified_bgp", "grpc"]:
+
+    def _is_good_meta(self, meta):
+        key_types = [("remote_as", int), ("local_as", int),
+                     ("remote_ip", str), ("local_ip", str),
+                     ("local_role", str), ("remote_role", str),
+                     ("interface_name", str), ("link_type", str),
+                     ("protocol_name", str), ("as4_session",bool),
+                     ("is_interior", bool), ("status", bool),
+                     ("initial_broadcast", bool)]
+        keys_types_check(meta, key_types)
+        if not meta["link_type"] in ["native_bgp", "modified_bgp"]:
             raise ValueError(f'unknown link_type: {meta["link_type"]}')
         return True
 
-def get_new_link_dict(app_name):
-    """
-    generate a new link dict for adding
-    """
 
-    link_dict = {"status": False, "initial_broadcast": False,
-                 "app": app_name, "meta": get_new_link_meta()}
-    return link_dict
-
-
-def get_new_link_meta():
+def get_new_link_meta(app_name, link_type, initial_status=False):
     """
     generate a new link meta dict for adding,dummy data provided, remember to change it
     """
     meta = {"remote_as": 0,
             "remote_ip": "",
             "local_role": "",
+            "remote_role":"",
             "local_ip": "",
+            "local_as":0,
             "interface_name": "",
             "protocol_name": "",
             "as4_session": True,
-            "remote_id": "10.0.1.2",
             "is_interior": True,
-            "link_type": "native_bgp"
+            "link_type": link_type,
+            "status": initial_status,
+            "initial_broadcast": False,
+            "app": app_name
             }
     return meta

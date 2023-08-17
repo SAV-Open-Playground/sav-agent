@@ -27,8 +27,10 @@ app_config = {
 }
 app.config.from_object(app_config)
 # ensure the instance folder exists
-sa = SavAgent(logger=LOGGER, path_to_config=r"/root/savop/SavAgent_config.json")
+sa = SavAgent(
+    logger=LOGGER, path_to_config=r"/root/savop/SavAgent_config.json")
 # flask is used as a tunnel between reference_router and agent
+
 
 class GrpcServer(agent_msg_pb2_grpc.AgentLinkServicer):
     def __init__(self, agent, logger):
@@ -43,7 +45,7 @@ class GrpcServer(agent_msg_pb2_grpc.AgentLinkServicer):
         my_id = self.agent.config["grpc_config"]["id"]
         reply = f"got {msg_str}"
         try:
-            msg_dict = {"msg":json.loads(msg_str)}
+            msg_dict = {"msg": json.loads(msg_str)}
             req_dst_ip = msg_dict['msg']['dst_ip']
             msg_dict["source_app"] = sa.rpdp_app.name
             msg_dict["source_link"] = f"grpc_link_{self.agent.config['grpc_config']['id']}_{req.sender_id}"
@@ -89,14 +91,14 @@ def index():
             cmd = sa.rpdp_app.get_prepared_cmd()
             return {"code": "2000", "data": cmd, "message": "success"}
         msg["source_app"] = sa.rpdp_app.name
-        if m_t =="link_state_change":
+        if m_t == "link_state_change":
             msg["source_link"] = msg["protocol_name"]
         else:
             msg["source_link"] = msg["msg"]["protocol_name"]
-            if not m_t =="link_state_change":
-                link_type = "native_bgp"
+            if not m_t == "link_state_change":
+                msg['link_type'] = "native_bgp"
                 if "rpdp" in msg["msg"]["channels"]:
-                    link_type = "modified_bgp"
+                    msg['link_type'] = "modified_bgp"
         sa.put_msg(msg)
         return {"code": "0000", "message": "success"}
     except Exception as err:
@@ -129,7 +131,6 @@ def refresh_proto(active_app):
     return {"code": "0000", "message": f"{info}"}
 
 
-
 @app.route('/update_config/', methods=["POST"])
 def update_config():
     msg = "updated"
@@ -141,7 +142,7 @@ def update_config():
             grpc_server.stop(0)
             grpc_server = grpc.server(futures.ThreadPoolExecutor())
             agent_msg_pb2_grpc.add_AgentLinkServicer_to_server(
-            GrpcServer(sa, LOGGER), grpc_server)
+                GrpcServer(sa, LOGGER), grpc_server)
             addr = sa.config["grpc_config"]["server_addr"]
             grpc_server.add_insecure_port(addr)
             grpc_server.start()

@@ -204,7 +204,7 @@ def ln(list_of_interface):
     """
     result = []
     for i in list_of_interface:
-        result.append(i["meta"]["protocol_name"])
+        result.append(i["protocol_name"])
     return result
 
 def get_kv_match(list_of_dict, key, value):
@@ -580,7 +580,7 @@ def aspa_check(meta, aspa_info):
     """
     # TODO: ipv6
     adj_provider_as = f"AS{meta['meta']['local_as']}(v4)"
-    adj_customer_as = meta["meta"]["remote_as"]
+    adj_customer_as = meta["remote_as"]
     for data in aspa_info:
         if data["customer"] == adj_customer_as:
             return adj_provider_as in data["providers"]
