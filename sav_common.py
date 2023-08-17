@@ -21,18 +21,23 @@ import subprocess
 
 from sav_data_structure import *
 
+
 class RPDPPeer():
-    def __init__(self,asn,port,ip,is_as4) -> None:
+    def __init__(self, asn, port, ip, is_as4) -> None:
         self.asn = asn
         self.port = port
         self.ip = ip
         self.is_as4 = is_as4
+
     def __str__(self) -> str:
         return f"{self.asn},{self.ip}:{self.ip}"
+
+
 ASN_TYPE = int
 IP_ADDR_TYPE = netaddr.IPAddress
 PREFIX_TYPE = netaddr.IPNetwork
 RPDP_PEER_TYPE = RPDPPeer
+
 
 def parse_bird_table(table, logger=None):
     """
@@ -85,7 +90,7 @@ def parse_bird_table(table, logger=None):
                 temp = {}
         parsed_rows[prefix].append(temp)
         # parsed_rows[prefix].sort()
-        if len(parsed_rows[prefix])==1 and len(parsed_rows[prefix][0])==0:
+        if len(parsed_rows[prefix]) == 1 and len(parsed_rows[prefix][0]) == 0:
             del parsed_rows[prefix]
     return table_name, parsed_rows
 
@@ -125,10 +130,12 @@ def sav_rule_tuple(prefix, interface_name, rule_source, as_number=-1):
         prefix = str(prefix)
     return (prefix, interface_name, rule_source, as_number)
 
-def run_cmd(command,shell=True, capture_output=True, encoding='utf-8'):
+
+def run_cmd(command, shell=True, capture_output=True, encoding='utf-8'):
     return subprocess.run(command, shell=shell, capture_output=capture_output, encoding=encoding)
 
-def keys_types_check(d,key_types):
+
+def keys_types_check(d, key_types):
     """
     raise KeyError if key is missing
     raise TypeError if key is not the right type
@@ -136,8 +143,9 @@ def keys_types_check(d,key_types):
     for k, t in key_types:
         if not k in d:
             raise KeyError(f"{k} missing in {d}")
-        if not isinstance(d[k],t):
+        if not isinstance(d[k], t):
             raise TypeError(f"{k} should be {t} but {type(d[k])} found")
+
 
 def get_host_interface_list():
     """
@@ -149,6 +157,7 @@ def get_host_interface_list():
     result = std_out.split("\n")[:-1]
     result = list(map(lambda x: x.split('@')[0], result))
     return [i for i in result if len(i) != 0]
+
 
 def get_logger(file_name):
     """
@@ -164,7 +173,8 @@ def get_logger(file_name):
         __file__))+f"/../logs/{file_name}.log", maxBytes=maxsize, backupCount=backup_num)
     handler.setLevel(level)
 
-    formatter = logging.Formatter("[%(asctime)s]  [%(filename)s:%(lineno)s-%(funcName)s] [%(levelname)s] %(message)s")
+    formatter = logging.Formatter(
+        "[%(asctime)s]  [%(filename)s:%(lineno)s-%(funcName)s] [%(levelname)s] %(message)s")
     formatter.converter = time.gmtime
     handler.setFormatter(formatter)
 
@@ -206,6 +216,7 @@ def ln(list_of_interface):
     for i in list_of_interface:
         result.append(i["protocol_name"])
     return result
+
 
 def get_kv_match(list_of_dict, key, value):
     result = []
@@ -249,9 +260,6 @@ def save_json(path_to_json, json_obj):
         json_file.write(json.dumps(json_obj, indent=4))
 
 
-
-
-
 class SavApp():
     """
     SavApp class helps receive and send massage using links
@@ -284,7 +292,7 @@ class SavApp():
     def fib_changed(self):
         raise NotImplementedError
 
-    def put_link_up(self, link_name,link_type):
+    def put_link_up(self, link_name, link_type):
         # this msg may incur creating of new link, so we need to know the type
         msg = {
             "msg_type": "link_state_change",
@@ -294,7 +302,8 @@ class SavApp():
             "msg": True,
         }
         self.agent.put_msg(msg)
-    def set_link_type(self,link_name, link_type):
+
+    def set_link_type(self, link_name, link_type):
         # this msg may incur creating of new link, so we need to know the type
         msg = {
             "msg_type": "set_link_type",
@@ -312,80 +321,92 @@ class SavApp():
             "msg": False
         }
         self.agent.put_msg(msg)
+
     def _bird_cmd(self, cmd):
-        return birdc_cmd(self.logger,cmd)
-    def _parse_roa_table(self,t_name = 'r4'):
-        return get_roa(self.logger,t_name)
+        return birdc_cmd(self.logger, cmd)
+
+    def _parse_roa_table(self, t_name='r4'):
+        return get_roa(self.logger, t_name)
+
+
 def birdc_cmd(logger, cmd):
-        """
-        execute bird command and return the output in std
-        """
-        proc = subprocess.Popen(
-            ["/usr/local/sbin/birdc "+cmd],
-            shell=True,
-            stdout=subprocess.PIPE,
-            stdin=subprocess.PIPE,
-            stderr=subprocess.PIPE)
-        proc.stdin.write("\n".encode("utf-8"))
-        proc.stdin.flush()
-        proc.wait()
-        out = proc.stdout.read().decode()
-        temp = out.split("\n")[0]
-        temp = temp.split()
-        if len(temp) < 2:
-            return None
-        if not (temp[0] == "BIRD" and temp[-1] == "ready."):
-            logger.error(f"birdc execute error:{out}")
-            return None
-        out = "\n".join(out.split("\n")[1:])
-        return out
+    """
+    execute bird command and return the output in std
+    """
+    proc = subprocess.Popen(
+        ["/usr/local/sbin/birdc "+cmd],
+        shell=True,
+        stdout=subprocess.PIPE,
+        stdin=subprocess.PIPE,
+        stderr=subprocess.PIPE)
+    proc.stdin.write("\n".encode("utf-8"))
+    proc.stdin.flush()
+    proc.wait()
+    out = proc.stdout.read().decode()
+    temp = out.split("\n")[0]
+    temp = temp.split()
+    if len(temp) < 2:
+        return None
+    if not (temp[0] == "BIRD" and temp[-1] == "ready."):
+        logger.error(f"birdc execute error:{out}")
+        return None
+    out = "\n".join(out.split("\n")[1:])
+    return out
+
+
 def birdc_show_protocols(logger):
     """
     execute show protocols 
     """
-    data = birdc_cmd(logger,cmd="show protocols")
+    data = birdc_cmd(logger, cmd="show protocols")
     if data is None:
         return {}
     data = data.split("\n")
     while "" in data:
         data.remove("")
     return data
-def birdc_get_protos_by(logger,key,value):
+
+
+def birdc_get_protos_by(logger, key, value):
     data = birdc_show_protocols(logger)
     title = data.pop(0).split()
     result = []
     for row in data:
         temp = row.split()
         a = {}
-        for i in range(min(len(title),len(temp))):
-            a[title[i]]=temp[i]
+        for i in range(min(len(title), len(temp))):
+            a[title[i]] = temp[i]
         if not key in a:
             logger.error(f"key {key} missing in:{list(a.keys())}")
             return result
-        if a[key]==value:
+        if a[key] == value:
             result.append(a)
     return result
+
+
 def birdc_get_import(logger, protocol_name, channel_name="ipv4"):
-        """
-        using birdc show all import to get bird fib
-        return a list
-        """
-        cmd = f"show route all import table {protocol_name}.{channel_name}"
-        data = birdc_cmd(logger,cmd)
-        if data.startswith("No import table in channel"):
-            logger.warning(data[:-1])
-            return {"import": {}}
-        if data is None:
-            return {"import": {}}
-        data = data.split("Table")
-        while "" in data:
-            data.remove("")
-        for table in data:
-            table_name, table_data = parse_bird_table(table, logger)
-            if table_name =="import":
-                return table_data
-        return []
-def get_roa(logger,t_name= 'r4'):
+    """
+    using birdc show all import to get bird fib
+    return a list
+    """
+    cmd = f"show route all import table {protocol_name}.{channel_name}"
+    data = birdc_cmd(logger, cmd)
+    if data.startswith("No import table in channel"):
+        logger.warning(data[:-1])
+        return {"import": {}}
+    if data is None:
+        return {"import": {}}
+    data = data.split("Table")
+    while "" in data:
+        data.remove("")
+    for table in data:
+        table_name, table_data = parse_bird_table(table, logger)
+        if table_name == "import":
+            return table_data
+    return []
+
+
+def get_roa(logger, t_name='r4'):
     """
     get ROA info from bird table
     """
@@ -394,7 +415,7 @@ def get_roa(logger,t_name= 'r4'):
     # detect if roa table have rows and stale
     last_len = -1
     for _ in range(30):
-        data = birdc_cmd(logger,cmd)
+        data = birdc_cmd(logger, cmd)
         if data is None:
             logger.warning('empty roa')
             return {}
@@ -423,7 +444,9 @@ def get_roa(logger,t_name= 'r4'):
             result[as_number].append(netaddr.IPNetwork(prefix))
             # result[as_number].append(prefix)
     return result
-def get_p_by_asn(asn,roa,aspa):
+
+
+def get_p_by_asn(asn, roa, aspa):
     """
     return a a dict(key is prefix,value is origin as) of unique prefix that could be used as src in packet from this as using aspa an roa info
     customer and peer is considered
@@ -435,16 +458,18 @@ def get_p_by_asn(asn,roa,aspa):
     ass = [asn]
     while added:
         added = False
-        for customer_asn,providers in aspa.items(): 
-            if element_exist_check(ass,providers):
+        for customer_asn, providers in aspa.items():
+            if element_exist_check(ass, providers):
                 if not customer_asn in ass:
                     ass.append(customer_asn)
                     for p in roa[customer_asn]:
                         if not p in result:
-                            result[p]=customer_asn
+                            result[p] = customer_asn
                     added = True
-    return result                    
-def element_exist_check(a,b):
+    return result
+
+
+def element_exist_check(a, b):
     """
     return True if any element in a exists in b
     """
@@ -490,7 +515,8 @@ def get_agent_app_msg(link_meta, msg_meta, logger):
         if not tell_str_is_interior(path):
             raise ValueError(
                 "interior msg should have interior scope")
-            
+
+
 def prefixes_to_hex_str(prefix_list, ip_type="ipv4"):
     """
         constructs NLRI prefix list
@@ -507,6 +533,8 @@ def prefixes_to_hex_str(prefix_list, ip_type="ipv4"):
         return ",".join(items)
     else:
         raise NotImplementedError
+
+
 def hex_str_to_prefixes(input_bytes, t="ipv4"):
     """
     reverse of prefixes_to_hex_str
@@ -528,7 +556,8 @@ def hex_str_to_prefixes(input_bytes, t="ipv4"):
         return result
     else:
         raise NotImplementedError
-    
+
+
 def str_to_scope(input_str):
     temp = decode_csv(input_str)
     result = []
@@ -541,11 +570,14 @@ def str_to_scope(input_str):
                 path.append(temp.pop(0))
             result.append(path)
     return result
+
+
 def remove_local(list_of_fib):
     """
     remove local prefixes
     """
     return [i for i in list_of_fib if not '0.0.0.0' in i['Gateway']]
+
 
 def get_aspa(logger, hostname="savopkrill.com", port_number=3000, pwd="krill"):
     while True:
@@ -558,13 +590,13 @@ def get_aspa(logger, hostname="savopkrill.com", port_number=3000, pwd="krill"):
             response.raise_for_status()  # Raises an exception for any HTTP error status codes
             # Return the response as a dictionary
             temp = response.json()
-            #TODO ipv6
+            # TODO ipv6
             result = {}
             for row in temp:
                 temp2 = []
                 for s in row["providers"]:
-                    s = s.replace("AS","")
-                    s = s.replace("(v4)","")
+                    s = s.replace("AS", "")
+                    s = s.replace("(v4)", "")
                     s = int(s)
                     if not s in temp2:
                         temp2.append(s)
@@ -573,6 +605,7 @@ def get_aspa(logger, hostname="savopkrill.com", port_number=3000, pwd="krill"):
         except Exception as err:
             logger.debug(err)
             time.sleep(0.1)
+
 
 def aspa_check(meta, aspa_info):
     """
@@ -602,11 +635,11 @@ def aspa_check(meta, aspa_info):
 #     keys_types_check(msg,key_types)
 #     if not msg["msg_type"] in ['origin','relay']:
 #         raise ValueError(f"mst_type should be ether 'origin' or 'relay'")
-    
+
 #     for path in msg[path_key]:
 #         if not tell_str_is_interior(path):
 #             raise ValueError(f"{path_key} should contain path value")
-    
+
 #     if msg["is_interior"]:
 #         if not tell_str_is_interior(msg[origin_key]):
 #             raise ValueError(

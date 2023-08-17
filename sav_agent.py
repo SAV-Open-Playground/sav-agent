@@ -27,6 +27,7 @@ from app_efp_urpf import EfpUrpfApp
 from app_fp_urpf import FpUrpfApp
 from app_bar import BarApp
 
+
 def add_path(given_asn_path, data_dict):
     for path in data_dict:
         given_len = len(given_asn_path)
@@ -83,7 +84,8 @@ class SavAgent():
         """
         try:
             config = read_json(path_to_config)
-            required_keys = [("apps", list), ("grpc_config", dict), ("location", str)]
+            required_keys = [
+                ("apps", list), ("grpc_config", dict), ("location", str)]
             keys_types_check(config, required_keys)
 
             grpc_config = config["grpc_config"]
@@ -207,9 +209,10 @@ class SavAgent():
         self.data["fib_for_stable_read_time"] = time.time()
         self.data["fib_for_apps"] = []
         self.data["initial_bgp_stable"] = False
-        
+
         self.rec_count = 1
-    def add_sav_nodes(self,nodes):
+
+    def add_sav_nodes(self, nodes):
         data = self.data["sav_graph"]["nodes"]
         added = False
         for node in nodes:
@@ -218,27 +221,29 @@ class SavAgent():
                 self.logger.info(f"SAV GRAPH NODE ADDED :{node}")
                 added = True
         if added:
-            self.sib_man.upsert("sav_graph", json.dumps((self.data["sav_graph"])))
-        
+            self.sib_man.upsert(
+                "sav_graph", json.dumps((self.data["sav_graph"])))
+
     def add_sav_link(self, asn_a, asn_b):
         data_dict = self.data["sav_graph"]
-        asn_a =int(asn_a)
+        asn_a = int(asn_a)
         asn_b = int(asn_b)
-        self.add_sav_nodes([asn_a,asn_b])
+        self.add_sav_nodes([asn_a, asn_b])
         if asn_a == asn_b:
             return
         # add link if not exist
-        key_asn = str(min(asn_a, asn_b))
-        value_asn = asn_a if key_asn == asn_b else asn_b
+        key_asn = min(asn_a, asn_b)
+        value_asn = max(asn_a, asn_b)
         if not key_asn in data_dict["links"]:
             data_dict["links"][key_asn] = [value_asn]
             self.sib_man.upsert("sav_graph", json.dumps((data_dict)))
             self.logger.info(f"SAV GRAPH LINK ADDED :{key_asn}-{value_asn}")
             return
-        elif value_asn not in data_dict["links"][key_asn]:
+        # now key_asn in data_dict["links"]
+        if value_asn not in data_dict["links"][key_asn]:
             data_dict["links"][key_asn].append(value_asn)
-        self.sib_man.upsert("sav_graph", json.dumps((data_dict)))
-        self.logger.info(f"SAV GRAPH LINK ADDED :{key_asn}-{value_asn}")
+            self.sib_man.upsert("sav_graph", json.dumps((data_dict)))
+            self.logger.info(f"SAV GRAPH LINK ADDED :{key_asn}-{value_asn}")
 
     def _init_apps(self):
         # bird and grpc are must
@@ -329,7 +334,7 @@ class SavAgent():
         """
         decide whether to send initial broadcast of each link
         """
-        
+
         all_link_names = self.link_man.get_all_up()
         for link_name in all_link_names:
             # self.logger.debug(f"{link_name}")
@@ -337,7 +342,7 @@ class SavAgent():
             # self.logger.debug(json.dumps(link, indent=2))
             if link["initial_broadcast"] is False:
                 # self.logger.debug(f"going to send to {link_name}")
-                self._send_init_broadcast_on_link(link,link_name)
+                self._send_init_broadcast_on_link(link, link_name)
                 link["initial_broadcast"] = True
         # self.logger.debug(f"finish {all_link_names}")
 
@@ -376,8 +381,10 @@ class SavAgent():
         # end of filter
         # get local prefix by gateway is 0.0.0.0
         prefixes = get_kv_match(prefixes, "Gateway", "0.0.0.0")
-        prefixes = list(set(map(lambda x:x["Destination"]+"/"+x["Genmask"],prefixes))) # may have replicas, they have different metrics
-        local_prefixes = list(map(netaddr.IPNetwork,prefixes))
+        # may have replicas, they have different metrics
+        prefixes = list(
+            set(map(lambda x: x["Destination"]+"/"+x["Genmask"], prefixes)))
+        local_prefixes = list(map(netaddr.IPNetwork, prefixes))
         local_prefixes_for_upsert = json.dumps(list(map(str, local_prefixes)))
         self.sib_man.upsert("local_prefixes", local_prefixes_for_upsert)
         return local_prefixes
@@ -414,7 +421,7 @@ class SavAgent():
         keys_types_check(msg, key_types)
         self.msgs.append(msg)
 
-    def _send_init_broadcast_on_link(self, link,link_name):
+    def _send_init_broadcast_on_link(self, link, link_name):
         if not link["status"]:
             self.logger.error(f"{link_name} is down, not sending")
             return
@@ -428,7 +435,8 @@ class SavAgent():
         if not msg['source_link'].startswith("savbgp"):
             self.logger.debug(f"not savgp link({msg['source_link']}), ignore")
             return
-        link_names = self.link_man.get_by_kv("protocol_name", msg["source_link"])
+        link_names = self.link_man.get_by_kv(
+            "protocol_name", msg["source_link"])
         if len(link_names) > 1:
             raise ValueError(f"link name not found: {link_names}")
         if len(link_names) == 1:
@@ -442,11 +450,14 @@ class SavAgent():
             else:
                 return  # no change
         else:
-            link_dict = get_new_link_meta(msg["source_app"],msg["link_type"],msg["msg"])
+            link_dict = get_new_link_meta(
+                msg["source_app"], msg["link_type"], msg["msg"])
             self.link_man.add(link_dict)
             self.logger.debug(f"{msg['source_link']} added {link_dict}")
         self.sib_man.upsert("link_data", json.dumps(self.link_man.data))
-        self.logger.debug(f"link status changed: {link_name} now is {msg['msg']}")
+        self.logger.debug(
+            f"link status changed: {link_name} now is {msg['msg']}")
+
     def _process_link_config(self, msg):
         """
         in this function, we add the config to corresponding link
@@ -481,12 +492,12 @@ class SavAgent():
         else:
             # self.logger.warning(msg)
             msg["link_type"] = "native_bgp"
-        data_dict = get_new_link_meta("rpdp_app",msg["link_type"])
+        data_dict = get_new_link_meta("rpdp_app", msg["link_type"])
         for key in msg:
             if key in data_dict:
                 data_dict[key] = msg[key]
         # self.logger.debug(json.dumps(msg,indent=2))
-        # self.logger.debug(json.dumps(data_dict,indent=2))     
+        # self.logger.debug(json.dumps(data_dict,indent=2))
         if not self.link_man.exist(msg["protocol_name"]):
             self.link_man.add(data_dict)
         else:
@@ -517,6 +528,7 @@ class SavAgent():
         elif log_type == "relay_terminate":
             self.logger.info(
                 f"RELAY TERMINATED MSG ON INTRA-LINK: {link_name}, msg:{msg1}")
+
     def _process_sav_intra(self, msg, link_meta):
         """
         doing nothing but logging
@@ -565,10 +577,10 @@ class SavAgent():
         else:
             # self.logger.debug(f"got RPDP packet ({self.rec_count}) at {time.time()}")
             self.rpdp_app.recv_http_msg(msg)
-            
+
         # self.logger.debug(f"finished PROCESSING ({self.rec_count}) at {time.time()}")
-        self.rec_count +=1
-        if self.rec_count==10000:
+        self.rec_count += 1
+        if self.rec_count == 10000:
             self.rec_count = 1
 
     def _process_grpc_msg(self, msg):
@@ -644,7 +656,6 @@ class SavAgent():
         for row in del_rules:
             self.logger.debug(f"TODO: deleting rule: {row}")
             pass  # TODO: delete
-        
 
     def _send_origin(self, input_link_name=None, input_paths=None):
         """
@@ -666,7 +677,7 @@ class SavAgent():
                     self.logger.debug("no link is up, not sending")
                     return
             for link_name in link_names:
-                
+
                 link = self.link_man.data.get(link_name)
                 if link["link_type"] != "native_bgp":
                     if link["is_interior"]:
@@ -729,6 +740,7 @@ class SavAgent():
                     # TODO intra origin
         except Exception as e:
             self.logger.error(e)
+
     def _process_msg(self, input_msg):
         # self.logger.debug(f"start processing msg: {input_msg['msg_type']}:{input_msg}")
         msg, m_t = input_msg["msg"], input_msg["msg_type"]
