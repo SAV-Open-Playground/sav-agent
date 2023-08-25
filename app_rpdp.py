@@ -9,6 +9,7 @@
              In this implementation, the SPA and SPD is encoded into standard BGP Update message
 """
 
+import copy
 from multiprocessing import Manager
 import grpc
 import agent_msg_pb2
@@ -417,6 +418,7 @@ class RPDPApp(SavApp):
             link_type = link["link_type"]
             link_name = link["protocol_name"]
             map_data = {}
+
             if link_name in config["link_map"]:
                 link_type = config["link_map"][link_name]["link_type"]
                 map_data = config["link_map"][link_name]["link_data"]
@@ -542,10 +544,18 @@ class RPDPApp(SavApp):
                 f"last message not finished {self.prepared_cmd}")
             time.sleep(0.01)
         # specialized for bird app, we need to convert the msg to byte array
-        msg_byte = self._msg_to_hex_str(msg)
-        # self.logger.debug(f"msg_byte({len(msg_byte)}): {msg_byte}")
-        self.add_prepared_cmd(msg_byte)
-        self._bird_cmd(cmd="call_agent")
+        nlri = copy.deepcopy(msg["sav_nlri"])
+        # split into multi mesgs
+        max_nrli_len = 50
+        self.logger.debug(max_nrli_len)
+        while len(nlri) > max_nrli_len:
+            msg["sav_nlri"] = nlri[:max_nrli_len]
+            nlri = nlri[max_nrli_len:]
+            self.logger.debug(len(nlri))
+            msg_byte = self._msg_to_hex_str(msg)
+            # self.logger.debug(msg_byte)
+            self.add_prepared_cmd(msg_byte)
+            self._bird_cmd(cmd="call_agent")
         self.logger.info(
             f"SENT MSG ON LINK [{msg['protocol_name']}]:{msg}, time_stamp: [{time.time()}]]")
 
@@ -840,9 +850,9 @@ class RPDPApp(SavApp):
         # key_types = [("src", str), ("dst", str),
         #              ("msg_type", str), ("is_interior", bool),
         #              ("as4_session", bool), ("protocol_name",str),
-        #              ("is_native_bgp", bool), ("sav_origin", str), 
+        #              ("is_native_bgp", bool), ("sav_origin", str),
         #              ("sav_scope", list), ("sav_path", list),
-        #              ("sav_nlri", list), ("dummy_link", str), 
+        #              ("sav_nlri", list), ("dummy_link", str),
         #              ("interface_name", str), ("as_path", list)]
         # keys_types_check(msg, key_types)
         msg["is_interior"] = tell_str_is_interior(msg["sav_origin"])
