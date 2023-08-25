@@ -289,9 +289,9 @@ class IPTableManager():
         # self.logger.debug(self.active_app)
         # if not (self.active_app in src_apps):
         # return
-        refresh_info = iptables_refresh(self.active_app, self.logger)
-        log_msg = f"IP TABLES CHANGED: {refresh_info}"
-        self.logger.debug(log_msg)
+        # refresh_info = iptables_refresh(self.active_app, self.logger)
+        # log_msg = f"IP TABLES CHANGED: {refresh_info}"
+        # self.logger.debug(log_msg)
 
     def delete(self, input_id):
         session = db.session
@@ -452,10 +452,14 @@ class LinkManager(InfoManager):
         self.logger.debug(f"link added: {link_name} ")
 
     def _get_link_name(self, meta_dict):
-        return f"{meta_dict['link_type']}_{meta_dict['local_ip']}_{meta_dict['remote_ip']}"
-        # return meta_dict["protocol_name"]
+        return meta_dict["protocol_name"]
 
-
+    # def is_mapped(self,link_map,link_name):
+    #     """return the correct link_type and info for this link"""
+    #     if not link_name in self.data:
+    #         raise KeyError(f"link_name {link_name} not found")
+    #     ifa = self.data[link_name]["interface_name"]
+    #     return link_map.get(ifa,None)
     def update_link(self, meta_dict):
         self._is_good_meta(meta_dict)
         link_name = self._get_link_name(meta_dict)
@@ -467,7 +471,8 @@ class LinkManager(InfoManager):
 
     def get_by_name_type(self, link_name,link_type=None):
         if link_type == 'grpc':
-            self.logger.debug(link_name)
+            # self.logger.debug(link_name)
+            return self.data[link_name]
         elif link_type == "quic":
             self.logger.debug(link_name)
         self.logger.debug(link_name)
@@ -482,8 +487,7 @@ class LinkManager(InfoManager):
         result = []
         if not is_asn(remote_as):
             raise ValueError(f"{remote_as} is not a valid asn")
-        for key in self.data:
-            link = self.data[key]
+        for _,link in self.data.items():
             if (link["remote_as"] == remote_as) and (
                     link["is_interior"] == is_interior):
                 result.append(link)
@@ -498,15 +502,30 @@ class LinkManager(InfoManager):
             if meta[k] == v:
                 result.append(link_name)
         return result
+    def rpdp_links(self,link_map):
+        """return a list of link_name and link_data tuple that are rpdp links
+        """
+        results = []
+        for link_name,link in self.data.items():
+            # self.logger.debug(link["protocol_name"] )
+            # self.logger.debug(link_map.keys() )
+            if link["protocol_name"] in link_map:
+                results.append((link_name,link))
+            elif link["link_type"] == "modified_bgp":
+                results.append((link_name,link))
+            else:
+                self.logger.debug(f"ignoring no sav link: {link_name}")
+        return results
     def get_all_up(self, include_native_bgp=False):
         """
         return a list of all up link_names ,use get(link_name) to get link object
         """
         temp = []
         for link_name,link in self.data.items():
-            # self.logger.debug(link)
+            # self.logger.debug(link["protocol_name"])
             if link["status"]:
                 if link["link_type"] == "native_bgp":
+                    # self.logger.debug(link["protocol_name"])
                     if include_native_bgp:
                         temp.append(link_name)
                 else:
@@ -528,12 +547,14 @@ class LinkManager(InfoManager):
         """
         return a list of bgp(modified or native) link_dict that has the same interface_name
         """
+        # self.logger.debug(f"interface_name:{interface_name}")
         result = []
-        for link_name in self.data:
-            link = self.data[link_name]
-            if link["link_type"] in ["native_bgp", "modified_bgp"]:
-                if link["interface_name"] == interface_name:
-                    result.append(link)
+        # self.logger.debug(self.data)
+        for _,link in self.data.items():
+            # self.logger.debug(link)
+            if link["interface_name"] == interface_name:
+                result.append(link)
+        # self.logger.debug(f"result:{result}")
         return result
 
     def exist(self, link_name):

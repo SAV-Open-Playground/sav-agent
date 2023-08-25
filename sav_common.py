@@ -64,12 +64,13 @@ def parse_bird_table(table, logger=None):
     for row in rows:
         heading = row.pop(0)
         # skip blackhole
-        if "blackhole" in heading:
-            continue
+        # if "blackhole" in heading:
+            # continue
         prefix = heading.split(" ")[0]
         prefix = prefix.replace("24-24", "24")
         # TODO: demo filter
-        if not prefix.startswith("192"):
+        # logger.debug(f"prefix:{prefix}")
+        if prefix =="0.0.0.0/0":
             continue
         prefix = netaddr.IPNetwork(prefix)
         if prefix not in parsed_rows:
@@ -86,9 +87,12 @@ def parse_bird_table(table, logger=None):
                 temp["interface_ip"] = line.split(
                     "on ")[0].split("via ")[-1]
             if line.startswith("                     "):
-                parsed_rows[prefix].append(temp)
-                temp = {}
-        parsed_rows[prefix].append(temp)
+                if not temp=={}:
+                    parsed_rows[prefix].append(temp)
+                    temp = {}
+        # add the last one
+        if not temp=={}:
+            parsed_rows[prefix].append(temp)
         # parsed_rows[prefix].sort()
         if len(parsed_rows[prefix]) == 1 and len(parsed_rows[prefix][0]) == 0:
             del parsed_rows[prefix]
@@ -329,31 +333,82 @@ class SavApp():
         return get_roa(self.logger, t_name)
 
 
+# def birdc_cmd(logger, cmd):
+#     """
+#     execute bird command and return the output in std
+#     """
+#     cmd = "/usr/local/sbin/birdc "+cmd
+#     proc = subprocess.Popen(
+#         # [cmd],
+#         cmd.split(" "),
+#         shell=True,
+#         stdout=subprocess.PIPE,
+#         stdin=subprocess.PIPE,
+#         stderr=subprocess.PIPE)
+#     proc.stdin.write("\n".encode("utf-8"))
+#     proc.stdin.flush()
+#     proc.wait()
+#     out = proc.stdout.read().decode()
+#     temp = out.split("\n")[0]
+#     temp = temp.split()
+#     if len(temp) < 2:
+#         return None
+#     if not (temp[0] == "BIRD" and temp[-1] == "ready."):
+#         logger.error(f"birdc execute error:{out}")
+#         return None
+#     out = "\n".join(out.split("\n")[1:])
+#     return out
 def birdc_cmd(logger, cmd):
     """
     execute bird command and return the output in std
     """
-    proc = subprocess.Popen(
-        ["/usr/local/sbin/birdc "+cmd],
-        shell=True,
+    # logger.debug(cmd)
+    # cmd = f"/usr/local/sbin/birdc {cmd}" 
+    # cmd = ['birdc',cmd]
+    # cmd = "birdc "+cmd
+    
+    cmd = "/usr/local/sbin/birdc "+cmd
+    # cmd = shlex.split(cmd)
+    # cmd = [cmd]
+    # cmd = ["/usr/local/sbin/birdc",cmd]
+    cmd = cmd.split(" ")
+    # logger.debug(cmd)       
+    try:
+        # logger.debug(os.system(cmd))
+        # proc = subprocess.run(cmd,capture_output=True,shell=True)
+        proc = subprocess.Popen(
+            cmd,
+        # executable="/usr/local/sbin/birdc",
+        # args=cmd,
+        # shell=True,
         stdout=subprocess.PIPE,
         stdin=subprocess.PIPE,
         stderr=subprocess.PIPE)
-    proc.stdin.write("\n".encode("utf-8"))
-    proc.stdin.flush()
-    proc.wait()
-    out = proc.stdout.read().decode()
+        # proc = subprocess.check_output(cmd,shell=True)
+        # logger.debug(proc)
+        # logger.debug(proc.stderr.read())
+        out = proc.stdout.read()
+        # logger.debug(out)
+        out = out.decode()
+        # out = proc.stdout.decode('utf-8')
+    except Exception as e:
+        logger.debug(cmd)
+        logger.debug(type(e))
+        logger.error(e)
+
     temp = out.split("\n")[0]
     temp = temp.split()
     if len(temp) < 2:
+        logger.debug(cmd)
+        logger.debug(proc.stderr.read())
+        logger.error(temp)
+        logger.error("length to short")
         return None
     if not (temp[0] == "BIRD" and temp[-1] == "ready."):
         logger.error(f"birdc execute error:{out}")
         return None
     out = "\n".join(out.split("\n")[1:])
     return out
-
-
 def birdc_show_protocols(logger):
     """
     execute show protocols 
@@ -383,6 +438,30 @@ def birdc_get_protos_by(logger, key, value):
             result.append(a)
     return result
 
+def parse_bird_fib(logger):
+    """
+    using birdc show all to get bird fib
+    """
+    # logger.debug("parse_bird_fib")
+    data = birdc_cmd(logger,cmd="show route all")
+    # logger.debug(data)
+    if data is None:
+        logger.warning("empty bird fib")
+        return {}
+    # logger.debug(data)
+    data = data.split("Table")
+    # logger.debug(data)
+    while "" in data:
+        data.remove("")
+    result = {}
+    for table in data:
+        # logger.debug(f"{table}")
+        table_name, table_data = parse_bird_table(
+            table, logger)
+        result[table_name] = table_data
+        # logger.debug(f"{table_name}:{table_data}")
+    # logger.debug("parse_bird_fib done")
+    return result
 
 def birdc_get_import(logger, protocol_name, channel_name="ipv4"):
     """
@@ -586,7 +665,7 @@ def get_aspa(logger, hostname="savopkrill.com", port_number=3000, pwd="krill"):
                        "Content-Type": "application/json"}
             url = f"https://{hostname}:{port_number}/api/v1/cas/testbed/aspas"
             response = requests.request(
-                "GET", url, headers=headers, verify=False)
+                "GET", url, headers=headers, verify=False,timeout=15)
             response.raise_for_status()  # Raises an exception for any HTTP error status codes
             # Return the response as a dictionary
             temp = response.json()
@@ -603,7 +682,7 @@ def get_aspa(logger, hostname="savopkrill.com", port_number=3000, pwd="krill"):
                 result[row["customer"]] = temp2
             return result
         except Exception as err:
-            logger.debug(err)
+            logger.error(err)
             time.sleep(0.1)
 
 

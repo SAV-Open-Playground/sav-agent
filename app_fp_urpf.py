@@ -45,30 +45,12 @@ class FpUrpfApp(SavApp):
         """
         result = []
         for as_number in table:
+            self.logger.debug(table[as_number])
             for prefix in table[as_number]["prefixes"]:
+                self.logger.debug(table[as_number]["interface_names"])
                 for interface_name in table[as_number]["interface_names"]:
                     result.append(sav_rule_tuple(
                         prefix, interface_name, self.name, as_number))
-        return result
-
-    
-    def _parse_bird_fib(self):
-        """
-        using birdc show all to get bird fib
-        """
-        data = self._bird_cmd(cmd="show route all")
-        if data is None:
-            return {}
-        data = data.split("Table")
-        # self.logger.debug(data)
-        while "" in data:
-            data.remove("")
-        result = {}
-        for table in data:
-            table_name, table_data = parse_bird_table(
-                table, self.logger)
-            result[table_name] = table_data
-        # self.logger.debug(result)
         return result
 
     def fib_changed(self):
@@ -76,8 +58,7 @@ class FpUrpfApp(SavApp):
         fib change detected
         """
         # self._init_protocols()
-        new_ = self._parse_bird_fib()
-
+        new_ = parse_bird_fib(self.logger)
         if not "master4" in new_:
             self.logger.warning(
                 "no master4 table. Is BIRD ready?")
@@ -85,10 +66,11 @@ class FpUrpfApp(SavApp):
         old_rules = self.rules
         new_ = new_['master4']
         # we need prefix-interface table
-        for prefix in new_:
-            # self.logger.debug(f"prefix:{prefix}:{new_[prefix]}")
+        for prefix,items in new_.items():
+            if str(prefix)=="0.0.0.0/0":
+                continue
             temp = []
-            for item in new_[prefix]:
+            for item in items:
                 # self.logger.debug(item)
                 temp.append(item["interface_name"])
             new_[prefix] = temp
@@ -116,6 +98,6 @@ class FpUrpfApp(SavApp):
                     del_rules.append(sav_rule_tuple(
                         prefix, interface_name, self.name))
         self.rules = new_
-        # self.logger.debug(f"add_rules:{add_rules}")
-        # self.logger.debug(f"del_rules:{del_rules}")
+        # self.logger.debug(f"{self.name}: add_rules={add_rules}")
+        # self.logger.debug(f"{self.name}: del_rules={del_rules}")
         return add_rules, del_rules
