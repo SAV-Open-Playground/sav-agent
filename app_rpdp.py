@@ -546,14 +546,13 @@ class RPDPApp(SavApp):
         # specialized for bird app, we need to convert the msg to byte array
         nlri = copy.deepcopy(msg["sav_nlri"])
         # split into multi mesgs
-        max_nrli_len = 50
-        self.logger.debug(max_nrli_len)
-        while len(nlri) > max_nrli_len:
-            msg["sav_nlri"] = nlri[:max_nrli_len]
-            nlri = nlri[max_nrli_len:]
+        max_nlri_len = 50
+        self.logger.debug(max_nlri_len)
+        while len(nlri) > max_nlri_len:
+            msg["sav_nlri"] = nlri[:max_nlri_len]
+            nlri = nlri[max_nlri_len:]
             self.logger.debug(len(nlri))
             msg_byte = self._msg_to_hex_str(msg)
-            # self.logger.debug(msg_byte)
             self.add_prepared_cmd(msg_byte)
             self._bird_cmd(cmd="call_agent")
         self.logger.info(
@@ -566,9 +565,8 @@ class RPDPApp(SavApp):
         and put that into the json for bird app
         """
         key_types = [("msg_type", str), ("protocol_name", str),
-                     ("as4_session", bool), ("sav_nlri",
-                                             list), ("is_interior", bool),
-                     ("is_native_bgp", int)]
+                     ("as4_session", bool), ("sav_nlri", list),
+                     ("is_interior", bool), ("is_native_bgp", int)]
         try:
             keys_types_check(msg, key_types)
         except Exception as e:
