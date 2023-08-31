@@ -470,12 +470,6 @@ class LinkManager(InfoManager):
         self.logger.debug(f"link updated: {self.data[link_name]} ")
 
     def get_by_name_type(self, link_name,link_type=None):
-        if link_type == 'grpc':
-            # self.logger.debug(link_name)
-            return self.data[link_name]
-        elif link_type == "quic":
-            self.logger.debug(link_name)
-        self.logger.debug(link_name)
         if link_name not in self.data:
             self.logger.debug(f"all link names:{self.data.keys()}")
             raise KeyError(f"link {link_name} not found")

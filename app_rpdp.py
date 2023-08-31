@@ -491,18 +491,21 @@ class RPDPApp(SavApp):
 
     def _send_quic(self, msg, bgp_meta, quic_meta, quic_link):
         # self.logger.debug(msg)
-
-        configuration = QuicConfiguration(
-            is_client=True, alpn_protocols=H3_ALPN)
-        configuration.load_verify_locations(r'/root/savop/ca_cert.pem')
-        url = f"wss://node_{bgp_meta['remote_as']}:7777/savop_quic"
-        host = bgp_meta["remote_ip"]
-        # self.logger.debug(bgp_meta)
-        # self.logger.debug(quic_meta)
-        msg = self._quic_msg_box(msg, bgp_meta)
-        asyncio.run(self.__quic_send(
-            host, configuration, msg, url), debug=True)
-        return
+        try:
+            
+            configuration = QuicConfiguration(
+                is_client=True, alpn_protocols=H3_ALPN)
+            configuration.load_verify_locations(r'/root/savop/ca_cert.pem')
+            url = f"wss://node_{bgp_meta['remote_as']}:7777/savop_quic"
+            host = bgp_meta["remote_ip"]
+            # self.logger.debug(bgp_meta)
+            # self.logger.debug(quic_meta)
+            msg = self._quic_msg_box(msg, bgp_meta)
+            asyncio.run(self.__quic_send(
+                host, configuration, msg, url), debug=True)
+        except Exception as e:
+            self.logger.error(e)
+            self.logger.error(type(e))
 
     def _send_grpc(self, msg, bgp_meta, grpc_id, grpc_link):
         try:
@@ -530,7 +533,22 @@ class RPDPApp(SavApp):
                         f"expected {remote_id}, got {rep.sender_id}")
         except Exception as e:
             self.logger.error(e)
-
+    def perf_test_send(self,msgs):
+        count = 0
+        for msg in msgs:
+            if msg["type"]=="modified_bgp":
+                self.add_prepared_cmd(msg["msg"])
+                self._bird_cmd(cmd="call_agent")
+            # elif msg["type"]=="grpc":
+                # self._send_grpc(msg["msg"],msg["link"],msg["grpc_id"],msg["grpc_link"])
+            elif msg["type"]=="quic":
+                msg["msg"]["sav_nlri"] = list(map(netaddr.IPNetwork,msg["msg"]["sav_nlri"]))
+                link = self.agent.link_man.data.get("savbgp_65502_65501")
+                self.send_msg(msg["msg"],self.agent.config,link)
+            else:
+                self.logger.error(f"unknown msg type {msg['type']}")
+            self.logger.debug(f"sent {count} msg ({msg['type']})")
+        self.logger.debug("perf test send finished")
     def _send_modified_bgp(self, msg):
         """
         notify the bird to retrieve the msg from flask server and execute it.
@@ -539,24 +557,26 @@ class RPDPApp(SavApp):
         if not isinstance(msg, dict):
             self.logger.error(f"msg is not a dictionary msg is {type(msg)}")
             return
-        while len(self.prepared_cmd) > 0:
+        cmd_len = len(self.prepared_cmd)
+        if cmd_len > 0:
             self.logger.warn(
-                f"last message not finished {self.prepared_cmd}")
+                f"last message not finished, {cmd_len} remaining")
+            self.logger.debug(self.prepared_cmd)
             time.sleep(0.01)
         # specialized for bird app, we need to convert the msg to byte array
         nlri = copy.deepcopy(msg["sav_nlri"])
         # split into multi mesgs
         max_nlri_len = 50
-        self.logger.debug(max_nlri_len)
+        # self.logger.debug(max_nlri_len)
         while len(nlri) > max_nlri_len:
             msg["sav_nlri"] = nlri[:max_nlri_len]
             nlri = nlri[max_nlri_len:]
-            self.logger.debug(len(nlri))
+            # self.logger.debug(len(nlri))
             msg_byte = self._msg_to_hex_str(msg)
             self.add_prepared_cmd(msg_byte)
-            self._bird_cmd(cmd="call_agent")
-        self.logger.info(
-            f"SENT MSG ON LINK [{msg['protocol_name']}]:{msg}, time_stamp: [{time.time()}]]")
+            # self._bird_cmd(cmd="call_agent")
+        # self.logger.info(
+            # f"SENT MSG ON LINK [{msg['protocol_name']}]:{msg}, time_stamp: [{time.time()}]]")
 
     def _msg_to_hex_str(self, msg):
         """
@@ -674,7 +694,7 @@ class RPDPApp(SavApp):
             self.logger.error("construct msg error")
 
     def recv_http_msg(self, msg):
-        # self.logger.debug("app {} got msg {}".format(self.name, msg))
+        self.logger.debug(f"app {self.name} got http msg ({self.data['msg_count']})at {time.time()} ")
         try:
             m_t = msg["msg_type"]
             if not m_t in ["bird_bgp_config", "bgp_update"]:
@@ -706,7 +726,6 @@ class RPDPApp(SavApp):
         self.process_rpdp_msg(msg)
 
     def process_quic_msg(self, msg):
-        self.logger.debug("receive_quic_msg")
         self._quic_msg_unbox(msg)
         self.process_rpdp_msg(msg)
 
@@ -748,7 +767,7 @@ class RPDPApp(SavApp):
         new_path = msg["sav_path"]+[link_meta["local_as"]]
         for i in range(len(new_path)-1):
             self.agent.add_sav_link(new_path[i], new_path[i+1])
-        self.agent._log_info_for_front(msg=None, log_type="sav_graph")
+        # self.agent._log_info_for_front(msg=None, log_type="sav_graph")
         relay_scope = {}
         intra_links = self.agent.link_man.get_all_up_type(is_interior=False)
         # if we receive a inter-domain msg via inter-domain link
@@ -844,7 +863,7 @@ class RPDPApp(SavApp):
         link_name = input_msg["source_link"]
         link_meta = self.agent.link_man.data.get(link_name)
         msg = input_msg["msg"]
-        # self.logger.debug(msg.keys())
+        self.logger.debug(msg.keys())
         # key_types = [("src", str), ("dst", str),
         #              ("msg_type", str), ("is_interior", bool),
         #              ("as4_session", bool), ("protocol_name",str),

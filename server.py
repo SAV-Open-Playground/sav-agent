@@ -4,6 +4,8 @@
 @Time    :   2023/01/12 14:19:52
 """
 import json
+import time
+import netaddr
 from flask import Flask
 from flask import request
 from model import db
@@ -65,7 +67,8 @@ app = Flask(__name__, instance_relative_config=True)
 app.config.from_mapping(SECRET_KEY="dev",)
 app_config = {
     "DEBUG": True,
-    "SQLALCHEMY_TRACK_MODIFICATIONS": True
+    "SQLALCHEMY_TRACK_MODIFICATIONS": True,
+    "SQLALCHEMY_POOL_SIZE":20
 }
 app.config.from_object(app_config)
 # ensure the instance folder exists
@@ -214,10 +217,51 @@ def savop_quic():
     else:
         LOGGER.warning(f"quic got unexpected msg:{request.data.decode()}")
         return {"code": "5004", "message": "quic server disabled"}
-
+@app.route('/reset/', methods=["POST","GET"])
+def reset():
+    sa.data["msg_count"]=0
+    LOGGER.debug(F"PERF-TEST: TEST BEGIN at {time.time()}")
+    return {"code": "0000", "message": "reset received"}
     # the returned value is not used by client
 _, grpc_server, quic_server, grpc_addr, quic_addr = _update_config(
     sa, LOGGER, grpc_server, quic_server, grpc_addr, quic_addr)
-
+@app.route('/long_nlri_test/', methods=["POST","GET"])
+def long_nlri_test():
+    LOGGER.debug(F"got long_nlri_test at {time.time()}")
+    try:
+        bgp_sample = {"as_path": "2,1,0,0,255,222",
+                  "as_path_len": 6,
+                  "is_interior": 1,
+                  "next_hop": "4,10,0,1,1",
+                  "nlri_len": 4, "protocol_name": "savbgp_65502_65501",
+                  "bgp_nlri": "24,23,24,3",
+                  "withdraws": "0,0",
+                  "is_native_bgp": 1}
+        for i in range(1,100):
+            for j in range(1,255):
+                bgp_sample["sav_nlri"] += f"24,1,2,{i+1},{j},"
+                bgp_sample["nlri_len"] += 4
+    except Exception as e:
+        LOGGER.debug(e)
+    return {"code": "0000", "message": "reset received"}
+    # the returned value is not used by client
+@app.route('/perf_test/', methods=["POST","GET"])
+def perf_test():
+    LOGGER.debug("got perf test")
+    try:
+        f = open(r"./perf_test.json", "r")
+        lines=f.readlines()
+        f.close()
+        sa.rpdp_app.perf_test_send(list(map(json.loads,lines)))
+        
+        # LOGGER.debug(f"got {len(lines)} sav bgps")
+        # for row in lines:
+        #     data = json.loads(row)
+        #     data["sav_nlri"] = list(map(netaddr.IPNetwork,data["sav_nlri"]))
+        #     link = sa.link_man.data.get("savbgp_65502_65501")
+        #     sa.rpdp_app.send_msg(data,sa.config,link)
+    except Exception as err:
+        LOGGER.error(err)
+    return {"code": "0000", "message": "msg received"}
 if __name__ == '__main__':
     app.run("0.0.0.0:8888")

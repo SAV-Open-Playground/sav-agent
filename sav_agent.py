@@ -105,13 +105,14 @@ class SavAgent():
         # using grpc
         link = self.link_man.data.get(link["protocol_name"])
         self.rpdp_app.send_msg(msg,self.config,link)
-        
 
     def _init_data(self):
         """
         all major data should be initialized here
         """
         self.data = {}
+        self.data["pkt_id"] = 0
+        self.data["msg_count"] = 0
         self.data["links"] = {}  # link manager"s data
         self.data["fib"] = []  # system"s fib table
         # key is prefix (str), value is as paths in csv
@@ -128,7 +129,6 @@ class SavAgent():
         self.data["fib_for_stable_read_time"] = time.time()
         self.data["fib_for_apps"] = []
         self.data["initial_bgp_stable"] = False
-        self.rec_count = 1
 
     def add_sav_nodes(self, nodes):
         data = self.data["sav_graph"]["nodes"]
@@ -213,9 +213,8 @@ class SavAgent():
             return
         self._diff_fib("fib_for_stable")
         read_time = self.data.get("fib_for_stable_read_time", time.time())
-        # self.logger.debug(f"{self.data['fib_for_stable_read_time']},,{read_time}")
         if time.time()-read_time > stable_span:
-            self.logger.debug("FIB STABILIZED")
+            self.logger.debug(f"FIB STABILIZED at {read_time}")
             self.data["initial_bgp_stable"] = True
             # self._diff_fib("fib")
             self._notify_apps(["rpdp_app"])
@@ -233,14 +232,19 @@ class SavAgent():
         while True:
             try:
                 if self.data["initial_bgp_stable"]:
-                    if len(self.msgs) > 0:
+                    while len(self.msgs) > 0:
                         try:
                             msg = self.msgs.pop(0)
+                            self.data["pkt_id"] += 1
+                            msg["pkt_id"]=self.data["pkt_id"]
                             self._process_msg(msg)
                         except Exception as err:
                             self.logger.error(
                                 f"error when processing: [{err}]:{msg}")
                     self._send_link_init()
+                    while len(self.rpdp_app.prepared_cmd)>0:
+                        self.logger.debug("sending prepared cmd")
+                        self.rpdp_app._bird_cmd("call_agent")
                 else:
                     self._if_bird_ready(
                         stable_span=self.config.get("fib_stable_threshold"))
@@ -301,12 +305,13 @@ class SavAgent():
         # may have replicas, they have different metrics
         prefixes = list(
             set(map(lambda x: x["Destination"]+"/"+x["Genmask"], prefixes)))
-        self.logger.debug(f"local prefixes: {prefixes}")
+        # self.logger.debug(f"local prefixes: {prefixes}")
         local_prefixes = list(map(netaddr.IPNetwork, prefixes))
         local_prefixes_for_upsert = json.dumps(list(map(str, local_prefixes)))
         self.sib_man.upsert("local_prefixes", local_prefixes_for_upsert)
         return local_prefixes
-
+    def perf_test_send(self, ratio, nlri_num, total_pkt_num):
+        raise NotImplementedError
     def get_fib(self):
         """
         parsing the output of "route -n -F" command
@@ -478,21 +483,23 @@ class SavAgent():
 
     def _process_bgp_update(self, msg):
         """
-        process  bgp update message
+        process  bgp update message (from bird)
         """
         # self.logger.debug(f"{msg}")
         msg["msg"]["is_native_bgp"] = not (len(msg["msg"]["sav_nlri"]) > 0)
         if msg["msg"]["is_native_bgp"]:
-            # self.logger.debug(f"got BGP packet ({self.rec_count}) at {time.time()}")
+            # self.data["msg_count"]+=1
+            # self.logger.debug(f"PERF-TEST: got native BGP packet ({self.data['msg_count']}) at {time.time()}")
+            # self.logger.debug(msg)
             self._process_native_bgp_update(msg)
+            # self.logger.debug(f"PERF-TEST: finished PROCESSING ({self.data['msg_count']}) at {time.time()}")
         else:
-            # self.logger.debug(f"got RPDP packet ({self.rec_count}) at {time.time()}")
+            self.data["msg_count"]+=1
+            self.logger.debug(f"PERF-TEST: got modified BGP packet ({self.data['msg_count']}) at {time.time()}")
+            self.logger.debug(msg)
             self.rpdp_app.recv_http_msg(msg)
-
-        # self.logger.debug(f"finished PROCESSING ({self.rec_count}) at {time.time()}")
-        self.rec_count += 1
-        if self.rec_count == 10000:
-            self.rec_count = 1
+            self.logger.debug(f"PERF-TEST: finished PROCESSING ({self.data['msg_count']}) at {time.time()}")
+        
 
         
     def _process_native_bgp_update(self, msg,rest=False):
@@ -663,7 +670,12 @@ class SavAgent():
             return False
 
     def _process_msg(self, input_msg):
-        # self.logger.debug(f"start processing msg: {input_msg['msg_type']}:{input_msg}")
+        t0 = time.time()
+        log_msg = f"start msg, pkt_id:{input_msg['pkt_id']}, msg_type: {input_msg['msg_type']}"
+        self.logger.debug(log_msg)
+        key_types = [("msg_type", str), ("pkt_id", int)]
+        keys_types_check(input_msg, key_types)
+        
         msg, m_t = input_msg["msg"], input_msg["msg_type"]
         if m_t == "link_state_change":
             self._process_link_state_change(input_msg)
@@ -674,12 +686,18 @@ class SavAgent():
         elif m_t == "native_bgp_update":
             self._process_native_bgp_update(input_msg)
         elif m_t == "grpc_msg":
+            # self.data["msg_count"]+=1
             self.rpdp_app.process_grpc_msg(input_msg)
         elif m_t == "quic_msg":
+            self.data["msg_count"]+=1
+            self.logger.debug(f"PERF-TEST: got quic packet ({self.data['msg_count']}) at {time.time()}")
             self.rpdp_app.process_quic_msg(input_msg)
+            self.logger.debug(f"PERF-TEST: finished PROCESSING ({self.data['msg_count']}) at {time.time()}")
         else:
             self.logger.warning(f"unknown msg type: [{m_t}]\n{input_msg}")
-        # self.logger.debug(f"end processing msg: {input_msg['msg_type']}:{input_msg}")
+        log_msg = log_msg.replace("start", "finish")
+        log_msg += f", time used: {time.time()-t0}"
+        self.logger.debug(log_msg)
 
     def _start(self):
         self._thread = threading.Thread(target=self._run)
