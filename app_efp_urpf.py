@@ -18,12 +18,8 @@ class EfpUrpfApp(SavApp):
     """
 
     def __init__(self, agent, name, logger=None, ca_host="", ca_port=""):
-        self.prepared_cmd = Manager().list()
         self.pp_v4_dict = {}
         # pp represents prefix-(AS)path
-        src_ip = agent.config.get("grpc_id")
-        link_man = agent.link_man
-        local_as = agent.config.get("local_as")
         if not name.startswith("EFP-uRPF"):
             raise ValueError("name should start with 'EFP-uRPF'")
         name = name[9:].upper().split("-")
@@ -77,8 +73,8 @@ class EfpUrpfApp(SavApp):
         """
         using birdc show all import to get bird fib
         """
-        
-        return birdc_get_import(self.logger,protocol_name,channel_name)
+
+        return birdc_get_import(self.logger, protocol_name, channel_name)
 
     def fib_changed(self):
         """
@@ -92,7 +88,6 @@ class EfpUrpfApp(SavApp):
             return self.algorithm_b(old_rules)
         # TODO update self.rules
 
-    
     def algorithm_a(self, old_rules):
         """
         RFC 8704
@@ -108,13 +103,16 @@ class EfpUrpfApp(SavApp):
             # self.logger.debug(msg=f"protocol_name:{protocol_name}")
             link_data = self.agent.link_man.data.get(protocol_name)
             if not link_data:
-                self.logger.warning(f"get link data error for link:{protocol_name}")
-                self.logger.warning(f"self.agent.link_man:{self.agent.link_man}")
+                self.logger.warning(
+                    f"get link data error for link:{protocol_name}")
+                self.logger.warning(
+                    f"self.agent.link_man:{self.agent.link_man}")
                 self.logger.warning(f"self.agent:{self.agent}")
                 continue
             meta = link_data
             all_int_in[protocol_name] = {"meta": meta}
-            all_int_in[protocol_name]["adj-in"] = self._parse_import_table(protocol_name)
+            all_int_in[protocol_name]["adj-in"] = self._parse_import_table(
+                protocol_name)
             # self.logger.debug(msg=f"all_int_in:{all_int_in[protocol_name]['adj-in']}")
             # filter out the adj-in that does not match the roa
             if self.roa:
