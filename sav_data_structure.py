@@ -21,23 +21,19 @@ def asn2hex(asn, as_session=False):
         :param asn: asn (str)
         :return: hex value list (u8)
     """
+    temp = hex(int(asn))[2:]
+    result = []
+    if len(temp)%2==1:
+        result.append(str(int(temp[:1], 16)))
+        temp = temp[1:]
+    while len(temp):
+        result.append(str(int(temp[:2], 16)))
+        temp = temp[2:]
+    length = 2
     if as_session:
-        result = hex(int(asn))[2:]
-        temp = []
-        while len(result) >= 2:
-            temp.append(str(int(result[:2], 16)))
-            result = result[2:]
-        result = temp
-        while len(result) < 4:
-            result = ["0"] + result
-        return result
-
-    result = hex(int(asn))[2:]
-    temp = []
-    while len(result) >= 2:
-        temp.append(str(int(result[:2], 16)))
-        result = result[2:]
-    result = temp
+        length = 4
+    while len(result) < length:
+        result = ["0"] + result
     return result
 # IP 
 
