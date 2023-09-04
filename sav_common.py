@@ -98,7 +98,11 @@ def parse_bird_table(table, logger=None):
             del parsed_rows[prefix]
     return table_name, parsed_rows
 
-
+def check_msg(key,msg,meta=SAV_META):
+    """check msg before sending to ensure the msg can be processed properly"""
+    if not key in SAV_META:
+        raise KeyError(f"key {key} not in SAV_META")
+    keys_types_check(msg,meta[key])
 def rule_list_diff(old_rules, new_rules):
     """
     return adds and dels for the given lists
@@ -304,6 +308,7 @@ class SavApp():
             "source_link": link_name,
             "link_type": link_type,
             "msg": True,
+            "pkt_rec_dt":time.time()
         }
         self.agent.put_msg(msg)
 
@@ -314,6 +319,7 @@ class SavApp():
             "source_app": self.name,
             "source_link": link_name,
             "msg": link_type,
+            "pkt_rec_dt":time.time()
         }
         self.agent.put_msg(msg)
 
@@ -322,16 +328,18 @@ class SavApp():
             "msg_type": "link_state_change",
             "source_app": self.name,
             "source_link": link_name,
-            "msg": False
+            "msg": False,
+            "pkt_rec_dt":time.time()
         }
         self.agent.put_msg(msg)
 
-    def _bird_cmd(self, cmd):
-        return birdc_cmd(self.logger, cmd)
+    # def _bird_cmd(self, cmd):
+    #     return birdc_cmd(self.logger, cmd)
 
     def _parse_roa_table(self, t_name='r4'):
         return get_roa(self.logger, t_name)
-
+def init_metric():
+    return {"count":0,"time":0.0,"size":0}
 
 # def birdc_cmd(logger, cmd):
 #     """
@@ -362,40 +370,62 @@ def birdc_cmd(logger, cmd):
     """
     execute bird command and return the output in std
     """
+    t0=time.time()
     # logger.debug(cmd)
     # cmd = f"/usr/local/sbin/birdc {cmd}" 
     # cmd = ['birdc',cmd]
     # cmd = "birdc "+cmd
     
-    cmd = "/usr/local/sbin/birdc "+cmd
+    cmd = f"/usr/local/sbin/birdc {cmd}"
     # cmd = shlex.split(cmd)
     # cmd = [cmd]
     # cmd = ["/usr/local/sbin/birdc",cmd]
-    cmd = cmd.split(" ")
+    
     # logger.debug(cmd)       
     try:
         # logger.debug(os.system(cmd))
         # proc = subprocess.run(cmd,capture_output=True,shell=True)
-        proc = subprocess.Popen(
-            cmd,
-        # executable="/usr/local/sbin/birdc",
-        # args=cmd,
-        # shell=True,
-        stdout=subprocess.PIPE,
-        stdin=subprocess.PIPE,
-        stderr=subprocess.PIPE)
-        # proc = subprocess.check_output(cmd,shell=True)
-        # logger.debug(proc)
-        # logger.debug(proc.stderr.read())
-        out = proc.stdout.read()
-        # logger.debug(out)
-        out = out.decode()
+        if "call_agent" in cmd:
+            # logger.debug("111111")
+            # t1 = time.time()
+            proc = subprocess.Popen(
+            ["/usr/local/sbin/birdc","call_agent"],
+            # shell=True,
+            stdout=subprocess.PIPE,
+            stdin=subprocess.PIPE,
+            stderr=subprocess.PIPE)
+            proc.stdin.write("\n".encode("utf-8"))
+            proc.stdin.flush()
+            proc.wait()
+            out = proc.stdout.read().decode()
+            # t2 = time.time()
+            # logger.debug(t2-t1)
+
+        else:
+            cmd = cmd.split(" ")
+            proc = subprocess.Popen(
+                cmd,
+            # executable="/usr/local/sbin/birdc",
+            # args=cmd,
+            # shell=True,
+            stdout=subprocess.PIPE,
+            stdin=subprocess.PIPE,
+            stderr=subprocess.PIPE)
+            # proc = subprocess.check_output(cmd,shell=True)
+            # logger.debug(proc)
+            # logger.debug(proc.stderr.read())
+            out = proc.stdout.read()
+            # logger.debug(out)
+            out = out.decode()
         # out = proc.stdout.decode('utf-8')
     except Exception as e:
         logger.debug(cmd)
         logger.debug(type(e))
         logger.error(e)
-
+    t =time.time()-t0
+    if t> TIMEIT_THRESHOLD:
+        logger.debug(cmd)
+        logger.warning(f"TIMEIT {time.time()-t0:.4f} seconds")
     temp = out.split("\n")[0]
     temp = temp.split()
     if len(temp) < 2:
@@ -408,6 +438,9 @@ def birdc_cmd(logger, cmd):
         logger.error(f"birdc execute error:{out}")
         return None
     out = "\n".join(out.split("\n")[1:])
+    t =time.time()-t0
+    # if t> TIMEIT_THRESHOLD:
+    #     logger.warning(f"TIMEIT {time.time()-t0:.4f} seconds")
     return out
 def birdc_show_protocols(logger):
     """
@@ -724,3 +757,16 @@ def aspa_check(meta, aspa_info):
 #             raise ValueError(
 #                 "interior msg should have interior path and origin")
 #     return True
+TIMEIT_THRESHOLD = 0.5
+def sav_timer(logger):
+    def timer_func(func):
+        # This function shows the execution time of 
+        # the function object passed
+        def wrap_func(*args, **kwargs):
+            t1 = time.time()
+            result = func(*args, **kwargs)
+            t2 = time.time()
+            logger.debug(f'Function {func.__name__!r} executed in {(t2-t1):.4f}s')
+            return result
+        return wrap_func
+    return timer_func

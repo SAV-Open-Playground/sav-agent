@@ -83,3 +83,13 @@ def get_inter_spa(origin_as,prefixes):
         "flag":1
     }
     return msg
+# description of all msg used between functions,each key must have a description
+SAV_META = {
+    "example":{
+    "description":"bgp update message",
+    "key_types":[]
+    }
+            }
+
+    
+    

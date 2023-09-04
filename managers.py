@@ -327,7 +327,28 @@ class IPTableManager():
         session.close()
         return data
 
-
+class BirdCMDManager():
+    """manage the execution of bird command, avoid concurrency issue"""
+    def __init__(self,logger) -> None:
+        self.logger = logger
+        self.cmd_list = []
+        self.is_running = False
+    def bird_cmd(self,cmd):
+        # self.logger.debug(f"got {cmd}")
+        t0 = time.time()
+        # if self.is_running:
+            # self.logger.debug(f"pausing {cmd}")
+        while self.is_running:
+            time.sleep(0.01)
+        # self.logger.debug(f"start {cmd}")
+        t1 = time.time()
+        self.is_running = True
+        ret = birdc_cmd(self.logger,cmd)
+        self.is_running = False
+        t2 = time.time()
+        # self.logger.debug(f"end {cmd}")
+        # self.logger.debug(f"cmd[{cmd}] waited {t1-t0:.4f} sec , executed {t2-t1:.4f} sec, total: {t2-t0:.4f} sec")
+        return ret
 class SIBManager():
     """
     manage the STB with SQLite and Flask-SQLAlchemy
@@ -395,10 +416,11 @@ class InfoManager():
     """
 
     def __init__(self, data, logger):
+        if not isinstance(data, dict):
+            raise ValueError("data is not a dictionary")
         self.logger = logger
         self.data = data
-        if not isinstance(self.data, dict):
-            raise ValueError("data is not a dictionary")
+        
 
     def add(self, msg):
         raise NotImplementedError

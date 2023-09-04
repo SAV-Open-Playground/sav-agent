@@ -12,12 +12,13 @@ from model import db
 from model import SavInformationBase
 from sav_agent import get_logger
 from sav_agent import SavAgent
+from sav_common import TIMEIT_THRESHOLD
 from concurrent import futures
 import grpc
 import agent_msg_pb2
 import agent_msg_pb2_grpc
 from managers import iptables_refresh, router_acl_refresh
-
+import random
 
 class GrpcServer(agent_msg_pb2_grpc.AgentLinkServicer):
     def __init__(self, agent, logger):
@@ -26,10 +27,10 @@ class GrpcServer(agent_msg_pb2_grpc.AgentLinkServicer):
         self.logger = logger
 
     def Simple(self, req, context):
+        t0 = time.time()
         msg_str = req.json_str
         req_src_ip = context.peer().split(":")[1]
         # self.logger.debug(f"grpc got msg from {req.sender_id}")
-        # self.logger.debug(msg)
         my_id = self.agent.config["rpdp_id"]
         reply = f"got {msg_str}"
         response = agent_msg_pb2.AgentMsg(sender_id=my_id, json_str=reply)
@@ -51,12 +52,13 @@ class GrpcServer(agent_msg_pb2_grpc.AgentLinkServicer):
                     f"server disabled msg received: {msg_dict}")
                 raise Exception("got msg on disabled server")
             msg_dict["msg_type"] = "grpc_msg"
+            msg_dict["msg_rec_dt"] = t0
             self.agent.put_msg(msg_dict)
             # self.agent.grpc_recv(msg_dict, req.sender_id)
         except Exception as err:
             self.logger.debug(msg_str)
             self.logger.error(f"grpc msg adding error: {err}")
-        
+
         return response
 
 
@@ -68,7 +70,7 @@ app.config.from_mapping(SECRET_KEY="dev",)
 app_config = {
     "DEBUG": True,
     "SQLALCHEMY_TRACK_MODIFICATIONS": True,
-    "SQLALCHEMY_POOL_SIZE":20
+    "SQLALCHEMY_POOL_SIZE": 20
 }
 app.config.from_object(app_config)
 # ensure the instance folder exists
@@ -132,6 +134,9 @@ def index():
     """
     the entrypoint for reference_router
     """
+    t0 = time.time()
+    # LOGGER.debug("start of bird_bgp_upload")
+    rep = {}
     try:
         msg = json.loads(request.data)
     except Exception as err:
@@ -145,8 +150,16 @@ def index():
                 return {"code": "5002", "message": f"{key} not found!"}
         m_t = msg["msg_type"]
         if m_t == "request_cmd":
-            cmd = sa.rpdp_app.get_prepared_cmd()
-            return {"code": "2000", "data": cmd, "message": "success"}
+            rep = {"code": "0000", "message": "success"}
+            try:
+                cmd = sa.rpdp_app.get_prepared_cmd()
+                return {"code": "2000", "data": cmd, "message": "success"}
+            except IndexError as err:
+                pass
+            t = time.time()-t0
+            if t > TIMEIT_THRESHOLD:
+                LOGGER.warning(f"TIMEIT {time.time()-t0:.4f} seconds")
+            return rep
         msg["source_app"] = sa.rpdp_app.name
         if m_t == "link_state_change":
             msg["source_link"] = msg["protocol_name"]
@@ -156,12 +169,18 @@ def index():
                 msg['link_type'] = "native_bgp"
                 if "rpdp" in msg["msg"]["channels"]:
                     msg['link_type'] = "modified_bgp"
+        msg["pkt_rec_dt"] = t0
         sa.put_msg(msg)
-        return {"code": "0000", "message": "success"}
+        rep = {"code": "0000", "message": "success"}
     except Exception as err:
+        LOGGER.error(type(err))
         LOGGER.error(msg)
         LOGGER.error(err)
-        return {"code": "5004", "message": str(err), "data": str(request.data)}
+        rep = {"code": "5004", "message": str(err), "data": str(request.data)}
+    t = time.time()-t0
+    if t > TIMEIT_THRESHOLD:
+        LOGGER.warning(f"TIMEIT {time.time()-t0:.4f} seconds")
+    return rep
 
 
 @app.route("/sib_table/", methods=["POST", "GET"])
@@ -198,8 +217,15 @@ def update_config():
     return {"code": "0000", "message": msg}
 
 
+@app.route('/metric/', methods=["POST","GET"])
+def metric():
+    rep = {"agent":sa.data["metric"],"rpdp_app":sa.rpdp_app.metric}
+    return rep
+
+
 @app.route('/savop_quic/', methods=["POST"])
 def savop_quic():
+    t0= time.time()
     if sa.config["quic_config"]["server_enabled"]:
         msg = json.loads(request.data.decode())
         msg = {
@@ -207,7 +233,8 @@ def savop_quic():
             "source_app": sa.rpdp_app.name,
             "link_type": "quic",
             "msg_type": "quic_msg",
-            "source_link": msg["dummy_link"]
+            "source_link": msg["dummy_link"],
+            "pkt_rec_dt":t0
         }
         try:
             sa.put_msg(msg)
@@ -217,51 +244,59 @@ def savop_quic():
     else:
         LOGGER.warning(f"quic got unexpected msg:{request.data.decode()}")
         return {"code": "5004", "message": "quic server disabled"}
-@app.route('/reset/', methods=["POST","GET"])
+
+
+@app.route('/reset/', methods=["POST", "GET"])
 def reset():
-    sa.data["msg_count"]=0
+    sa.data["msg_count"] = 0
     LOGGER.debug(F"PERF-TEST: TEST BEGIN at {time.time()}")
     return {"code": "0000", "message": "reset received"}
+
+
     # the returned value is not used by client
 _, grpc_server, quic_server, grpc_addr, quic_addr = _update_config(
     sa, LOGGER, grpc_server, quic_server, grpc_addr, quic_addr)
-@app.route('/long_nlri_test/', methods=["POST","GET"])
+
+
+@app.route('/long_nlri_test/', methods=["POST", "GET"])
 def long_nlri_test():
     LOGGER.debug(F"got long_nlri_test at {time.time()}")
     try:
         bgp_sample = {"as_path": "2,1,0,0,255,222",
-                  "as_path_len": 6,
-                  "is_interior": 1,
-                  "next_hop": "4,10,0,1,1",
-                  "nlri_len": 4, "protocol_name": "savbgp_65502_65501",
-                  "bgp_nlri": "24,23,24,3",
-                  "withdraws": "0,0",
-                  "is_native_bgp": 1}
-        for i in range(1,100):
-            for j in range(1,255):
+                      "as_path_len": 6,
+                      "is_interior": 1,
+                      "next_hop": "4,10,0,1,1",
+                      "nlri_len": 4, "protocol_name": "savbgp_65502_65501",
+                      "bgp_nlri": "24,23,24,3",
+                      "withdraws": "0,0",
+                      "is_native_bgp": 1}
+        for i in range(1, 100):
+            for j in range(1, 255):
                 bgp_sample["sav_nlri"] += f"24,1,2,{i+1},{j},"
                 bgp_sample["nlri_len"] += 4
     except Exception as e:
         LOGGER.debug(e)
     return {"code": "0000", "message": "reset received"}
     # the returned value is not used by client
-@app.route('/perf_test/', methods=["POST","GET"])
+@app.route('/passport/get_public_key', methods=['GET'])
+def get_public_key():
+    return 
+
+@app.route('/perf_test/', methods=["POST", "GET"])
 def perf_test():
     LOGGER.debug("got perf test")
     try:
         f = open(r"./perf_test.json", "r")
-        lines=f.readlines()
+        lines = f.readlines()
         f.close()
-        sa.rpdp_app.perf_test_send(list(map(json.loads,lines)))
-        
-        # LOGGER.debug(f"got {len(lines)} sav bgps")
-        # for row in lines:
-        #     data = json.loads(row)
-        #     data["sav_nlri"] = list(map(netaddr.IPNetwork,data["sav_nlri"]))
-        #     link = sa.link_man.data.get("savbgp_65502_65501")
-        #     sa.rpdp_app.send_msg(data,sa.config,link)
+        sa.put_msg({"msg": lines, "msg_type": "perf_test",
+                   "source_app": "", "source_link": "","pkt_rec_dt":time.time()})
+        return {"code": "0000", "message": "msg received"}
+
     except Exception as err:
         LOGGER.error(err)
     return {"code": "0000", "message": "msg received"}
+
+
 if __name__ == '__main__':
-    app.run("0.0.0.0:8888")
+    app.run("0.0.0.0:8888",debug=True)
