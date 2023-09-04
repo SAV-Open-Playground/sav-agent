@@ -285,44 +285,22 @@ async def main(
 if __name__ == "__main__":
 
     # load SSL certificate and key
-    try:
-        log = r'./server_cert.log'
-        with open(log, 'w'):
-            pass
-        configuration = QuicConfiguration(
-            alpn_protocols=H3_ALPN,
-            is_client=False,
-            max_datagram_frame_size=65536,
-            quic_logger=None,
-            secrets_log_file=open(log, 'a'),
-        )
-        configuration.load_cert_chain(r'/root/savop-dev/savop/rpki/keys/node_1/cert.pem',
-                                      r'/root/savop-dev/savop/rpki/keys/node_1/key.pem')
-    #
-        print("Starting server on [::]:7777")
-        asyncio.run(main(
-                    host='::',
-                    port=7777,
-                    configuration=configuration,
-                    retry=False,
-                    ))
-    except:
-        log = r'/root/savop/logs/server_cert.log'
-        with open(log, 'w'):
-            pass
-        configuration = QuicConfiguration(
-            alpn_protocols=H3_ALPN,
-            is_client=False,
-            max_datagram_frame_size=65536,
-            quic_logger=None,
-            secrets_log_file=open(log, 'a'),
-        )
-        configuration.load_cert_chain(r'/root/savop/cert.pem',
-                                      r'/root/savop/key.pem')
-        print("Starting server on [::]:7777")
-        asyncio.run(main(
-            host='::',
-            port=7777,
-            configuration=configuration,
-            retry=False,
-        ))
+    log = r'/root/savop/logs/server_cert.log'
+    with open(log, 'w'):
+        pass
+    configuration = QuicConfiguration(
+        alpn_protocols=H3_ALPN,
+        is_client=False,
+        max_datagram_frame_size=65536,
+        quic_logger=None,
+        secrets_log_file=open(log, 'a'),
+    )
+    configuration.load_cert_chain(r'/root/savop/cert.pem',
+                                  r'/root/savop/key.pem')
+    print("Starting server on [::]:7777")
+    asyncio.run(main(
+        host='::',
+        port=7777,
+        configuration=configuration,
+        retry=False,
+    ))
