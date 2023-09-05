@@ -261,7 +261,9 @@ class IPTableManager():
             if interface not in interface_list:
                 self.logger.error(
                     f"the interface {interface} doesn't exit in the list:{interface_list}")
-                raise ValueError("the interface doesn't exit!")
+                self.logger.error(
+                    f"sav rule {data} is not added")
+                continue
             rules_in_table = session.query(SavTable).filter(
                 SavTable.prefix == prefix,
                 SavTable.interface == interface,
@@ -272,7 +274,7 @@ class IPTableManager():
                 # self.logger.debug(data)
                 log_msg = f"SAV RULE EXISTS: {data}"
                 # self.logger.info(log_msg)
-                return
+                continue
             src_apps.add(src_app)
             sib_row = SavTable(
                 prefix=prefix,
