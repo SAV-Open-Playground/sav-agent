@@ -278,10 +278,30 @@ def long_nlri_test():
         LOGGER.debug(e)
     return {"code": "0000", "message": "reset received"}
     # the returned value is not used by client
-@app.route('/passport/get_public_key', methods=['GET'])
-def get_public_key():
-    return 
-
+@app.route('/passport_key_exchange', methods=['GET','POST'])
+def passport_key_exchange():
+    # LOGGER.debug(request.json)
+    if sa.passport_app is None:
+        LOGGER.error("passport app not detected")
+        return None
+    sa.passport_app.rec_public_key(request.json)
+    return sa.passport_app.get_public_key_dict()
+@app.route('/passport_send_pkt', methods=['GET','POST'])
+def passport_send_pkt():
+    if sa.passport_app is None:
+        LOGGER.error("passport app not detected")
+        return {}
+    sa.passport_app.send_pkt(target_ip="10.0.0.2")
+    return {}
+@app.route('/passport_rec_pkt', methods=['GET','POST'])
+def passport_rec_pkt():
+    # LOGGER.debug(request.json)
+    if sa.passport_app is None:
+        LOGGER.error("passport app not detected")
+        return {}
+    sa.put_msg({"msg": request.json, "msg_type": "passport_pkt",
+                   "source_app": "passport_app", "source_link": "","pkt_rec_dt":time.time()})
+    return {}
 @app.route('/perf_test/', methods=["POST", "GET"])
 def perf_test():
     LOGGER.debug("got perf test")

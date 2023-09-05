@@ -202,7 +202,8 @@ class SavAgent():
                 self.add_app(app_instance)
             elif name == "passport":
                 app_instance = PassportApp(self, self.config["local_as"],self.config["rpdp_id"],logger=self.logger)
-                self.passport_app =app_instance
+                self.passport_app = app_instance
+                self.add_app(app_instance)
             else:
                 self.logger.error(msg=f"unknown app name: {name}")
             if self.config["enabled_sav_app"] == name:
@@ -396,6 +397,7 @@ class SavAgent():
             f"link status changed: {msg['source_link']} now is {msg['msg']}")
         meta = self.link_man.data.get(msg["source_link"])
         if self.passport_app and msg["msg"]:
+            self.logger.debug(meta)
             self.passport_app.initialize_share_key(meta["remote_as"],meta["remote_ip"])
     def _process_link_config(self, msg):
         """
@@ -560,13 +562,12 @@ class SavAgent():
             app = self.get_app(app_name)
             self.logger.debug(f"calling app: {app_name}")
             a, d = [], []
-            if isinstance(app, UrpfApp):
+            app_type = type(app)
+            if app_type in [UrpfApp]:
                 a, d = app.fib_changed(adds, dels)
-            elif (isinstance(app, EfpUrpfApp)
-                  or isinstance(app, FpUrpfApp)
-                  or isinstance(app, BarApp)):
+            elif app_type in [EfpUrpfApp, FpUrpfApp, BarApp, PassportApp]:
                 a, d = app.fib_changed()
-            elif isinstance(app, RPDPApp):
+            elif app_type in [RPDPApp]:
                 pass
             else:
                 self.logger.error(f":{type(app)}")
@@ -730,6 +731,8 @@ class SavAgent():
                     f"PERF-TEST: finished PROCESSING ({self.data['msg_count']}) at {time.time()}")
             case "perf_test":
                 self.rpdp_app.perf_test_send(list(map(json.loads,input_msg["msg"])))
+            case "passport_pkt":
+                self.passport_app.rec_pkt(input_msg["msg"])
             case _:
                 self.logger.warning(f"unknown msg type: [{m_t}]\n{input_msg}")
             

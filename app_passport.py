@@ -16,6 +16,8 @@ import json
 import time
 import random
 import requests
+import hashlib
+import hmac
 
 
 class PassportApp(SavApp):
@@ -23,6 +25,8 @@ class PassportApp(SavApp):
     SAV-APP Passport Implementation
     we use flask server for shared key generation
     only perform AS-LEVEL CHECK
+    Passport will not generate any rule for IPtable,
+    it will use HTTP to warp the packet and handle the filtering logic by itself
     """
 
     def __init__(self, agent, asn,router_id,name="passport_app", logger=None):
@@ -31,37 +35,112 @@ class PassportApp(SavApp):
         self.pp_v4_dict = {}
         self.p = 10007
         self.g = 5
-        self.private_key = random.randint(1, self.p - 1)
-        self.public_key = (self.g ** self.private_key) % self.p
-        self.shared_keys = {}
+        self._private_key = random.randint(1, self.p - 1)
+        self.public_key = (self.g ** self._private_key) % self.p
+        self.initialized_peers = {}
         self.asn = asn
         self.router_id = router_id
+        self.test_pkt_id = 0
     
-    def get_pp_v4_dict(self):
-        return self.pp_v4_dict
-        
+    
+    def rec_public_key(self,req):
+        asn = req["asn"]
+        public_key = req["public_key"]
+        if asn in self.initialized_peers:
+            return
+        shared_key = (public_key ** self._private_key) % self.p
+        if not asn in self.initialized_peers:
+            self.initialized_peers[asn] = {"shared_key":shared_key,"ip":req["router_id"]}
+            self.logger.debug(f"{self.asn}-{asn} shared key is {shared_key}")
+    
+    
+    def get_public_key_dict(self):
+        return {"asn":self.asn,"router_id":self.router_id,"public_key":self.public_key}
+    
     def initialize_share_key(self,target_asn,target_ip):
-        self.logger.debug(f"initialize share key with {target_asn} at {target_ip}")
-        req = {"asn":self.asn,"router_id":self.router_id,"public_key":self.public_key}
-        rep = requests.post(f"http://node_{target_asn}:8888/got_share_key/",json=req)
-        self.logger.debug(rep)
-        shared_key = (rep['public_key'] ** self.private_key) % self.p
-        self.shared_keys[target_asn] = shared_key
-        return req
-        
+        # self.logger.debug(f"initialize share key with {target_asn} at {target_ip}")
+        req = self.get_public_key_dict()
+        rep = requests.post(f"http://{target_ip}:8888/passport_key_exchange",json=req)
+        if rep.status_code != 200:
+            self.logger.error(f"get public key failed with {rep.status_code}")
+            return None
+        else:
+            rep = rep.json()
+            shared_key = (rep['public_key'] ** self._private_key) % self.p
+            self.initialized_peers[target_asn] = {"shared_key":shared_key,"ip":rep["router_id"]}
+            self.logger.debug(f"{self.asn}-{target_asn} shared key is {shared_key}")
+            return req
+    def fib_changed(self):
+        # always return empty list,since the passport needs to modify the packet directly    
+        return [],[]
+    
     def _get_next_hop(self, target_ip):
-        self.pp_v4_dict
-        self.logger.debug(self.pp_v4_dict)
-    def send_pkt(self, data,target_ip):
+        """return next_hop asn in int"""
+        self.update_pp_v4()
+        target_ip = netaddr.IPAddress(target_ip)
+        result = None
+        for prefix in self.pp_v4_dict:
+            if target_ip in prefix:
+                if result:
+                    if prefix in result[0]:
+                        result = (prefix, self.pp_v4_dict[prefix])
+                else:
+                    result = (prefix, self.pp_v4_dict[prefix])
+        result = result[1]["as_path"]
+        if len(result) != 1:
+            self.logger.error("as_path length is not 1")
+            self.logger.debug(result)
+            raise ValueError
+        result = result[0][0]
+        return result
+    
+    def send_pkt(self,target_ip,msg = None):
         """Warp http over each packet"""
-        http_data = {
-            "data":data,
-            "dst_asn":target_ip,
-            "src_asn":self.asn
-                     }
+        next_hop_asn = self._get_next_hop(target_ip)
+        next_hop_ip = self.initialized_peers[next_hop_asn]["ip"]
+        key = self.initialized_peers[next_hop_asn]["shared_key"]
+        self.test_pkt_id +=1
+        if msg is None:
+            msg = f"testing packet_{self.test_pkt_id} from asn: {self.asn}"
+        
+        data_for_mac = f"{self.router_id}{target_ip}{len(msg)}ipv4{msg[:8]}".encode()
+        mac = self.calculate_mac(data_for_mac,key)
+        pkt = {
+            "data": msg,
+            "target_ip": target_ip,
+            "origin_ip": self.router_id,
+            "dst_ip": next_hop_ip,
+            "src_ip":self.router_id, # maybe incorrect,but we don't care
+            "src_asn":self.asn,
+            "mac":mac
+            }
+        # self.logger.debug(f"http://{next_hop_ip}:8888/passport_rec_pkt")
+        rep = requests.post(f"http://{next_hop_ip}:8888/passport_rec_pkt",json=pkt)
+        if not rep.status_code == 200:
+            self.logger.error(f"send packet failed with {rep.status_code}")
+        # self.logger.debug(f"send packet to {next_hop_ip}")
+        
+    def calculate_mac(self,data,key):
+        key = str(key).encode()
+        mac = hmac.new(key,data,hashlib.sha256)
+        return str(mac.hexdigest())
+    
+    def check_mac(self,pkt):
+        data_for_mac = f"{pkt['origin_ip']}{pkt['target_ip']}{len(pkt['data'])}ipv4{pkt['data'][:8]}".encode()
+        mac = self.calculate_mac(data_for_mac,self.initialized_peers[pkt["src_asn"]]["shared_key"])
+        return mac == pkt["mac"]
     
     def rec_pkt(self, pkt):
-        raise NotImplementedError
+        if not self.check_mac(pkt):
+            self.logger.error("mac check failed")
+            return
+        dst_ip = pkt["dst_ip"]
+        target_ip = pkt["target_ip"]
+        if dst_ip == target_ip:
+            self.logger.info(f"packet reach target {target_ip}: {pkt['data']}")
+            return
+        self.send_pkt(target_ip,pkt["data"])
+            
     def _parse_bird_fib(self):
         """
         using birdc show all to get bird fib
@@ -83,49 +162,19 @@ class PassportApp(SavApp):
             self.logger.debug(f"TIMEIT {time.time()-t0:.4f} seconds")
         return result
 
-    def diff_pp_v4(self, reset=False):
+    def update_pp_v4(self):
         """
         return adds and dels,
         which is a list of modification required(tuple of (prefix,path))
         """
-        t0 = time.time()
-        if reset:
-            self.pp_v4_dict = {}
-        old_ = self.pp_v4_dict
         new_ = self._parse_bird_fib()
-        # self.logger.debug(type(new_))
-        # self.logger.debug((new_.keys()))
         if not "master4" in new_:
             self.logger.warning(
                 "no master4 table. Is BIRD ready?")
             return [], []
         new_ = new_["master4"]
-        dels = []
-        adds = []
         # self.logger.debug(new_)
-        for prefix, paths in new_.items():
-            if prefix not in old_:
-                for path in paths["as_path"]:
-                    adds.append((prefix, path))
-            else:
-                if paths != old_[prefix]:
-                    for path in old_[prefix]["as_path"]:
-                        if not path in paths["as_path"]:
-                            dels.append((prefix, path))
-                    for path in new_[prefix]["as_path"]:
-                        if not path in old_[prefix]["as_path"]:
-                            adds.append((prefix, path))
-        for prefix in old_:
-            if prefix not in new_:
-                for path in old_[prefix]["as_path"]:
-                    dels.append((prefix, path))
         self.pp_v4_dict = new_
-        # self.logger.debug(adds)
-        # self.logger.debug(dels)
-        t = time.time()-t0
-        if t > TIMEIT_THRESHOLD:
-            self.logger.debug(f"TIMEIT {time.time()-t0:.4f} seconds")
-        return adds, dels
 
     def _parse_birdc_show_table(self, data):
         """
@@ -143,13 +192,6 @@ class PassportApp(SavApp):
         if t > TIMEIT_THRESHOLD:
             self.logger.debug(f"TIMEIT {time.time()-t0:.4f} seconds")
         return result
-
-    # def _parse_bird_roa(self):
-    #     """
-    #     """
-    #     data = self._bird_cmd(cmd="show route table r4")
-    #     if data is None:
-    #         return {}
 
     def _build_inter_sav_spa_nlri(self, origin_asn, prefix, route_type=2, flag=1):
         return (route_type, origin_asn, prefix, flag)
@@ -202,100 +244,3 @@ class PassportApp(SavApp):
         if t > TIMEIT_THRESHOLD:
             self.logger.debug(f"TIMEIT {time.time()-t0:.4f} seconds")
         return table_name, parsed_rows
-
-    def send_msg(self, msg, config, link):
-        """send msg to other sav agent"""
-        t0 = time.time()
-        try:
-            link_type = link["link_type"]
-            link_name = link["protocol_name"]
-            map_data = {}
-
-            if link_name in config["link_map"]:
-                link_type = config["link_map"][link_name]["link_type"]
-                map_data = config["link_map"][link_name]["link_data"]
-            if link_type == "grpc":
-                self._send_grpc(msg, link, config["rpdp_id"], map_data)
-            elif link_type == "modified_bgp":
-                # using reference router
-                self._send_modified_bgp(msg)
-            elif link_type == "quic":
-                a = threading.Thread(target=self._send_quic, args=(
-                    msg, link, config["quic_config"], map_data))
-      #          a.setDaemon(True)
-                a.start()
-                a.join()
-            elif link_type == "native_bgp":
-                # this should not happen
-                self.logger.error(link)
-                self.logger.error(msg)
-            else:
-                self.logger.error(f"unhandled msg {msg}")
-            t = time.time()-t0
-            if t > TIMEIT_THRESHOLD:
-                self.logger.debug(f"TIMEIT {time.time()-t0:.4f} seconds")
-        except Exception as e:
-            self.logger.error(e)
-            self.logger.error(f"sending error")
-
-    def _quic_msg_box(self, msg, bgp_meta):
-        msg["sav_nlri"] = list(map(prefix2str, msg["sav_nlri"]))
-        msg["dummy_link"] = f"savbgp_{bgp_meta['remote_as']}_{bgp_meta['local_as']}"
-        return json.dumps(msg)
-
-    def _quic_msg_unbox(self, msg):
-        link_meta = self.agent.link_man.get_by_name_type(
-            msg["source_link"], "quic")
-        msg["msg"]["interface_name"] = link_meta["interface_name"]
-        msg["msg"]["as_path"] = msg["msg"]["sav_path"]
-        return msg
-
-    async def __quic_send(self, host, configuration, msg, url):
-        # self.logger.debug(host)
-        # self.logger.debug(url)
-        t0 = time.time()
-        try:
-            async with connect(
-                host,
-                7777,
-                configuration=configuration,
-                create_protocol=HttpClient,
-                session_ticket_handler=None,
-                local_port=0,
-                wait_connected=True,
-            ) as client:
-                client = cast(HttpClient, client)
-                ws = await client.websocket(url, subprotocols=["chat", "superchat"])
-
-                await ws.send(msg)
-                rep = await ws.recv()
-                if not rep == "good":
-                    self.logger.debug(rep)
-                    self.logger.error("not good")
-                await ws.close()
-                client._quic.close(error_code=ErrorCode.H3_NO_ERROR)
-        except Exception as e:
-            self.logger.debug(f"connect {host} failed")
-            self.logger.error(type(e))
-            self.logger.error(dir(e))
-            self.logger.debug(e.name())
-            trace = e.with_traceback()
-            # self.logger.error(str(e))
-            self.logger.error(str(trace))
-            self.logger.error(dir(trace))
-            self.logger.error()
-        t = time.time()-t0
-        if t > TIMEIT_THRESHOLD:
-            self.logger.debug(f"TIMEIT {time.time()-t0:.4f} seconds")
-
-    # async def __quic_send(self, host, configuration, msg, url):
-    #     # self.logger.debug(host)
-    #     # self.logger.debug(url)
-    #     t0 = time.time()
-    #     try:
-    #         key = f"quick_{host}"
-    #         if key in self.connect_objs:
-    #             client = self.connect_objs[key]["client"]
-    #             ws = self.connect_objs[key]["ws"]
-    #         else:# -*-coding:utf-8 -*-
-
