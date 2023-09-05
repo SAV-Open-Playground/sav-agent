@@ -246,9 +246,10 @@ def savop_quic():
         return {"code": "5004", "message": "quic server disabled"}
 
 
-@app.route('/reset/', methods=["POST", "GET"])
-def reset():
+@app.route('/reset_metric/', methods=["POST", "GET"])
+def reset_metric():
     sa.data["msg_count"] = 0
+    sa.rpdp_app.reset_metric()
     LOGGER.debug(F"PERF-TEST: TEST BEGIN at {time.time()}")
     return {"code": "0000", "message": "reset received"}
 
