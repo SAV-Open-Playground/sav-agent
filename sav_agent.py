@@ -506,7 +506,7 @@ class SavAgent():
         """
         process  bgp update message (from bird)
         """
-        self.logger.debug(f"{msg}")
+        # self.logger.debug(f"{msg}")
         msg["msg"]["is_native_bgp"] = not (len(msg["msg"]["sav_nlri"]) > 0)
         if msg["msg"]["is_native_bgp"]:
             # self.data["msg_count"]+=1
@@ -535,8 +535,8 @@ class SavAgent():
         # self.logger.debug(adds)
         for prefix, path in adds:
             changed_routes.append({prefix: path})
-        self.logger.info(
-            f"UPDATED LOCAL PREFIX-AS_PATH TABLE {self.rpdp_app.get_pp_v4_dict()}")
+        # self.logger.info(
+            # f"UPDATED LOCAL PREFIX-AS_PATH TABLE {self.rpdp_app.get_pp_v4_dict()}")
         self._send_origin(None, changed_routes)
         # self.logger.debug(f"_send_origin finished")
         self._notify_apps()

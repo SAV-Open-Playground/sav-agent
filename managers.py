@@ -285,8 +285,8 @@ class IPTableManager():
                 direction=None)
             session.add(sib_row)
             session.commit()
-            log_msg = f"SAV RULE ADDED: {data}"
-            self.logger.info(log_msg)
+            # log_msg = f"SAV RULE ADDED: {data}"
+            # self.logger.info(log_msg)
         session.close()
         # self.logger.debug(self.active_app)
         # if not (self.active_app in src_apps):
