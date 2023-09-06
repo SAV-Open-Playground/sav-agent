@@ -284,9 +284,10 @@ class IPTableManager():
                 source=src_app,
                 direction=None)
             session.add(sib_row)
-            session.commit()
+            
             # log_msg = f"SAV RULE ADDED: {data}"
             # self.logger.info(log_msg)
+        session.commit()
         session.close()
         # self.logger.debug(self.active_app)
         # if not (self.active_app in src_apps):
@@ -351,6 +352,7 @@ class BirdCMDManager():
         # self.logger.debug(f"end {cmd}")
         # self.logger.debug(f"cmd[{cmd}] waited {t1-t0:.4f} sec , executed {t2-t1:.4f} sec, total: {t2-t0:.4f} sec")
         return ret
+    
 class SIBManager():
     """
     manage the STB with SQLite and Flask-SQLAlchemy
