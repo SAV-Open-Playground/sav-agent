@@ -8,7 +8,6 @@
              In this implementation, the SPA and SPD is encoded into standard BGP Update message
 """
 
-import copy
 from multiprocessing import Manager
 import grpc
 import agent_msg_pb2
@@ -271,6 +270,25 @@ def save_session_ticket(ticket: SessionTicket) -> None:
         with open(args.session_ticket, "wb") as fp:
             pickle.dump(ticket, fp)
 
+# class QuicClientManager():
+#     """establish quic connection and reuse it for sending"""
+#     def __init__(self) -> None:
+#         self.connections = {}
+#         self.config = QuicConfiguration(is_client=True, alpn_protocols=H3_ALPN)
+#         self.config.load_verify_locations(r'/root/savop/ca_cert.pem')
+#     def send(self,msg,url,host):
+#         try:
+#             if host in self.connections:
+#                 asyncio.run(self.__quic_send(
+#                     host, configuration, msg, url), debug=True)
+#         except Exception as e:
+#             self.logger.exception(e)
+#             self.logger.error(e)
+#             self.logger.error(type(e))
+#         t = time.time()-t0
+#         if t > TIMEIT_THRESHOLD:
+#             self.logger.debug(f"TIMEIT {time.time()-t0:.4f} seconds")
+
 
 class RPDPApp(SavApp):
     """
@@ -284,63 +302,42 @@ class RPDPApp(SavApp):
         self.pp_v4_dict = {}
         self.connect_objs = {}
         self.metric = self.get_init_metric_dict()
+        self.quic_config = QuicConfiguration(
+            is_client=True, alpn_protocols=H3_ALPN)
+        self.quic_config.load_verify_locations(r'/root/savop/ca_cert.pem')
+
     def get_init_metric_dict(self):
         return {
-            "modified_bgp":{
-                "recv":init_metric(),"send":init_metric(),"start":None,"end":None
-                },
-            "grpc":{
-                "recv":init_metric(),"send":init_metric(),"start":None,"end":None
-                },
-            "quic":{
-                "recv":init_metric(),"send":init_metric(),"start":None,"end":None}
-            }
-        
+            "modified_bgp": {
+                "recv": init_metric(), "send": init_metric(), "start": None, "end": None
+            },
+            "grpc": {
+                "recv": init_metric(), "send": init_metric(), "start": None, "end": None
+            },
+            "quic": {
+                "recv": init_metric(), "send": init_metric(), "start": None, "end": None}
+        }
+
     def get_pp_v4_dict(self):
         # retrun the bird prefix-(AS)path table in RPDPApp (no refreshing)
         return self.pp_v4_dict
-
-    def _parse_bird_fib(self):
-        """
-        using birdc show all to get bird fib
-        """
-        t0 = time.time()
-        data = self.agent.bird_man.bird_cmd("show route all")
-        # data = self._bird_cmd(cmd="show route all")
-        if data is None:
-            return {}
-        data = data.split("Table")
-        while "" in data:
-            data.remove("")
-        result = {}
-        for table in data:
-            table_name, table_data = self._parse_bird_table(table)
-            result[table_name] = table_data
-        t = time.time()-t0
-        if t > TIMEIT_THRESHOLD:
-            self.logger.warning(f"TIMEIT {time.time()-t0:.4f} seconds")
-        return result
 
     def diff_pp_v4(self, reset=False):
         """
         return adds and dels,
         which is a list of modification required(tuple of (prefix,path))
+        if reset is True, will use empty dict as old_
         """
         t0 = time.time()
         if reset:
             self.pp_v4_dict = {}
         old_ = self.pp_v4_dict
-        new_ = self._parse_bird_fib()
-        # self.logger.debug(type(new_))
-        # self.logger.debug((new_.keys()))
-        if not "master4" in new_:
-            self.logger.warning(
-                "no master4 table. Is BIRD ready?")
-            return [], []
-        new_ = new_["master4"]
+        # new_ = self._parse_bird_fib()
+        new_ = self.agent.bird_man.get_fib()
         dels = []
         adds = []
         # self.logger.debug(new_)
+        # self.logger.debug(old_)
         for prefix, paths in new_.items():
             if prefix not in old_:
                 for path in paths["as_path"]:
@@ -364,8 +361,10 @@ class RPDPApp(SavApp):
         if t > TIMEIT_THRESHOLD:
             self.logger.warning(f"TIMEIT {time.time()-t0:.4f} seconds")
         return adds, dels
+
     def reset_metric(self):
         self.metric = self.get_init_metric_dict()
+
     def _parse_birdc_show_table(self, data):
         """
         parse the cmd output of birdc_show_table cmd
@@ -382,13 +381,6 @@ class RPDPApp(SavApp):
         if t > TIMEIT_THRESHOLD:
             self.logger.warning(f"TIMEIT {time.time()-t0:.4f} seconds")
         return result
-
-
-    def _build_inter_sav_spa_nlri(self, origin_asn, prefix, route_type=2, flag=1):
-        return (route_type, origin_asn, prefix, flag)
-
-    def _build_inter_sav_spd(self, sn, origin_router_id, origin_asn, validation_asn, optional_data, type=2, sub_type=2):
-        return (type, sub_type, sn, origin_router_id, origin_asn, validation_asn, optional_data)
 
     def _parse_bird_table(self, table):
         """
@@ -434,13 +426,21 @@ class RPDPApp(SavApp):
         if t > TIMEIT_THRESHOLD:
             self.logger.warning(f"TIMEIT {time.time()-t0:.4f} seconds")
         return table_name, parsed_rows
-    def _add_metric(self,msg,in_time,process_time,link_type,direction):
+
+    def _build_inter_sav_spa_nlri(self, origin_asn, prefix, route_type=2, flag=1):
+        return (route_type, origin_asn, prefix, flag)
+
+    def _build_inter_sav_spd(self, sn, origin_router_id, origin_asn, validation_asn, optional_data, type=2, sub_type=2):
+        return (type, sub_type, sn, origin_router_id, origin_asn, validation_asn, optional_data)
+
+    def _add_metric(self, msg, in_time, process_time, link_type, direction):
         self.metric[link_type][direction]["count"] += 1
         self.metric[link_type][direction]["size"] += len(str(msg))
         self.metric[link_type][direction]["time"] += process_time
         if self.metric[link_type]["start"] is None:
             self.metric[link_type]["start"] = in_time
         self.metric[link_type]["end"] = in_time+process_time
+
     def send_msg(self, msg, config, link):
         """send msg to other sav agent"""
         t0 = time.time()
@@ -459,7 +459,7 @@ class RPDPApp(SavApp):
                 self._send_modified_bgp(msg)
             elif link_type == "quic":
                 a = threading.Thread(target=self._send_quic, args=(
-                    msg, link, config["quic_config"], map_data))
+                    msg, link, self.quic_config, config["quic_config"], map_data))
                 # a.setDaemon(True)
                 a.start()
                 a.join()
@@ -469,14 +469,16 @@ class RPDPApp(SavApp):
                 self.logger.error(msg)
             else:
                 self.logger.error(f"unhandled msg {msg}")
-            t = time.time()-t0
-            if t > TIMEIT_THRESHOLD:
+            t = time.time()
+            self.logger.debug(f"sending {link_type} took {t-t0:.4f} seconds")
+            if t-t0 > TIMEIT_THRESHOLD:
                 self.logger.warning(f"TIMEIT {t:.4f} seconds")
-            self._add_metric(msg,t0,t,link_type,"send")
+            self._add_metric(msg, t0, t, link_type, "send")
         except Exception as e:
+            self.logger.exception(e)
             self.logger.error(e)
             self.logger.error(f"sending error")
-        
+
     def _quic_msg_box(self, msg, bgp_meta):
         msg["sav_nlri"] = list(map(prefix2str, msg["sav_nlri"]))
         msg["dummy_link"] = f"savbgp_{bgp_meta['remote_as']}_{bgp_meta['local_as']}"
@@ -513,6 +515,7 @@ class RPDPApp(SavApp):
                 await ws.close()
                 client._quic.close(error_code=ErrorCode.H3_NO_ERROR)
         except Exception as e:
+            self.logger.exception(e)
             self.logger.debug(f"connect {host} failed")
             self.logger.error(type(e))
             self.logger.error(dir(e))
@@ -523,21 +526,52 @@ class RPDPApp(SavApp):
             self.logger.error(dir(trace))
             self.logger.error()
 
-    def _send_quic(self, msg, bgp_meta, quic_meta, quic_link):
+    async def __quic_send2(self, host, configuration, msg, url, connection=None):
+        if connection is None:
+            try:
+                async with connect(
+                    host,
+                    7777,
+                    configuration=configuration,
+                    create_protocol=HttpClient,
+                    session_ticket_handler=None,
+                    local_port=0,
+                    wait_connected=True,
+                ) as client:
+                    client = cast(HttpClient, client)
+                    ws = await client.websocket(url, subprotocols=["chat", "superchat"])
+                    await ws.send(msg)
+                    rep = await ws.recv()
+                    if not rep == "good":
+                        self.logger.debug(rep)
+                        self.logger.error("not good")
+                    connection = {"client": client, "ws": ws}
+                # await ws.close()
+                # client._quic.close(error_code=ErrorCode.H3_NO_ERROR)
+            except Exception as e:
+                self.logger.exception(e)
+                self.logger.debug(f"connect {host} failed")
+                self.logger.error(type(e))
+                self.logger.error(dir(e))
+        else:
+            ws = connection["ws"]
+            await ws.send(msg)
+            rep = await ws.recv()
+            if not rep == "good":
+                self.logger.debug(rep)
+                self.logger.error("not good")
+
+    def _send_quic(self, msg, bgp_meta, configuration, quic_meta, quic_link):
         # self.logger.debug(msg)
         t0 = time.time()
         try:
-            configuration = QuicConfiguration(
-                is_client=True, alpn_protocols=H3_ALPN)
-            configuration.load_verify_locations(r'/root/savop/ca_cert.pem')
             url = f"wss://node_{bgp_meta['remote_as']}:7777/savop_quic"
             host = bgp_meta["remote_ip"]
-            # self.logger.debug(bgp_meta)
-            # self.logger.debug(quic_meta)
             msg = self._quic_msg_box(msg, bgp_meta)
-            asyncio.run(self.__quic_send(
+            asyncio.run(self.__quic_send2(
                 host, configuration, msg, url), debug=True)
         except Exception as e:
+            self.logger.exception(e)
             self.logger.error(e)
             self.logger.error(type(e))
         t = time.time()-t0
@@ -554,7 +588,7 @@ class RPDPApp(SavApp):
             remote_id = grpc_link["remote_id"]
             msg["dst_ip"] = remote_ip
             str_msg = json.dumps(msg)
-            self.logger.debug(remote_addr)
+            # self.logger.debug(remote_addr)
             with grpc.insecure_channel(remote_addr) as channel:
                 stub = agent_msg_pb2_grpc.AgentLinkStub(channel)
                 agent_msg = agent_msg_pb2.AgentMsg(
@@ -563,38 +597,47 @@ class RPDPApp(SavApp):
                 expected_str = f"got {str_msg}"
                 if not rep.json_str == expected_str:
                     raise ValueError(
-                        f"expected {expected_str}, got {rep.json_str}")
+                        f"json expected {expected_str}, got {rep.json_str}")
                 if not rep.sender_id == remote_id:
                     self.logger.debug(
                         f"sending to {remote_addr},{remote_id}")
                     raise ValueError(
-                        f"expected {remote_id}, got {rep.sender_id}")
+                        f"remote id expected {remote_id}, got {rep.sender_id}")
             t = time.time()-t0
             if t > TIMEIT_THRESHOLD:
                 self.logger.warning(f"TIMEIT {time.time()-t0:.4f} seconds")
         except Exception as e:
+            self.logger.exception(e)
             self.logger.error(e)
-
 
     def perf_test_send(self, msgs):
         count = 0
+        self.logger.debug("perf test send start")
         for msg in msgs:
             count += 1
             # self.logger.debug(f"START {count} msg ({msg['msg_type']})")
-            if msg["msg_type"] == "modified_bgp":
-                self.add_prepared_cmd(msg["msg"])
-                self.agent.bird_man.bird_cmd("call_agent")
-                # self._bird_cmd(cmd="call_agent")
-            # elif msg["type"]=="grpc":
-                # self._send_grpc(msg["msg"],msg["link"],msg["grpc_id"],msg["grpc_link"])
-            elif msg["msg_type"] == "quic":
-                msg["msg"]["sav_nlri"] = list(
-                    map(netaddr.IPNetwork, msg["msg"]["sav_nlri"]))
-                link = self.agent.link_man.data.get("savbgp_65502_65501")
-                self.send_msg(msg["msg"], self.agent.config, link)
-            else:
-                self.logger.error(f"unknown msg type {msg['msg_type']}")
-            # self.logger.debug(f"END {count} msg ({msg['msg_type']})")
+            match msg["msg_type"]:
+                case "dsav":
+                    self.add_prepared_cmd(msg)
+                    self.agent.bird_man.bird_cmd("call_agent")
+                case "bgp":
+                    self.add_prepared_cmd(msg)
+                    self.agent.bird_man.bird_cmd("call_agent")
+                case "grpc":
+                    link = self.agent.link_man.data.get("savbgp_65502_65501")
+                    self._send_grpc(msg["msg"],
+                                    link,
+                                    self.agent.config["rpdp_id"],
+                                    {"remote_addr": "10.0.1.1:5000", "remote_id": "10.0.1.1"})
+                case "quic":
+                    msg["msg"]["sav_nlri"] = list(
+                        map(netaddr.IPNetwork, msg["msg"]["sav_nlri"]))
+                    link = self.agent.link_man.data.get("savbgp_65502_65501")
+                    self.send_msg(msg["msg"], self.agent.config, link)
+                case _:
+                    self.logger.error(
+                        f"unknown msg type {msg['msg_type']}({type(msg['msg_type'])})")
+            self.logger.debug(f"SENT {count} msg ({msg['msg_type']})")
         self.logger.debug("perf test send finished")
 
     def _send_modified_bgp(self, msg):
@@ -609,7 +652,7 @@ class RPDPApp(SavApp):
         if cmd_len > 0:
             self.logger.warn(
                 f"last message not finished, {cmd_len} remaining")
-            self.logger.debug(self.prepared_cmd)
+            # self.logger.debug(self.prepared_cmd)
             time.sleep(0.01)
         # specialized for bird app, we need to convert the msg to byte array
         nlri = copy.deepcopy(msg["sav_nlri"])
@@ -653,10 +696,10 @@ class RPDPApp(SavApp):
         hex_str_msg["next_hop"] = [
             str(len(hex_str_msg["next_hop"]))] + hex_str_msg["next_hop"]
         hex_str_msg["next_hop"] = ",".join(hex_str_msg["next_hop"])
-        self.logger.debug(msg["sav_scope"])
+        # self.logger.debug(msg["sav_scope"])
         hex_str_msg["sav_scope"] = scope_to_hex_str(
             msg["sav_scope"], msg["is_interior"], is_as4)
-        self.logger.debug(hex_str_msg["sav_scope"] )
+        # self.logger.debug(hex_str_msg["sav_scope"] )
         hex_str_msg["is_interior"] = 1 if msg["is_interior"] else 0
         if msg["is_interior"]:
             as_path_code = "2"
@@ -751,13 +794,11 @@ class RPDPApp(SavApp):
             # if check_agent_agent_msg(msg):
             return msg
         except Exception as e:
+            self.logger.exception(e)
             self.logger.error(e)
             self.logger.error("construct msg error")
 
-
     def recv_http_msg(self, msg):
-        self.logger.debug(
-            f"app {self.name} got http msg ({msg['pkt_id']})at {time.time()} ")
         try:
             m_t = msg["msg_type"]
             if not m_t in ["bird_bgp_config", "bgp_update"]:
@@ -768,16 +809,17 @@ class RPDPApp(SavApp):
                 link_type = "native_bgp"
             msg["source_app"] = self.name
             msg["source_link"] = msg["msg"]["protocol_name"]
-           
+
             if m_t == "bgp_update":
                 self.put_link_up(msg["source_link"], link_type)
                 msg["msg"] = self.preprocess_msg(msg["msg"])
-                self.logger.debug("receive_http_msg")
+                # self.logger.debug("receive_http_msg")
                 self.process_rpdp_msg(msg)
             else:
                 self.logger.error(msg)
                 self.agent.put_msg(msg)
         except Exception as e:
+            self.logger.exception(e)
             self.logger.error(e)
 
     def process_grpc_msg(self, msg):
@@ -786,11 +828,13 @@ class RPDPApp(SavApp):
             msg["source_link"], "grpc")
         msg["msg"]["interface_name"] = link_meta["interface_name"]
         msg["link_type"] = "grpc"
-        self.logger.debug("receive_grpc_msg")
+        # self.logger.debug("receive_grpc_msg")
         self.process_rpdp_msg(msg)
 
-    def process_quic_msg(self, msg):
-        self._quic_msg_unbox(msg)
+    def process_quic_msg(self, msg, is_test_msg=False, test_id=None):
+        self.logger.debug("enter")
+        msg = self._quic_msg_unbox(msg)
+        self.logger.debug("unboxed")
         self.process_rpdp_msg(msg)
 
     def preprocess_msg(self, msg):
@@ -807,24 +851,19 @@ class RPDPApp(SavApp):
         del msg["routes"]
         # process sav_nlri
         msg["sav_nlri"] = hex_str_to_prefixes(msg["sav_nlri"])
-
         # process sav_scope
-        self.logger.debug(msg["sav_scope"])
         msg["sav_scope"] = str_to_scope(msg["sav_scope"])
-
         # process as_path, only used for inter-msgs
         msg["as_path"] = decode_csv(msg["as_path"])
-
-        # self.logger.debug(msg)
         return msg
 
     def process_rpdp_inter(self, msg, link):
         """
         determine whether to relay or terminate the message.
         """
-        # self.logger.debug(f"process rpdp inter msg {msg}, link {link}")
+        self.logger.debug(f"process rpdp inter msg {msg}, link {link}")
         link_meta = link
-        scope_data =msg["sav_scope"]
+        scope_data = msg["sav_scope"]
         # self.logger.debug(scope_data)
         relay_msg = {
             "sav_nlri": msg["sav_nlri"],
@@ -860,7 +899,8 @@ class RPDPApp(SavApp):
                         # self.logger.debug(scope_data)
                         relay_msg = self._construct_msg(
                             link, relay_msg, "relay", True)
-                        relay_msg['sav_nlri'] = list(map(str, relay_msg['sav_nlri']))
+                        relay_msg['sav_nlri'] = list(
+                            map(str, relay_msg['sav_nlri']))
                         self.agent._log_info_for_front(
                             msg, "relay_terminate", link_name)
                 else:
@@ -925,7 +965,6 @@ class RPDPApp(SavApp):
         process rpdp message, only inter-domain is supported
         regarding the nlri part, the processing is the same
         """
-        # self.logger.debug(input_msg)
         t0 = time.time()
         key_types = [("msg", dict), ("source_link", str),
                      ("source_app", str), ("link_type", str)]
@@ -934,6 +973,7 @@ class RPDPApp(SavApp):
         link_meta = self.agent.link_man.data.get(link_name)
         msg = input_msg["msg"]
         # self.logger.debug(list(msg.keys()))
+        # 'neighbor_as', 'interface_name', 'interface_index', 'protocol_name', 'as_path', 'sav_origin', 'sav_scope', 'sav_nlri', 'channels', 'is_native_bgp', 'add_routes', 'del_routes'
         # key_types = [("src", str), ("dst", str),
         #              ("msg_type", str), ("is_interior", bool),
         #              ("as4_session", bool), ("protocol_name",str),
@@ -953,9 +993,7 @@ class RPDPApp(SavApp):
                               "source_link": link_name,
                               "local_role": link_meta["local_role"]
                               })
-        # self.logger.debug(temp_list)
         self.agent.ip_man.add(temp_list)
-        # self.logger.debug(list(msg.keys()))
         if msg["is_interior"]:
             # in inter-domain, sav_path is as_path
             if not input_msg["msg_type"] == "grpc_msg":
@@ -965,11 +1003,9 @@ class RPDPApp(SavApp):
                 for path in msg["sav_scope"]:
                     temp.append(list(map(int, path)))
                 msg["sav_scope"] = temp
-                # self.logger.debug(temp)
             self.process_rpdp_inter(msg, link_meta)
-
         else:
             self.logger.error("INTRA MSG RECEIVED")
             self._process_sav_intra(msg, link_meta)
         t = time.time()-t0
-        self._add_metric(input_msg,t0,t,input_msg["link_type"],"recv")
+        self._add_metric(input_msg, t0, t, input_msg["link_type"], "recv")

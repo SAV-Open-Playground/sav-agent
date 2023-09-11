@@ -11,7 +11,6 @@
 from sav_common import *
 
 
-
 class UrpfApp(SavApp):
     """
     a SavApp implementation of uRPF
@@ -35,8 +34,6 @@ class UrpfApp(SavApp):
         # TODO: implement del
         # self.logger.debug(f"app {self.name} fib_changed")
         # remove local prefixes
-        adds = remove_local(adds)
-        dels = remove_local(dels)
         if self.mode == "strict":
             return self._fib_changed_strict(adds, dels)
         elif self.mode == "loose":
@@ -49,14 +46,10 @@ class UrpfApp(SavApp):
         """
         add_rules = []
         del_rules = []
-        for row in adds:
-            prefix = netaddr.IPNetwork(
-                row["Destination"]+"/"+row["Genmask"])
+        for prefix, row in adds.items():
             add_rules.append(sav_rule_tuple(
                 prefix, row.get("Iface"), self.name))
-        for row in dels:
-            prefix = netaddr.IPNetwork(
-                row["Destination"]+"/"+row["Genmask"])
+        for prefix, row in adds.items():
             del_rules.append(sav_rule_tuple(
                 prefix, row.get("Iface"), self.name))
         return add_rules, del_rules
@@ -67,12 +60,8 @@ class UrpfApp(SavApp):
         """
         add_rules = []
         del_rules = []
-        for row in adds:
-            prefix = netaddr.IPNetwork(
-                row["Destination"]+"/"+row["Genmask"])
+        for prefix, row in adds.items():
             add_rules.append(sav_rule_tuple(prefix, "*", self.name))
-        for row in dels:
-            prefix = netaddr.IPNetwork(
-                row["Destination"]+"/"+row["Genmask"])
+        for prefix, row in adds.items():
             del_rules.append(sav_rule_tuple(prefix, "*", self.name))
         return add_rules, del_rules

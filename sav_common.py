@@ -16,6 +16,7 @@ import logging
 import logging.handlers
 import netaddr
 import requests
+import copy
 import subprocess
 
 
@@ -65,12 +66,12 @@ def parse_bird_table(table, logger=None):
         heading = row.pop(0)
         # skip blackhole
         # if "blackhole" in heading:
-            # continue
+        # continue
         prefix = heading.split(" ")[0]
         prefix = prefix.replace("24-24", "24")
         # TODO: demo filter
         # logger.debug(f"prefix:{prefix}")
-        if prefix =="0.0.0.0/0":
+        if prefix == "0.0.0.0/0":
             continue
         prefix = netaddr.IPNetwork(prefix)
         if prefix not in parsed_rows:
@@ -87,22 +88,25 @@ def parse_bird_table(table, logger=None):
                 temp["interface_ip"] = line.split(
                     "on ")[0].split("via ")[-1]
             if line.startswith("                     "):
-                if not temp=={}:
+                if not temp == {}:
                     parsed_rows[prefix].append(temp)
                     temp = {}
         # add the last one
-        if not temp=={}:
+        if not temp == {}:
             parsed_rows[prefix].append(temp)
         # parsed_rows[prefix].sort()
         if len(parsed_rows[prefix]) == 1 and len(parsed_rows[prefix][0]) == 0:
             del parsed_rows[prefix]
     return table_name, parsed_rows
 
-def check_msg(key,msg,meta=SAV_META):
+
+def check_msg(key, msg, meta=SAV_META):
     """check msg before sending to ensure the msg can be processed properly"""
     if not key in SAV_META:
         raise KeyError(f"key {key} not in SAV_META")
-    keys_types_check(msg,meta[key])
+    keys_types_check(msg, meta[key])
+
+
 def rule_list_diff(old_rules, new_rules):
     """
     return adds and dels for the given lists
@@ -308,7 +312,7 @@ class SavApp():
             "source_link": link_name,
             "link_type": link_type,
             "msg": True,
-            "pkt_rec_dt":time.time()
+            "pkt_rec_dt": time.time()
         }
         self.agent.put_msg(msg)
 
@@ -319,7 +323,7 @@ class SavApp():
             "source_app": self.name,
             "source_link": link_name,
             "msg": link_type,
-            "pkt_rec_dt":time.time()
+            "pkt_rec_dt": time.time()
         }
         self.agent.put_msg(msg)
 
@@ -329,7 +333,7 @@ class SavApp():
             "source_app": self.name,
             "source_link": link_name,
             "msg": False,
-            "pkt_rec_dt":time.time()
+            "pkt_rec_dt": time.time()
         }
         self.agent.put_msg(msg)
 
@@ -338,8 +342,10 @@ class SavApp():
 
     def _parse_roa_table(self, t_name='r4'):
         return get_roa(self.logger, t_name)
+
+
 def init_metric():
-    return {"count":0,"time":0.0,"size":0}
+    return {"count": 0, "time": 0.0, "size": 0}
 
 # def birdc_cmd(logger, cmd):
 #     """
@@ -366,22 +372,24 @@ def init_metric():
 #         return None
 #     out = "\n".join(out.split("\n")[1:])
 #     return out
-def birdc_cmd(logger, cmd):
+
+
+def birdc_cmd(logger, cmd, log_err=True):
     """
     execute bird command and return the output in std
     """
-    t0=time.time()
+    t0 = time.time()
     # logger.debug(cmd)
-    # cmd = f"/usr/local/sbin/birdc {cmd}" 
+    # cmd = f"/usr/local/sbin/birdc {cmd}"
     # cmd = ['birdc',cmd]
     # cmd = "birdc "+cmd
-    
+
     cmd = f"/usr/local/sbin/birdc {cmd}"
     # cmd = shlex.split(cmd)
     # cmd = [cmd]
     # cmd = ["/usr/local/sbin/birdc",cmd]
-    
-    # logger.debug(cmd)       
+
+    # logger.debug(cmd)
     try:
         # logger.debug(os.system(cmd))
         # proc = subprocess.run(cmd,capture_output=True,shell=True)
@@ -389,11 +397,11 @@ def birdc_cmd(logger, cmd):
             # logger.debug("111111")
             # t1 = time.time()
             proc = subprocess.Popen(
-            ["/usr/local/sbin/birdc","call_agent"],
-            # shell=True,
-            stdout=subprocess.PIPE,
-            stdin=subprocess.PIPE,
-            stderr=subprocess.PIPE)
+                ["/usr/local/sbin/birdc", "call_agent"],
+                # shell=True,
+                stdout=subprocess.PIPE,
+                stdin=subprocess.PIPE,
+                stderr=subprocess.PIPE)
             proc.stdin.write("\n".encode("utf-8"))
             proc.stdin.flush()
             proc.wait()
@@ -405,12 +413,12 @@ def birdc_cmd(logger, cmd):
             cmd = cmd.split(" ")
             proc = subprocess.Popen(
                 cmd,
-            # executable="/usr/local/sbin/birdc",
-            # args=cmd,
-            # shell=True,
-            stdout=subprocess.PIPE,
-            stdin=subprocess.PIPE,
-            stderr=subprocess.PIPE)
+                # executable="/usr/local/sbin/birdc",
+                # args=cmd,
+                # shell=True,
+                stdout=subprocess.PIPE,
+                stdin=subprocess.PIPE,
+                stderr=subprocess.PIPE)
             # proc = subprocess.check_output(cmd,shell=True)
             # logger.debug(proc)
             # logger.debug(proc.stderr.read())
@@ -422,26 +430,29 @@ def birdc_cmd(logger, cmd):
         logger.debug(cmd)
         logger.debug(type(e))
         logger.error(e)
-    t =time.time()-t0
-    if t> TIMEIT_THRESHOLD:
+    t = time.time()-t0
+    if t > TIMEIT_THRESHOLD:
         logger.debug(cmd)
         logger.warning(f"TIMEIT {time.time()-t0:.4f} seconds")
     temp = out.split("\n")[0]
     temp = temp.split()
     if len(temp) < 2:
-        logger.debug(cmd)
-        logger.debug(proc.stderr.read())
-        logger.error(temp)
-        logger.error("length to short")
+        if log_err:
+            logger.debug(cmd)
+            logger.debug(proc.stderr.read())
+            logger.error(temp)
+            logger.error("length to short")
         return None
     if not (temp[0] == "BIRD" and temp[-1] == "ready."):
         logger.error(f"birdc execute error:{out}")
         return None
     out = "\n".join(out.split("\n")[1:])
-    t =time.time()-t0
+    t = time.time()-t0
     # if t> TIMEIT_THRESHOLD:
     #     logger.warning(f"TIMEIT {time.time()-t0:.4f} seconds")
     return out
+
+
 def birdc_show_protocols(logger):
     """
     execute show protocols 
@@ -471,30 +482,34 @@ def birdc_get_protos_by(logger, key, value):
             result.append(a)
     return result
 
-def parse_bird_fib(logger):
+
+def parse_kernel_fib():
     """
-    using birdc show all to get bird fib
+    parsing the output of "route -n -F" command
     """
-    # logger.debug("parse_bird_fib")
-    data = birdc_cmd(logger,cmd="show route all")
-    # logger.debug(data)
-    if data is None:
-        logger.warning("empty bird fib")
-        return {}
-    # logger.debug(data)
-    data = data.split("Table")
-    # logger.debug(data)
-    while "" in data:
-        data.remove("")
-    result = {}
-    for table in data:
-        # logger.debug(f"{table}")
-        table_name, table_data = parse_bird_table(
-            table, logger)
-        result[table_name] = table_data
-        # logger.debug(f"{table_name}:{table_data}")
-    # logger.debug("parse_bird_fib done")
-    return result
+    proc = subprocess.Popen(
+        "route -n -F", shell=True, stdout=subprocess.PIPE)
+
+    output = proc.stdout.read().decode()
+    while "  " in output:
+        output = output.replace("  ", " ")
+    output = output.split("\n")
+    output.pop()  # removing tailing empty line
+    _ = output.pop(0)
+    output = list(map(lambda x: x.split(" "), output))
+    headings = output.pop(0)
+    output = list(map(lambda x: dict(zip(headings, x)), output))
+    # remove default route
+    temp = {}
+    for row in output:
+        if row["Destination"] == "0.0.0.0":
+            continue
+        # Intra is not implemented,so filter out private
+        prefix = netaddr.IPNetwork(row["Destination"]+"/"+row["Genmask"])
+        if not prefix.is_private():
+            temp[prefix] = row
+    return temp
+
 
 def birdc_get_import(logger, protocol_name, channel_name="ipv4"):
     """
@@ -684,13 +699,6 @@ def str_to_scope(input_str):
     return result
 
 
-def remove_local(list_of_fib):
-    """
-    remove local prefixes
-    """
-    return [i for i in list_of_fib if not '0.0.0.0' in i['Gateway']]
-
-
 def get_aspa(logger, hostname="savopkrill.com", port_number=3000, pwd="krill"):
     while True:
         try:
@@ -698,7 +706,7 @@ def get_aspa(logger, hostname="savopkrill.com", port_number=3000, pwd="krill"):
                        "Content-Type": "application/json"}
             url = f"https://{hostname}:{port_number}/api/v1/cas/testbed/aspas"
             response = requests.request(
-                "GET", url, headers=headers, verify=False,timeout=15)
+                "GET", url, headers=headers, verify=False, timeout=15)
             response.raise_for_status()  # Raises an exception for any HTTP error status codes
             # Return the response as a dictionary
             temp = response.json()
@@ -752,21 +760,25 @@ def aspa_check(meta, aspa_info):
 #         if not tell_str_is_interior(path):
 #             raise ValueError(f"{path_key} should contain path value")
 
+
 #     if msg["is_interior"]:
 #         if not tell_str_is_interior(msg[origin_key]):
 #             raise ValueError(
 #                 "interior msg should have interior path and origin")
 #     return True
 TIMEIT_THRESHOLD = 0.5
+
+
 def sav_timer(logger):
     def timer_func(func):
-        # This function shows the execution time of 
+        # This function shows the execution time of
         # the function object passed
         def wrap_func(*args, **kwargs):
             t1 = time.time()
             result = func(*args, **kwargs)
             t2 = time.time()
-            logger.debug(f'Function {func.__name__!r} executed in {(t2-t1):.4f}s')
+            logger.debug(
+                f'Function {func.__name__!r} executed in {(t2-t1):.4f}s')
             return result
         return wrap_func
     return timer_func

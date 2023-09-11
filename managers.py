@@ -9,6 +9,7 @@
 '''
 import subprocess
 import json
+
 from model import db
 from model import SavInformationBase, SavTable
 from sav_common import *
@@ -246,7 +247,9 @@ class IPTableManager():
         add list of rules to the STB
         currently only add ipv4 and inter-domain rules
         """
-        # self.logger.debug(data_list)
+        if len(data_list) == 0:
+            return
+        self.logger.debug(f"BEGIN inserting {len(data_list)}")
         session = db.session
         src_apps = set()
         for data in data_list:
@@ -269,11 +272,7 @@ class IPTableManager():
                 SavTable.interface == interface,
                 SavTable.source == src_app)
             if rules_in_table.count() != 0:
-                # self.logger.warning("rule exists")
-                # self.logger.debug(rules_in_table)
-                # self.logger.debug(data)
                 log_msg = f"SAV RULE EXISTS: {data}"
-                # self.logger.info(log_msg)
                 continue
             src_apps.add(src_app)
             sib_row = SavTable(
@@ -283,18 +282,14 @@ class IPTableManager():
                 local_role=local_role,
                 source=src_app,
                 direction=None)
+            # self.logger.debug(dir(session))
             session.add(sib_row)
-            
-            # log_msg = f"SAV RULE ADDED: {data}"
-            # self.logger.info(log_msg)
+
+            log_msg = f"SAV RULE ADDED: {data}"
+            self.logger.info(log_msg)
         session.commit()
         session.close()
-        # self.logger.debug(self.active_app)
-        # if not (self.active_app in src_apps):
-        # return
-        # refresh_info = iptables_refresh(self.active_app, self.logger)
-        # log_msg = f"IP TABLES CHANGED: {refresh_info}"
-        # self.logger.debug(log_msg)
+        self.logger.debug(f"END inserting {len(data_list)}")
 
     def delete(self, input_id):
         session = db.session
@@ -330,29 +325,137 @@ class IPTableManager():
         session.close()
         return data
 
+
 class BirdCMDManager():
     """manage the execution of bird command, avoid concurrency issue"""
-    def __init__(self,logger) -> None:
+
+    def __init__(self, logger) -> None:
         self.logger = logger
         self.cmd_list = []
         self.is_running = False
-    def bird_cmd(self,cmd):
-        # self.logger.debug(f"got {cmd}")
-        t0 = time.time()
+        self.bird_fib = {"check_time": None, "update_time": None, "data": {}}
+
+    def bird_cmd(self, cmd, log_err=True):
         # if self.is_running:
-            # self.logger.debug(f"pausing {cmd}")
+        # self.logger.debug(f"pausing {cmd}")
         while self.is_running:
             time.sleep(0.01)
         # self.logger.debug(f"start {cmd}")
-        t1 = time.time()
         self.is_running = True
-        ret = birdc_cmd(self.logger,cmd)
+        ret = birdc_cmd(self.logger, cmd, log_err)
         self.is_running = False
-        t2 = time.time()
-        # self.logger.debug(f"end {cmd}")
-        # self.logger.debug(f"cmd[{cmd}] waited {t1-t0:.4f} sec , executed {t2-t1:.4f} sec, total: {t2-t0:.4f} sec")
         return ret
-    
+
+    def update_fib(self, log_err=True):
+        """return adds, dels of modifications"""
+        new_fib = self._parse_bird_fib(log_err)
+        adds, dels = self._diff_fib(self.bird_fib["data"], new_fib)
+        if len(adds) + len(dels) > 0:
+            self.bird_fib["update_time"] = copy.deepcopy(
+                self.bird_fib["check_time"])
+
+        self.bird_fib["data"] = new_fib
+        self.bird_fib["check_time"] = time.time()
+
+    def _diff_fib(self, old_fib, new_fib):
+        """
+        return list of added and deleted rows in dict format
+        """
+        # self.logger.debug(f"old fib:{old_fib}, new_fib:{new_fib}")
+        dels = {}
+        adds = {}
+        for prefix in new_fib:
+            if not (new_fib.get(prefix, None) == old_fib.get(prefix, None)):
+                adds[prefix] = new_fib[prefix]
+        for prefix in old_fib:
+            if not (new_fib.get(prefix, None) == old_fib.get(prefix, None)):
+                dels[prefix] = new_fib[prefix]
+        # self.logger.debug(f"adds:{adds}")
+        # self.logger.debug(f"dels:{dels}")
+        return adds, dels
+
+    def get_fib(self):
+        return self.bird_fib["data"]
+
+    def _parse_bird_fib(self, log_err):
+        """
+        using birdc show all to get bird fib,
+        return pre-as_path dict
+        """
+        t0 = time.time()
+        data = self.bird_cmd("show route all", log_err)
+        # data = self._bird_cmd(cmd="show route all")
+        if data is None:
+            return {}
+        data = data.split("Table")
+        while "" in data:
+            data.remove("")
+        result = {}
+        for table in data:
+            table_name, table_data = self._parse_bird_table(table)
+            result[table_name] = table_data
+        if not "master4" in result:
+            self.logger.warning(
+                "no master4 table. Is BIRD ready?")
+            return {}
+        result = result["master4"]
+        escape_prefix = ["0.0.0.0/0"]
+        escape_prefix = list(map(netaddr.IPNetwork, escape_prefix))
+        for prefix in escape_prefix:
+            if prefix in result:
+                del result[prefix]
+        t = time.time() - t0
+        if t > TIMEIT_THRESHOLD:
+            self.logger.warning(f"TIMEIT {time.time()-t0:.4f} seconds")
+        return result
+
+    def _parse_bird_table(self, table):
+        """
+        return table_name (string) and parsed_rows (dict)
+        only parse the as_path
+        """
+        # self.logger.debug(table)
+        t0 = time.time()
+        temp = table.split("\n")
+        while '' in temp:
+            temp.remove('')
+
+        table_name = temp[0][1:-1]
+        parsed_rows = {}
+        temp = temp[1:]
+        rows = []
+        this_row = []
+        for line in temp:
+            if not (line[0] == '\t' or line[0] == ' '):
+                rows.append(this_row)
+                this_row = [line]
+            else:
+                this_row.append(line)
+        rows.append(this_row)
+        while [] in rows:
+            rows.remove([])
+        for row in rows:
+            prefix = row.pop(0)
+            # if "blackhole" in prefix:
+            #     continue
+            prefix = prefix.split(" ")[0]
+            prefix = prefix.replace("24-24", "24")
+            prefix = netaddr.IPNetwork(prefix)
+            # if prefix.is_private():
+            #     # self.logger.debug(f"private prefix {prefix} ignored")
+            #     continue
+            temp = {"as_path": []}
+            for line in row:
+                if line.startswith("\tBGP.as_path: "):
+                    temp["as_path"].append(list(map(
+                        int, line.split(": ")[1].split(" "))))
+            parsed_rows[prefix] = temp
+        t = time.time()-t0
+        if t > TIMEIT_THRESHOLD:
+            self.logger.debug(f"TIMEIT {time.time()-t0:.4f} seconds")
+        return table_name, parsed_rows
+
+
 class SIBManager():
     """
     manage the STB with SQLite and Flask-SQLAlchemy
@@ -424,7 +527,6 @@ class InfoManager():
             raise ValueError("data is not a dictionary")
         self.logger = logger
         self.data = data
-        
 
     def add(self, msg):
         raise NotImplementedError
@@ -479,23 +581,23 @@ class LinkManager(InfoManager):
 
     def _get_link_name(self, meta_dict):
         return meta_dict["protocol_name"]
-
     # def is_mapped(self,link_map,link_name):
     #     """return the correct link_type and info for this link"""
     #     if not link_name in self.data:
     #         raise KeyError(f"link_name {link_name} not found")
     #     ifa = self.data[link_name]["interface_name"]
     #     return link_map.get(ifa,None)
+
     def update_link(self, meta_dict):
         self._is_good_meta(meta_dict)
         link_name = self._get_link_name(meta_dict)
         old_meta = self.data[link_name]
         if old_meta["status"] == meta_dict["status"]:
-            return 
+            return
         self.data[link_name] = meta_dict
         self.logger.debug(f"link updated: {self.data[link_name]} ")
 
-    def get_by_name_type(self, link_name,link_type=None):
+    def get_by_name_type(self, link_name, link_type=None):
         if link_name not in self.data:
             self.logger.debug(f"all link names:{self.data.keys()}")
             raise KeyError(f"link {link_name} not found")
@@ -507,41 +609,44 @@ class LinkManager(InfoManager):
         result = []
         if not is_asn(remote_as):
             raise ValueError(f"{remote_as} is not a valid asn")
-        for _,link in self.data.items():
+        for _, link in self.data.items():
             if (link["remote_as"] == remote_as) and (
                     link["is_interior"] == is_interior):
                 result.append(link)
         return result
-    def get_by_kv(self, k,v):
+
+    def get_by_kv(self, k, v):
         """return a list of link_names that matches the key and value
         """
         result = []
-        for link_name,meta in self.data.items():
+        for link_name, meta in self.data.items():
             if not k in meta:
                 raise ValueError(f"{k} is not a valid key")
             if meta[k] == v:
                 result.append(link_name)
         return result
-    def rpdp_links(self,link_map):
+
+    def rpdp_links(self, link_map):
         """return a list of link_name and link_data tuple that are rpdp links
         """
         results = []
-        for link_name,link in self.data.items():
+        for link_name, link in self.data.items():
             # self.logger.debug(link["protocol_name"] )
             # self.logger.debug(link_map.keys() )
             if link["protocol_name"] in link_map:
-                results.append((link_name,link))
+                results.append((link_name, link))
             elif link["link_type"] == "modified_bgp":
-                results.append((link_name,link))
+                results.append((link_name, link))
             else:
                 self.logger.debug(f"ignoring no sav link: {link_name}")
         return results
+
     def get_all_up(self, include_native_bgp=False):
         """
         return a list of all up link_names ,use get(link_name) to get link object
         """
         temp = []
-        for link_name,link in self.data.items():
+        for link_name, link in self.data.items():
             # self.logger.debug(link["protocol_name"])
             if link["status"]:
                 if link["link_type"] == "native_bgp":
@@ -570,7 +675,7 @@ class LinkManager(InfoManager):
         # self.logger.debug(f"interface_name:{interface_name}")
         result = []
         # self.logger.debug(self.data)
-        for _,link in self.data.items():
+        for _, link in self.data.items():
             # self.logger.debug(link)
             if link["interface_name"] == interface_name:
                 result.append(link)
@@ -585,7 +690,7 @@ class LinkManager(InfoManager):
                      ("remote_ip", str), ("local_ip", str),
                      ("local_role", str), ("remote_role", str),
                      ("interface_name", str), ("link_type", str),
-                     ("protocol_name", str), ("as4_session",bool),
+                     ("protocol_name", str), ("as4_session", bool),
                      ("is_interior", bool), ("status", bool),
                      ("initial_broadcast", bool)]
         keys_types_check(meta, key_types)
@@ -601,9 +706,9 @@ def get_new_link_meta(app_name, link_type, initial_status=False):
     meta = {"remote_as": 0,
             "remote_ip": "",
             "local_role": "",
-            "remote_role":"",
+            "remote_role": "",
             "local_ip": "",
-            "local_as":0,
+            "local_as": 0,
             "interface_name": "",
             "protocol_name": "",
             "as4_session": True,

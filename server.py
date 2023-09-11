@@ -5,7 +5,6 @@
 """
 import json
 import time
-import netaddr
 from flask import Flask
 from flask import request
 from model import db
@@ -18,7 +17,7 @@ import grpc
 import agent_msg_pb2
 import agent_msg_pb2_grpc
 from managers import iptables_refresh, router_acl_refresh
-import random
+
 
 class GrpcServer(agent_msg_pb2_grpc.AgentLinkServicer):
     def __init__(self, agent, logger):
@@ -30,7 +29,6 @@ class GrpcServer(agent_msg_pb2_grpc.AgentLinkServicer):
         t0 = time.time()
         msg_str = req.json_str
         req_src_ip = context.peer().split(":")[1]
-        # self.logger.debug(f"grpc got msg from {req.sender_id}")
         my_id = self.agent.config["rpdp_id"]
         reply = f"got {msg_str}"
         response = agent_msg_pb2.AgentMsg(sender_id=my_id, json_str=reply)
@@ -52,10 +50,11 @@ class GrpcServer(agent_msg_pb2_grpc.AgentLinkServicer):
                     f"server disabled msg received: {msg_dict}")
                 raise Exception("got msg on disabled server")
             msg_dict["msg_type"] = "grpc_msg"
-            msg_dict["msg_rec_dt"] = t0
+            msg_dict["pkt_rec_dt"] = t0
             self.agent.put_msg(msg_dict)
             # self.agent.grpc_recv(msg_dict, req.sender_id)
         except Exception as err:
+            self.logger.exception(err)
             self.logger.debug(msg_str)
             self.logger.error(f"grpc msg adding error: {err}")
 
@@ -135,11 +134,11 @@ def index():
     the entrypoint for reference_router
     """
     t0 = time.time()
-    # LOGGER.debug("start of bird_bgp_upload")
     rep = {}
     try:
         msg = json.loads(request.data)
     except Exception as err:
+        LOGGER.exception(err)
         LOGGER.error(err)
         return {"code": "5001", "message": "Invalid Json String", "data": str(request.data)}
     try:
@@ -173,6 +172,7 @@ def index():
         sa.put_msg(msg)
         rep = {"code": "0000", "message": "success"}
     except Exception as err:
+        LOGGER.exception(err)
         LOGGER.error(type(err))
         LOGGER.error(msg)
         LOGGER.error(err)
@@ -217,15 +217,15 @@ def update_config():
     return {"code": "0000", "message": msg}
 
 
-@app.route('/metric/', methods=["POST","GET"])
+@app.route('/metric/', methods=["POST", "GET"])
 def metric():
-    rep = {"agent":sa.data["metric"],"rpdp_app":sa.rpdp_app.metric}
+    rep = {"agent": sa.data["metric"], "rpdp_app": sa.rpdp_app.metric}
     return rep
 
 
 @app.route('/savop_quic/', methods=["POST"])
 def savop_quic():
-    t0= time.time()
+    t0 = time.time()
     if sa.config["quic_config"]["server_enabled"]:
         msg = json.loads(request.data.decode())
         msg = {
@@ -234,7 +234,7 @@ def savop_quic():
             "link_type": "quic",
             "msg_type": "quic_msg",
             "source_link": msg["dummy_link"],
-            "pkt_rec_dt":t0
+            "pkt_rec_dt": t0
         }
         try:
             sa.put_msg(msg)
@@ -252,7 +252,6 @@ def reset_metric():
     sa.rpdp_app.reset_metric()
     LOGGER.debug(F"PERF-TEST: TEST BEGIN at {time.time()}")
     return {"code": "0000", "message": "reset received"}
-
 
     # the returned value is not used by client
 _, grpc_server, quic_server, grpc_addr, quic_addr = _update_config(
@@ -279,7 +278,9 @@ def long_nlri_test():
         LOGGER.debug(e)
     return {"code": "0000", "message": "reset received"}
     # the returned value is not used by client
-@app.route('/passport_key_exchange', methods=['GET','POST'])
+
+
+@app.route('/passport_key_exchange', methods=['GET', 'POST'])
 def passport_key_exchange():
     # LOGGER.debug(request.json)
     if sa.passport_app is None:
@@ -287,22 +288,28 @@ def passport_key_exchange():
         return None
     sa.passport_app.rec_public_key(request.json)
     return sa.passport_app.get_public_key_dict()
-@app.route('/passport_send_pkt', methods=['GET','POST'])
+
+
+@app.route('/passport_send_pkt', methods=['GET', 'POST'])
 def passport_send_pkt():
     if sa.passport_app is None:
         LOGGER.error("passport app not detected")
         return {}
     sa.passport_app.send_pkt(target_ip="10.0.0.2")
     return {}
-@app.route('/passport_rec_pkt', methods=['GET','POST'])
+
+
+@app.route('/passport_rec_pkt', methods=['GET', 'POST'])
 def passport_rec_pkt():
     # LOGGER.debug(request.json)
     if sa.passport_app is None:
         LOGGER.error("passport app not detected")
         return {}
     sa.put_msg({"msg": request.json, "msg_type": "passport_pkt",
-                   "source_app": "passport_app", "source_link": "","pkt_rec_dt":time.time()})
+                "source_app": "passport_app", "source_link": "", "pkt_rec_dt": time.time()})
     return {}
+
+
 @app.route('/perf_test/', methods=["POST", "GET"])
 def perf_test():
     LOGGER.debug("got perf test")
@@ -311,7 +318,7 @@ def perf_test():
         lines = f.readlines()
         f.close()
         sa.put_msg({"msg": lines, "msg_type": "perf_test",
-                   "source_app": "", "source_link": "","pkt_rec_dt":time.time()})
+                   "source_app": "", "source_link": "", "pkt_rec_dt": time.time()})
         return {"code": "0000", "message": "msg received"}
 
     except Exception as err:
@@ -320,4 +327,4 @@ def perf_test():
 
 
 if __name__ == '__main__':
-    app.run("0.0.0.0:8888",debug=True)
+    app.run("0.0.0.0:8888", debug=True)

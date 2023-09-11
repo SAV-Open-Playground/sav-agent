@@ -58,24 +58,15 @@ class FpUrpfApp(SavApp):
         fib change detected
         """
         # self._init_protocols()
-        new_ = parse_bird_fib(self.logger)
-        if not "master4" in new_:
-            self.logger.warning(
-                "no master4 table. Is BIRD ready?")
-            return [], []
-        old_rules = self.rules
-        new_ = new_['master4']
+        new_ = self.agent.get_kernel_fib()
         # we need prefix-interface table
-        for prefix,items in new_.items():
-            if str(prefix)=="0.0.0.0/0":
-                continue
+
+        for prefix, row in new_.items():
             temp = []
-            for item in items:
-                # self.logger.debug(item)
-                temp.append(item["interface_name"])
+            temp.append(row["Iface"])
             new_[prefix] = temp
         # self.logger.debug(f"new_:{new_}")
-        # self.logger.debug(f"old_rules:{old_rules}")
+        old_rules = self.rules
         add_rules = []
         del_rules = []
         for prefix in new_:

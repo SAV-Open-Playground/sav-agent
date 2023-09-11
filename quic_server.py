@@ -111,6 +111,7 @@ class WebSocketHandler:
 
     async def send(self, message: Dict) -> None:
         data = b""
+        print(message)
         end_stream = False
         if message["type"] == "websocket.accept":
             subprotocol = message.get("subprotocol")
@@ -142,10 +143,11 @@ class WebSocketHandler:
             end_stream = True
         elif message["type"] == "websocket.send":
             text_msg = message.get("text")
+            print(text_msg)
             if text_msg is not None:
                 try:
                     requests.post('http://localhost:8888/savop_quic',
-                                  json=json.loads(text_msg))
+                                  json=json.loads(text_msg), timeout=30)
                 except Exception as e:
                     logger.error(e)
                 data = self.websocket.send(
@@ -285,7 +287,7 @@ async def main(
 if __name__ == "__main__":
 
     # load SSL certificate and key
-    log = r'/root/savop/logs/server_cert.log'
+    log = r'./server_cert.log'
     with open(log, 'w'):
         pass
     configuration = QuicConfiguration(
@@ -295,8 +297,10 @@ if __name__ == "__main__":
         quic_logger=None,
         secrets_log_file=open(log, 'a'),
     )
-    configuration.load_cert_chain(r'/root/savop/cert.pem',
-                                  r'/root/savop/key.pem')
+    # configuration.load_cert_chain(r'/root/savop/cert.pem',
+    #                               r'/root/savop/key.pem')
+    # configuration.load_cert_chain(r'/root/savop-dev/savop/rpki/nodes/node_65501/cert.pem',
+    #   r'/root/savop-dev/savop/rpki/nodes/node_65501/key.pem')
     print("Starting server on [::]:7777")
     asyncio.run(main(
         host='::',

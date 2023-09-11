@@ -29,8 +29,8 @@ class PassportApp(SavApp):
     it will use HTTP to warp the packet and handle the filtering logic by itself
     """
 
-    def __init__(self, agent, asn,router_id,name="passport_app", logger=None):
-        super(PassportApp, self).__init__( agent,name, logger)
+    def __init__(self, agent, asn, router_id, name="passport_app", logger=None):
+        super(PassportApp, self).__init__(agent, name, logger)
         self.prepared_cmd = Manager().list()
         self.pp_v4_dict = {}
         self.p = 10007
@@ -41,39 +41,64 @@ class PassportApp(SavApp):
         self.asn = asn
         self.router_id = router_id
         self.test_pkt_id = 0
-    
-    
-    def rec_public_key(self,req):
-        asn = req["asn"]
-        public_key = req["public_key"]
-        if asn in self.initialized_peers:
-            return
-        shared_key = (public_key ** self._private_key) % self.p
-        if not asn in self.initialized_peers:
-            self.initialized_peers[asn] = {"shared_key":shared_key,"ip":req["router_id"]}
-            self.logger.debug(f"{self.asn}-{asn} shared key is {shared_key}")
-    
-    
+
     def get_public_key_dict(self):
-        return {"asn":self.asn,"router_id":self.router_id,"public_key":self.public_key}
-    
-    def initialize_share_key(self,target_asn,target_ip):
-        # self.logger.debug(f"initialize share key with {target_asn} at {target_ip}")
-        req = self.get_public_key_dict()
-        rep = requests.post(f"http://{target_ip}:8888/passport_key_exchange",json=req)
-        if rep.status_code != 200:
-            self.logger.error(f"get public key failed with {rep.status_code}")
-            return None
-        else:
+        return {"asn": self.asn, "router_id": self.router_id, "public_key": self.public_key}
+
+    def get_publish_msg(self):
+        my_key = self.get_public_key_dict()
+        msg = {"data": my_key, "origin": (self.asn, self.router_id)}
+        msg["path"] = [msg["origin"]]
+        return msg
+
+    def init_key_publish(self):
+        my_peers = self.agent.get_peers()
+        origin_msg = self.get_publish_msg()
+        for peer_asn, peer_ip in my_peers:
+            self.logger.debug(f"init_key_publish with {peer_asn}")
+            if peer_asn in self.initialized_peers:
+                continue
+            rep = requests.post(
+                f"http://{peer_ip}:8888/passport_key_exchange", json=origin_msg)
+            if rep.status_code != 200:
+                self.logger.error(
+                    f"get public key failed with {rep.status_code}")
+                continue
             rep = rep.json()
             shared_key = (rep['public_key'] ** self._private_key) % self.p
-            self.initialized_peers[target_asn] = {"shared_key":shared_key,"ip":rep["router_id"]}
-            self.logger.debug(f"{self.asn}-{target_asn} shared key is {shared_key}")
-            return req
+            self.initialized_peers[peer_asn] = {
+                "shared_key": shared_key, "ip": rep["router_id"]}
+            self.logger.debug(f"init_key_publish success with {peer_asn}")
+
+    def get_peers(self):
+        self.logger.debug("self.agent.link_man.data")
+        return self.agent.link_man.data
+
+    def process_key_publish(self, msg):
+        origin_asn, origin_ip = msg["origin"]
+        if not origin_asn in self.initialized_peers:
+            shared_key = (msg["data"]["public_key"] **
+                          self._private_key) % self.p
+            self.initialized_peers[origin_asn] = {
+                "shared_key": shared_key, "ip": msg["data"]["router_id"]}
+        if self.asn in msg["path"]:
+            # terminate
+            return
+        for peer_asn in my_peers:
+            if peer_asn in msg["path"]:
+                continue
+            msg["path"].append((self.asn, self.router_id))
+            rep = requests.post(
+                f"http://{target_ip}:8888/passport_key_exchange", json=msg)
+            if rep.status_code != 200:
+                self.logger.error(
+                    f"get public key failed with {rep.status_code}")
+                continue
+
     def fib_changed(self):
-        # always return empty list,since the passport needs to modify the packet directly    
-        return [],[]
-    
+        # always return empty list,since the passport needs to modify the packet directly
+        return [], []
+
     def _get_next_hop(self, target_ip):
         """return next_hop asn in int"""
         self.update_pp_v4()
@@ -93,43 +118,47 @@ class PassportApp(SavApp):
             raise ValueError
         result = result[0][0]
         return result
-    
-    def send_pkt(self,target_ip,msg = None):
+
+    def send_pkt(self, target_ip, msg=None):
         """Warp http over each packet"""
         next_hop_asn = self._get_next_hop(target_ip)
         next_hop_ip = self.initialized_peers[next_hop_asn]["ip"]
         key = self.initialized_peers[next_hop_asn]["shared_key"]
-        self.test_pkt_id +=1
+        self.test_pkt_id += 1
         if msg is None:
             msg = f"testing packet_{self.test_pkt_id} from asn: {self.asn}"
-        
-        data_for_mac = f"{self.router_id}{target_ip}{len(msg)}ipv4{msg[:8]}".encode()
-        mac = self.calculate_mac(data_for_mac,key)
+
+        data_for_mac = f"{self.router_id}{target_ip}{len(msg)}ipv4{msg[:8]}".encode(
+        )
+        mac = self.calculate_mac(data_for_mac, key)
         pkt = {
             "data": msg,
             "target_ip": target_ip,
             "origin_ip": self.router_id,
             "dst_ip": next_hop_ip,
-            "src_ip":self.router_id, # maybe incorrect,but we don't care
-            "src_asn":self.asn,
-            "mac":mac
-            }
+            "src_ip": self.router_id,  # maybe incorrect,but we don't care
+            "src_asn": self.asn,
+            "mac": mac
+        }
         # self.logger.debug(f"http://{next_hop_ip}:8888/passport_rec_pkt")
-        rep = requests.post(f"http://{next_hop_ip}:8888/passport_rec_pkt",json=pkt)
+        rep = requests.post(
+            f"http://{next_hop_ip}:8888/passport_rec_pkt", json=pkt)
         if not rep.status_code == 200:
             self.logger.error(f"send packet failed with {rep.status_code}")
         # self.logger.debug(f"send packet to {next_hop_ip}")
-        
-    def calculate_mac(self,data,key):
+
+    def calculate_mac(self, data, key):
         key = str(key).encode()
-        mac = hmac.new(key,data,hashlib.sha256)
+        mac = hmac.new(key, data, hashlib.sha256)
         return str(mac.hexdigest())
-    
-    def check_mac(self,pkt):
-        data_for_mac = f"{pkt['origin_ip']}{pkt['target_ip']}{len(pkt['data'])}ipv4{pkt['data'][:8]}".encode()
-        mac = self.calculate_mac(data_for_mac,self.initialized_peers[pkt["src_asn"]]["shared_key"])
+
+    def check_mac(self, pkt):
+        data_for_mac = f"{pkt['origin_ip']}{pkt['target_ip']}{len(pkt['data'])}ipv4{pkt['data'][:8]}".encode(
+        )
+        mac = self.calculate_mac(
+            data_for_mac, self.initialized_peers[pkt["src_asn"]]["shared_key"])
         return mac == pkt["mac"]
-    
+
     def rec_pkt(self, pkt):
         if not self.check_mac(pkt):
             self.logger.error("mac check failed")
@@ -139,108 +168,10 @@ class PassportApp(SavApp):
         if dst_ip == target_ip:
             self.logger.info(f"packet reach target {target_ip}: {pkt['data']}")
             return
-        self.send_pkt(target_ip,pkt["data"])
-            
-    def _parse_bird_fib(self):
-        """
-        using birdc show all to get bird fib
-        """
-        t0 = time.time()
-        # data = self._bird_cmd(cmd="show route all")
-        data = self.agent.bird_man.bird_cmd("show route all")
-        if data is None:
-            return {}
-        data = data.split("Table")
-        while "" in data:
-            data.remove("")
-        result = {}
-        for table in data:
-            table_name, table_data = self._parse_bird_table(table)
-            result[table_name] = table_data
-        t = time.time()-t0
-        if t > TIMEIT_THRESHOLD:
-            self.logger.debug(f"TIMEIT {time.time()-t0:.4f} seconds")
-        return result
-
-    def update_pp_v4(self):
-        """
-        return adds and dels,
-        which is a list of modification required(tuple of (prefix,path))
-        """
-        new_ = self._parse_bird_fib()
-        if not "master4" in new_:
-            self.logger.warning(
-                "no master4 table. Is BIRD ready?")
-            return [], []
-        new_ = new_["master4"]
-        # self.logger.debug(new_)
-        self.pp_v4_dict = new_
-
-    def _parse_birdc_show_table(self, data):
-        """
-        parse the cmd output of birdc_show_table cmd
-        """
-        t0 = time.time()
-        data = data.split("Table")
-        while "" in data:
-            data.remove("")
-        result = {}
-        for table in data:
-            table_name, table_data = self._parse_bird_table(table)
-            result[table_name] = table_data
-        t = time.time()-t0
-        if t > TIMEIT_THRESHOLD:
-            self.logger.debug(f"TIMEIT {time.time()-t0:.4f} seconds")
-        return result
+        self.send_pkt(target_ip, pkt["data"])
 
     def _build_inter_sav_spa_nlri(self, origin_asn, prefix, route_type=2, flag=1):
         return (route_type, origin_asn, prefix, flag)
 
     def _build_inter_sav_spd(self, sn, origin_router_id, origin_asn, validation_asn, optional_data, type=2, sub_type=2):
         return (type, sub_type, sn, origin_router_id, origin_asn, validation_asn, optional_data)
-
-    def _parse_bird_table(self, table):
-        """
-        return table_name (string) and parsed_rows (dict)
-        only parse the as_path
-        """
-        # self.logger.debug(table)
-        t0 = time.time()
-        temp = table.split("\n")
-        while '' in temp:
-            temp.remove('')
-
-        table_name = temp[0][1:-1]
-        parsed_rows = {}
-        temp = temp[1:]
-        rows = []
-        this_row = []
-        for line in temp:
-            if not (line[0] == '\t' or line[0] == ' '):
-                rows.append(this_row)
-                this_row = [line]
-            else:
-                this_row.append(line)
-        rows.append(this_row)
-        while [] in rows:
-            rows.remove([])
-        for row in rows:
-            prefix = row.pop(0)
-            # if "blackhole" in prefix:
-            #     continue
-            prefix = prefix.split(" ")[0]
-            prefix = prefix.replace("24-24", "24")
-            prefix = netaddr.IPNetwork(prefix)
-            # if prefix.is_private():
-            #     # self.logger.debug(f"private prefix {prefix} ignored")
-            #     continue
-            temp = {"as_path": []}
-            for line in row:
-                if line.startswith("\tBGP.as_path: "):
-                    temp["as_path"].append(list(map(
-                        int, line.split(": ")[1].split(" "))))
-            parsed_rows[prefix] = temp
-        t = time.time()-t0
-        if t > TIMEIT_THRESHOLD:
-            self.logger.debug(f"TIMEIT {time.time()-t0:.4f} seconds")
-        return table_name, parsed_rows
