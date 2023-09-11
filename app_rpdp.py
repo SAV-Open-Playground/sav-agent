@@ -905,7 +905,7 @@ class RPDPApp(SavApp):
                             msg, "relay_terminate", link_name)
                 else:
                     # self.logger.debug(path)
-                    self.logger.debug(relay_scope)
+                    # self.logger.debug(relay_scope)
                     if path[0] in relay_scope:
                         # TODO here we may add incorrect AS(AS that we donnot have SAV link)
                         relay_scope[path[0]].append(path)
@@ -928,7 +928,7 @@ class RPDPApp(SavApp):
         # self.logger.debug(relay_scope)
         for next_as, sav_scope in relay_scope.items():
             inter_links = self.agent.link_man.get_by(next_as, True)
-            self.logger.debug(inter_links)
+            # self.logger.debug(inter_links)
             # native_bgp link may included
             inter_links_temp = []
 
@@ -939,8 +939,8 @@ class RPDPApp(SavApp):
                     if i["protocol_name"] in self.agent.config["link_map"]:
                         inter_links_temp.append(i)
             inter_links = inter_links_temp
-            self.logger.debug(inter_links)
-            self.logger.debug(sav_scope)
+            # self.logger.debug(inter_links)
+            # self.logger.debug(sav_scope)
             relay_msg["sav_scope"] = sav_scope
             relay_msg["sav_path"] = msg["sav_path"] + [link_meta["local_as"]]
             for link in inter_links:
