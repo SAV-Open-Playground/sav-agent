@@ -308,14 +308,9 @@ class RPDPApp(SavApp):
 
     def get_init_metric_dict(self):
         return {
-            "modified_bgp": {
-                "recv": init_metric(), "send": init_metric(), "start": None, "end": None
-            },
-            "grpc": {
-                "recv": init_metric(), "send": init_metric(), "start": None, "end": None
-            },
-            "quic": {
-                "recv": init_metric(), "send": init_metric(), "start": None, "end": None}
+            "modified_bgp": init_protocol_metric(),
+            "grpc": init_protocol_metric(),
+            "quic": init_protocol_metric()
         }
 
     def get_pp_v4_dict(self):

@@ -219,8 +219,9 @@ def update_config():
 
 @app.route('/metric/', methods=["POST", "GET"])
 def metric():
-    rep = {"agent": sa.data["metric"], "rpdp_app": sa.rpdp_app.metric}
-    return rep
+    rep = {"agent": sa.data["metric"], "rpdp_app": sa.rpdp_app.metric,
+           "passport_app": sa.passport_app.metric}
+    return json.dumps(rep, indent=2)
 
 
 @app.route('/savop_quic/', methods=["POST"])
@@ -280,34 +281,48 @@ def long_nlri_test():
     # the returned value is not used by client
 
 
-@app.route('/passport_key_exchange', methods=['GET', 'POST'])
+@app.route('/passport_key_exchange/', methods=['GET', 'POST'])
 def passport_key_exchange():
     # LOGGER.debug(request.json)
     if sa.passport_app is None:
         LOGGER.error("passport app not detected")
         return None
-    sa.passport_app.rec_public_key(request.json)
+
+    msg = {
+        "msg_type": "passport_key_exchange",
+        "msg": request.json,
+        "source_app": "passport_app",
+        "source_link": "",
+        "pkt_rec_dt": time.time()
+    }
+    sa.put_msg(msg)
     return sa.passport_app.get_public_key_dict()
 
 
-@app.route('/passport_send_pkt', methods=['GET', 'POST'])
+@app.route('/passport_send_pkt/', methods=['GET', 'POST'])
 def passport_send_pkt():
     if sa.passport_app is None:
         LOGGER.error("passport app not detected")
         return {}
-    sa.passport_app.send_pkt(target_ip="10.0.0.2")
-    return {}
+    msg = {
+        "msg_type": "passport_send_pkt",
+        "msg": request.json,
+        "source_app": "passport_app",
+        "source_link": "",
+        "pkt_rec_dt": time.time()
+    }
+    sa.put_msg(msg)
+    return "received"
 
 
-@app.route('/passport_rec_pkt', methods=['GET', 'POST'])
+@app.route('/passport_rec_pkt/', methods=['GET', 'POST'])
 def passport_rec_pkt():
-    # LOGGER.debug(request.json)
     if sa.passport_app is None:
         LOGGER.error("passport app not detected")
         return {}
-    sa.put_msg({"msg": request.json, "msg_type": "passport_pkt",
+    sa.put_msg({"msg": request.json, "msg_type": "passport_recv_pkt",
                 "source_app": "passport_app", "source_link": "", "pkt_rec_dt": time.time()})
-    return {}
+    return "received"
 
 
 @app.route('/perf_test/', methods=["POST", "GET"])

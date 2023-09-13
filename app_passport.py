@@ -41,77 +41,147 @@ class PassportApp(SavApp):
         self.asn = asn
         self.router_id = router_id
         self.test_pkt_id = 0
+        self.init_key_publish()
+        self.metric = {
+            "key_exchange": init_protocol_metric(),
+            "pkt": init_protocol_metric(),
+        }
 
-    def get_public_key_dict(self):
-        return {"asn": self.asn, "router_id": self.router_id, "public_key": self.public_key}
+    def get_public_key_dict(self, source_ip=""):
+        # my_ip = ""
+        # for _, meta in self.pp_v4_dict.items():
+        #     if source_ip == meta["remote_ip"]:
+        #         my_ip = meta["local_ip"]
+        # if my_ip == "":
+        #     raise ValueError("my_ip is empty")
+        # self.logger.debug(self.agent.link_man.data)
+        return {"asn": self.asn, "router_id": self.router_id,
+                # "router_ip": self,
+                "public_key": self.public_key}
+
+    def update_metric(self, msg, key1, is_send, is_start, start_time=None):
+        """
+        is_send = True: send
+        is_send = False: receive
+        is_start = True: start
+        is_start = False: end
+        """
+        t0 = time.time()
+        data = self.metric[key1]
+        if is_start:
+            if data["start"] is None:
+                data["start"] = t0
+            else:
+                if data["start"] > t0:
+                    data["start"] = t0
+        else:
+            if start_time is None:
+                raise ValueError("start_time is None")
+            process_t = t0 - start_time
+            if data["end"] is None:
+                data["end"] = t0
+            else:
+                if data["end"] < t0:
+                    data["end"] = t0
+            if is_send:
+                data = data["send"]
+
+            else:
+                data = data["recv"]
+            data["count"] += 1
+            data["time"] += process_t
+            data["size"] += len(str(msg))
+        return t0
 
     def get_publish_msg(self):
+        """get standard public key message"""
         my_key = self.get_public_key_dict()
         msg = {"data": my_key, "origin": (self.asn, self.router_id)}
         msg["path"] = [msg["origin"]]
         return msg
 
     def init_key_publish(self):
+        """
+        initialize the key exchange process with peers
+        """
         my_peers = self.agent.get_peers()
         origin_msg = self.get_publish_msg()
         for peer_asn, peer_ip in my_peers:
-            self.logger.debug(f"init_key_publish with {peer_asn}")
             if peer_asn in self.initialized_peers:
                 continue
-            rep = requests.post(
-                f"http://{peer_ip}:8888/passport_key_exchange", json=origin_msg)
-            if rep.status_code != 200:
-                self.logger.error(
-                    f"get public key failed with {rep.status_code}")
-                continue
+            rep = self._send_to_remote(peer_ip, origin_msg)
             rep = rep.json()
             shared_key = (rep['public_key'] ** self._private_key) % self.p
             self.initialized_peers[peer_asn] = {
                 "shared_key": shared_key, "ip": rep["router_id"]}
-            self.logger.debug(f"init_key_publish success with {peer_asn}")
+            self.logger.debug(f"initialize key success with {peer_asn}")
 
     def get_peers(self):
-        self.logger.debug("self.agent.link_man.data")
         return self.agent.link_man.data
 
-    def process_key_publish(self, msg):
+    def _send_to_remote(self, remote_ip, msg, timeout=5, path="passport_key_exchange"):
+        start = self.update_metric(msg, "key_exchange", True, True)
+        url = f"http://{remote_ip}:8888/{path}/"
+        # self.logger.debug(url)
+        rep = requests.post(url, json=msg, timeout=timeout)
+        self.update_metric(msg, "key_exchange", True, False, start)
+        if not rep.status_code == 200:
+            self.logger.error(f"send packet failed with {rep.status_code}")
+            raise ValueError(f"send packet failed with {rep.status_code}")
+        return rep
+
+    def process_key_publish(self, input_msg):
+        # self.logger.debug(input_msg)
+        msg = input_msg["msg"]
         origin_asn, origin_ip = msg["origin"]
+        if origin_asn == self.asn:
+            return
         if not origin_asn in self.initialized_peers:
             shared_key = (msg["data"]["public_key"] **
                           self._private_key) % self.p
             self.initialized_peers[origin_asn] = {
                 "shared_key": shared_key, "ip": msg["data"]["router_id"]}
+            self.logger.debug(f"initialize key success with {origin_asn}")
         if self.asn in msg["path"]:
             # terminate
             return
-        for peer_asn in my_peers:
-            if peer_asn in msg["path"]:
+        for peer_asn, data in self.initialized_peers.items():
+
+            if [peer_asn, data["ip"]] in msg["path"]:
                 continue
             msg["path"].append((self.asn, self.router_id))
-            rep = requests.post(
-                f"http://{target_ip}:8888/passport_key_exchange", json=msg)
-            if rep.status_code != 200:
-                self.logger.error(
-                    f"get public key failed with {rep.status_code}")
-                continue
+            self._send_to_remote(data["ip"], msg)
 
     def fib_changed(self):
         # always return empty list,since the passport needs to modify the packet directly
+        self.init_key_publish()
         return [], []
 
     def _get_next_hop(self, target_ip):
-        """return next_hop asn in int"""
-        self.update_pp_v4()
         target_ip = netaddr.IPAddress(target_ip)
         result = None
-        for prefix in self.pp_v4_dict:
-            if target_ip in prefix:
-                if result:
-                    if prefix in result[0]:
-                        result = (prefix, self.pp_v4_dict[prefix])
-                else:
-                    result = (prefix, self.pp_v4_dict[prefix])
+        for prefix, data in self.agent.bird_man.bird_fib["data"].items():
+            # self.logger.debug(f"prefix {prefix} data {data}")
+            if not target_ip in prefix:
+                continue
+            if result:
+                if prefix in result[0]:
+                    result = (prefix, data)
+            else:
+                result = (prefix, data)
+        if result is None:
+            self.logger.warning(f"no route to {target_ip}")
+            raise ValueError
         result = result[1]["as_path"]
+        if len(result) == 0:
+            # indicate the target is a directly connected peer
+            self.logger.debug(self.agent.link_man.data)
+            for link_name, link_meta in self.agent.link_man.data.items():
+                self.logger.debug(link_meta)
+                self.logger.debug(target_ip)
+                if netaddr.IPAddress(link_meta["remote_ip"]) == target_ip:
+                    return link_meta["remote_as"]
+            raise ValueError("no directly connected peer")
         if len(result) != 1:
             self.logger.error("as_path length is not 1")
             self.logger.debug(result)
@@ -121,6 +191,8 @@ class PassportApp(SavApp):
 
     def send_pkt(self, target_ip, msg=None):
         """Warp http over each packet"""
+        # self.logger.debug(f"sending to {target_ip}")
+        start = self.update_metric(msg, "pkt", True, True)
         next_hop_asn = self._get_next_hop(target_ip)
         next_hop_ip = self.initialized_peers[next_hop_asn]["ip"]
         key = self.initialized_peers[next_hop_asn]["shared_key"]
@@ -141,11 +213,9 @@ class PassportApp(SavApp):
             "mac": mac
         }
         # self.logger.debug(f"http://{next_hop_ip}:8888/passport_rec_pkt")
-        rep = requests.post(
-            f"http://{next_hop_ip}:8888/passport_rec_pkt", json=pkt)
-        if not rep.status_code == 200:
-            self.logger.error(f"send packet failed with {rep.status_code}")
-        # self.logger.debug(f"send packet to {next_hop_ip}")
+        self._send_to_remote(next_hop_ip, pkt, path="passport_rec_pkt")
+        self.update_metric(msg, "pkt", True, False, start)
+        # self.logger.debug(f"sent packet to {next_hop_ip}")
 
     def calculate_mac(self, data, key):
         key = str(key).encode()
@@ -159,15 +229,17 @@ class PassportApp(SavApp):
             data_for_mac, self.initialized_peers[pkt["src_asn"]]["shared_key"])
         return mac == pkt["mac"]
 
-    def rec_pkt(self, pkt):
+    def rec_pkt(self, msg):
+        pkt = msg["msg"]
         if not self.check_mac(pkt):
             self.logger.error("mac check failed")
             return
         dst_ip = pkt["dst_ip"]
         target_ip = pkt["target_ip"]
         if dst_ip == target_ip:
-            self.logger.info(f"packet reach target {target_ip}: {pkt['data']}")
+            # self.logger.info(f"packet reach target {target_ip}: {pkt['data']}")
             return
+        # self.logger.debug(target_ip)
         self.send_pkt(target_ip, pkt["data"])
 
     def _build_inter_sav_spa_nlri(self, origin_asn, prefix, route_type=2, flag=1):

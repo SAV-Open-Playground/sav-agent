@@ -115,7 +115,7 @@ class SavAgent():
         all major data should be initialized here
         """
         self.data = {}
-        self.data["metric"] = init_metric()
+        self.data["metric"] = init_direction_metric()
 
         self.data["pkt_id"] = 0
         self.data["msg_count"] = 0
@@ -207,6 +207,7 @@ class SavAgent():
                     self, self.config["local_as"], self.config["rpdp_id"], logger=self.logger)
                 self.passport_app = app_instance
                 self.add_app(app_instance)
+
             else:
                 self.logger.error(msg=f"unknown app name: {name}")
             if self.config["enabled_sav_app"] == name:
@@ -399,9 +400,9 @@ class SavAgent():
         get all peer asn and ips, for passport app
         """
         result = []
-        for link_name in self.link_man.get_all_up():
-            peer_as = self.link_man.data[link_name]["remote_as"]
-            peer_ip = self.link_man.data[link_name]["remote_ip"]
+        for _, data in self.link_man.data.items():
+            peer_as = data["remote_as"]
+            peer_ip = data["remote_ip"]
             result.append((peer_as, peer_ip))
         return result
 
@@ -724,8 +725,28 @@ class SavAgent():
             case "perf_test":
                 self.rpdp_app.perf_test_send(
                     list(map(json.loads, input_msg["msg"])))
-            case "passport_pkt":
-                self.passport_app.rec_pkt(input_msg["msg"])
+            case "passport_key_exchange":
+                key = "key_exchange"
+                start = self.passport_app.update_metric(
+                    input_msg["msg"], key, False, True)
+                self.passport_app.process_key_publish(input_msg)
+                self.passport_app.update_metric(
+                    input_msg["msg"], key, False, False, start)
+            case "passport_send_pkt":
+                key = "pkt"
+                start = self.passport_app.update_metric(
+                    input_msg["msg"], key, True, True)
+                target_ip = input_msg["msg"]["target_ip"]
+                self.passport_app.send_pkt(target_ip, input_msg["msg"]["msg"])
+                self.passport_app.update_metric(
+                    input_msg["msg"], key, True, False, t0)
+            case "passport_recv_pkt":
+                key = "pkt"
+                self.passport_app.update_metric(
+                    input_msg["msg"], key, False, True)
+                self.passport_app.rec_pkt(input_msg)
+                self.passport_app.update_metric(
+                    input_msg["msg"], key, False, False, t0)
             case _:
                 self.logger.warning(f"unknown msg type: [{m_t}]\n{input_msg}")
         t1 = time.time()

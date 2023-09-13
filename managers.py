@@ -334,6 +334,8 @@ class BirdCMDManager():
         self.cmd_list = []
         self.is_running = False
         self.bird_fib = {"check_time": None, "update_time": None, "data": {}}
+        self.bird_fib_all = {"check_time": None,
+                             "update_time": None, "data": {}}
 
     def bird_cmd(self, cmd, log_err=True):
         # if self.is_running:

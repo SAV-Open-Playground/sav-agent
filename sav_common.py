@@ -344,9 +344,12 @@ class SavApp():
         return get_roa(self.logger, t_name)
 
 
-def init_metric():
+def init_direction_metric():
     return {"count": 0, "time": 0.0, "size": 0}
 
+
+def init_protocol_metric():
+    return {"recv": init_direction_metric(), "send": init_direction_metric(), "start": None, "end": None}
 # def birdc_cmd(logger, cmd):
 #     """
 #     execute bird command and return the output in std
