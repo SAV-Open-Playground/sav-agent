@@ -466,9 +466,10 @@ class RPDPApp(SavApp):
                 self.logger.error(f"unhandled msg {msg}")
             t = time.time()
             self.logger.debug(f"sending {link_type} took {t-t0:.4f} seconds")
-            if t-t0 > TIMEIT_THRESHOLD:
+            process_time = t-t0
+            if process_time > TIMEIT_THRESHOLD:
                 self.logger.warning(f"TIMEIT {t:.4f} seconds")
-            self._add_metric(msg, t0, t, link_type, "send")
+            self._add_metric(msg, t0, process_time, link_type, "send")
         except Exception as e:
             self.logger.exception(e)
             self.logger.error(e)

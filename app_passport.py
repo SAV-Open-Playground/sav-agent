@@ -120,11 +120,16 @@ class PassportApp(SavApp):
         return self.agent.link_man.data
 
     def _send_to_remote(self, remote_ip, msg, timeout=5, path="passport_key_exchange"):
-        start = self.update_metric(msg, "key_exchange", True, True)
+        # metric_key = "pkt"
+        metric_key = None
+        if path == "passport_key_exchange":
+            metric_key = "key_exchange"
+            start = self.update_metric(msg, metric_key, True, True)
         url = f"http://{remote_ip}:8888/{path}/"
         # self.logger.debug(url)
         rep = requests.post(url, json=msg, timeout=timeout)
-        self.update_metric(msg, "key_exchange", True, False, start)
+        if not metric_key is None:
+            self.update_metric(msg, metric_key, True, False, start)
         if not rep.status_code == 200:
             self.logger.error(f"send packet failed with {rep.status_code}")
             raise ValueError(f"send packet failed with {rep.status_code}")
@@ -192,7 +197,6 @@ class PassportApp(SavApp):
     def send_pkt(self, target_ip, msg=None):
         """Warp http over each packet"""
         # self.logger.debug(f"sending to {target_ip}")
-        start = self.update_metric(msg, "pkt", True, True)
         next_hop_asn = self._get_next_hop(target_ip)
         next_hop_ip = self.initialized_peers[next_hop_asn]["ip"]
         key = self.initialized_peers[next_hop_asn]["shared_key"]
@@ -214,7 +218,6 @@ class PassportApp(SavApp):
         }
         # self.logger.debug(f"http://{next_hop_ip}:8888/passport_rec_pkt")
         self._send_to_remote(next_hop_ip, pkt, path="passport_rec_pkt")
-        self.update_metric(msg, "pkt", True, False, start)
         # self.logger.debug(f"sent packet to {next_hop_ip}")
 
     def calculate_mac(self, data, key):
