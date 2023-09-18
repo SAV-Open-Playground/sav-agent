@@ -520,6 +520,7 @@ class RPDPApp(SavApp):
     def _send_grpc(self, msg, bgp_meta, grpc_id, grpc_link):
         t0 = time.time()
         try:
+
             if isinstance(msg["sav_nlri"][0], netaddr.IPNetwork):
                 msg["sav_nlri"] = list(map(prefix2str, msg["sav_nlri"]))
             remote_addr = grpc_link["remote_addr"]
@@ -551,6 +552,7 @@ class RPDPApp(SavApp):
                     return True
                 except Exception as e:
                     self.logger.exception(e)
+                    self.logger.debug(msg)
                     self.logger.error(e)
                     self.logger.error(
                         f"grpc error, retrying in {GRPC_RETRY_INTERVAL} seconds")
