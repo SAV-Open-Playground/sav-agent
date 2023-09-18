@@ -40,6 +40,7 @@ from aioquic.quic.configuration import QuicConfiguration
 from aioquic.quic.events import QuicEvent
 from aioquic.tls import SessionTicket
 USER_AGENT = "aioquic/" + aioquic.__version__
+GRPC_RETRY_INTERVAL = 0.1
 
 
 class URL:
@@ -328,7 +329,7 @@ class RPDPApp(SavApp):
             self.pp_v4_dict = {}
         old_ = self.pp_v4_dict
         # new_ = self._parse_bird_fib()
-        new_ = self.agent.bird_man.get_fib()
+        new_ = self.agent.bird_man.get_remote_fib()
         dels = []
         adds = []
         # self.logger.debug(new_)
@@ -360,68 +361,6 @@ class RPDPApp(SavApp):
     def reset_metric(self):
         self.metric = self.get_init_metric_dict()
 
-    def _parse_birdc_show_table(self, data):
-        """
-        parse the cmd output of birdc_show_table cmd
-        """
-        t0 = time.time()
-        data = data.split("Table")
-        while "" in data:
-            data.remove("")
-        result = {}
-        for table in data:
-            table_name, table_data = self._parse_bird_table(table)
-            result[table_name] = table_data
-        t = time.time()-t0
-        if t > TIMEIT_THRESHOLD:
-            self.logger.warning(f"TIMEIT {time.time()-t0:.4f} seconds")
-        return result
-
-    def _parse_bird_table(self, table):
-        """
-        return table_name (string) and parsed_rows (dict)
-        only parse the as_path
-        """
-        t0 = time.time()
-        temp = table.split("\n")
-        while '' in temp:
-            temp.remove('')
-
-        table_name = temp[0][1:-1]
-        parsed_rows = {}
-        temp = temp[1:]
-        rows = []
-        this_row = []
-        for line in temp:
-            if not (line[0] == '\t' or line[0] == ' '):
-                rows.append(this_row)
-                this_row = [line]
-            else:
-                this_row.append(line)
-        rows.append(this_row)
-        while [] in rows:
-            rows.remove([])
-        for row in rows:
-            prefix = row.pop(0)
-            # if "blackhole" in prefix:
-            #     continue
-            prefix = prefix.split(" ")[0]
-            prefix = prefix.replace("24-24", "24")
-            prefix = netaddr.IPNetwork(prefix)
-            # if prefix.is_private():
-            #     # self.logger.debug(f"private prefix {prefix} ignored")
-            #     continue
-            temp = {"as_path": []}
-            for line in row:
-                if line.startswith("\tBGP.as_path: "):
-                    temp["as_path"].append(list(map(
-                        int, line.split(": ")[1].split(" "))))
-            parsed_rows[prefix] = temp
-        t = time.time()-t0
-        if t > TIMEIT_THRESHOLD:
-            self.logger.warning(f"TIMEIT {time.time()-t0:.4f} seconds")
-        return table_name, parsed_rows
-
     def _build_inter_sav_spa_nlri(self, origin_asn, prefix, route_type=2, flag=1):
         return (route_type, origin_asn, prefix, flag)
 
@@ -439,14 +378,18 @@ class RPDPApp(SavApp):
     def send_msg(self, msg, config, link):
         """send msg to other sav agent"""
         t0 = time.time()
-        try:
-            link_type = link["link_type"]
-            link_name = link["protocol_name"]
-            map_data = {}
+        # self.logger.debug(f"sending {msg}")
+        # self.logger.debug(f"link: {link}")
 
+        try:
+            map_data = {}
+            link_name = link["protocol_name"]
             if link_name in config["link_map"]:
                 link_type = config["link_map"][link_name]["link_type"]
                 map_data = config["link_map"][link_name]["link_data"]
+            else:
+                link_type = link["link_type"]
+
             if link_type == "grpc":
                 self._send_grpc(msg, link, config["rpdp_id"], map_data)
             elif link_type == "modified_bgp":
@@ -481,8 +424,8 @@ class RPDPApp(SavApp):
         return json.dumps(msg)
 
     def _quic_msg_unbox(self, msg):
-        link_meta = self.agent.link_man.get_by_name_type(
-            msg["source_link"], "quic")
+        link_meta = self.agent.bird_man.get_link_meta_by_name(
+            msg["source_link"])
         msg["msg"]["interface_name"] = link_meta["interface_name"]
         msg["msg"]["as_path"] = msg["msg"]["sav_path"]
         return msg
@@ -585,23 +528,33 @@ class RPDPApp(SavApp):
             msg["dst_ip"] = remote_ip
             str_msg = json.dumps(msg)
             # self.logger.debug(remote_addr)
-            with grpc.insecure_channel(remote_addr) as channel:
-                stub = agent_msg_pb2_grpc.AgentLinkStub(channel)
-                agent_msg = agent_msg_pb2.AgentMsg(
-                    sender_id=grpc_id, json_str=str_msg)
-                rep = stub.Simple(agent_msg)
-                expected_str = f"got {str_msg}"
-                if not rep.json_str == expected_str:
-                    raise ValueError(
-                        f"json expected {expected_str}, got {rep.json_str}")
-                if not rep.sender_id == remote_id:
-                    self.logger.debug(
-                        f"sending to {remote_addr},{remote_id}")
-                    raise ValueError(
-                        f"remote id expected {remote_id}, got {rep.sender_id}")
-            t = time.time()-t0
-            if t > TIMEIT_THRESHOLD:
-                self.logger.warning(f"TIMEIT {time.time()-t0:.4f} seconds")
+            while True:
+                try:
+                    with grpc.insecure_channel(remote_addr) as channel:
+                        stub = agent_msg_pb2_grpc.AgentLinkStub(channel)
+                        agent_msg = agent_msg_pb2.AgentMsg(
+                            sender_id=grpc_id, json_str=str_msg)
+                        rep = stub.Simple(agent_msg)
+                        expected_str = f"got {str_msg}"
+                        if not rep.json_str == expected_str:
+                            raise ValueError(
+                                f"json expected {expected_str}, got {rep.json_str}")
+                        if not rep.sender_id == remote_id:
+                            self.logger.debug(
+                                f"sending to {remote_addr},{remote_id}")
+                            raise ValueError(
+                                f"remote id expected {remote_id}, got {rep.sender_id}")
+                    t = time.time()-t0
+                    if t > TIMEIT_THRESHOLD:
+                        self.logger.warning(
+                            f"TIMEIT {time.time()-t0:.4f} seconds")
+                    return True
+                except Exception as e:
+                    self.logger.exception(e)
+                    self.logger.error(e)
+                    self.logger.error(
+                        f"grpc error, retrying in {GRPC_RETRY_INTERVAL} seconds")
+                    time.sleep(GRPC_RETRY_INTERVAL)
         except Exception as e:
             self.logger.exception(e)
             self.logger.error(e)
@@ -620,7 +573,8 @@ class RPDPApp(SavApp):
                     self.add_prepared_cmd(msg)
                     self.agent.bird_man.bird_cmd("call_agent")
                 case "grpc":
-                    link = self.agent.link_man.data.get("savbgp_65502_65501")
+                    link = self.agent.bird_man.get_link_by_name(
+                        "savbgp_65502_65501")
                     self._send_grpc(msg["msg"],
                                     link,
                                     self.agent.config["rpdp_id"],
@@ -628,7 +582,8 @@ class RPDPApp(SavApp):
                 case "quic":
                     msg["msg"]["sav_nlri"] = list(
                         map(netaddr.IPNetwork, msg["msg"]["sav_nlri"]))
-                    link = self.agent.link_man.data.get("savbgp_65502_65501")
+                    link = self.agent.bird_man.get_link_meta_by_name(
+                        "savbgp_65502_65501")
                     self.send_msg(msg["msg"], self.agent.config, link)
                 case _:
                     self.logger.error(
@@ -749,7 +704,8 @@ class RPDPApp(SavApp):
         if msg_type is origin, input_msg is the value of sav_scope list of paths
         if msg_type is relay, input_msg a dict include sav_path, sav_nlri, sav_origin, sav_scope
         """
-        # self.logger.debug(f"link:{link},input_msg:{input_msg},msg_type:{msg_type},is_inter:{is_inter}")
+        # self.logger.debug(
+        # f"link:{link},input_msg:{input_msg},msg_type:{msg_type},is_inter:{is_inter}")
         try:
             msg = {
                 "src": link["local_ip"],
@@ -820,9 +776,14 @@ class RPDPApp(SavApp):
 
     def process_grpc_msg(self, msg):
         # self.logger.debug(msg)
-        link_meta = self.agent.link_man.get_by_name_type(
-            msg["source_link"], "grpc")
-        msg["msg"]["interface_name"] = link_meta["interface_name"]
+        link_meta = self.agent.bird_man.get_link_meta_by_name(
+            msg["source_link"])
+        if link_meta:
+            msg["msg"]["interface_name"] = link_meta["interface_name"]
+        else:
+            self.logger.warning("no link meta??")
+            self.logger.debug(f"link name {msg['source_link']}")
+            msg["msg"]["interface_name"] = "unknown"
         msg["link_type"] = "grpc"
         # self.logger.debug("receive_grpc_msg")
         self.process_rpdp_msg(msg)
@@ -857,7 +818,7 @@ class RPDPApp(SavApp):
         """
         determine whether to relay or terminate the message.
         """
-        self.logger.debug(f"process rpdp inter msg {msg}, link {link}")
+        # self.logger.debug(f"process rpdp inter msg {msg}, link {link}")
         link_meta = link
         scope_data = msg["sav_scope"]
         # self.logger.debug(scope_data)
@@ -870,7 +831,7 @@ class RPDPApp(SavApp):
             self.agent.add_sav_link(new_path[i], new_path[i+1])
         # self.agent._log_info_for_front(msg=None, log_type="sav_graph")
         relay_scope = {}
-        intra_links = self.agent.link_man.get_all_up_type(is_interior=False)
+        intra_links = self.agent.bird_man.get_up_intra_links()
         # if we receive a inter-domain msg via inter-domain link
         # self.logger.debug(msg["sav_scope"])
         if link_meta["is_interior"]:
@@ -889,7 +850,7 @@ class RPDPApp(SavApp):
                     # self.agent._log_info_for_front(msg, "terminate")
                     # AS_PATH:{msg['sav_path']} at AS {m['local_as']}")
                     for link_name in intra_links:
-                        link = self.agent.link_man.data.get(link_name)
+                        link = self.agent.bird_man.get_link_by_name(link_name)
                         relay_msg["sav_path"] = msg["sav_path"]
                         relay_msg["sav_scope"] = scope_data
                         # self.logger.debug(scope_data)
@@ -923,7 +884,8 @@ class RPDPApp(SavApp):
                 return
         # self.logger.debug(relay_scope)
         for next_as, sav_scope in relay_scope.items():
-            inter_links = self.agent.link_man.get_by(next_as, True)
+            inter_links = self.agent.bird_man.get_by_remote_as_is_inter(
+                next_as, True)
             # self.logger.debug(inter_links)
             # native_bgp link may included
             inter_links_temp = []
@@ -944,13 +906,12 @@ class RPDPApp(SavApp):
                 relay_msg = self._construct_msg(
                     link, relay_msg, "relay", True)
                 self.send_msg(relay_msg, self.agent.config, link)
-                self.agent.send_msg_to_agent(relay_msg, link)
             if link_meta["is_interior"] and msg["is_interior"]:
                 for link_name in intra_links:
-                    link = self.agent.link_man.data.get(link_name)
+                    link = self.agent.bird_man.get_link_meta_by_name(link_name)
                     relay_msg = self._construct_msg(
                         link, relay_msg, "relay", True)
-                    self.agent.send_msg_to_agent(relay_msg, link)
+                    self.send_msg(relay_msg, self.agent.config, link)
             if len(inter_links) == 0:
                 if link_meta["is_interior"]:
                     self.logger.debug(
@@ -966,7 +927,7 @@ class RPDPApp(SavApp):
                      ("source_app", str), ("link_type", str)]
         keys_types_check(input_msg, key_types)
         link_name = input_msg["source_link"]
-        link_meta = self.agent.link_man.data.get(link_name)
+        link_meta = self.agent.bird_man.get_link_meta_by_name(link_name)
         msg = input_msg["msg"]
         # self.logger.debug(list(msg.keys()))
         # 'neighbor_as', 'interface_name', 'interface_index', 'protocol_name', 'as_path', 'sav_origin', 'sav_scope', 'sav_nlri', 'channels', 'is_native_bgp', 'add_routes', 'del_routes'

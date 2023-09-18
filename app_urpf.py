@@ -24,7 +24,6 @@ class UrpfApp(SavApp):
         name = mode + name
         self.mode = mode
         super(UrpfApp, self).__init__(agent, name, logger)
-        self.fib = []
 
     def fib_changed(self, adds, dels):
         """

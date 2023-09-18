@@ -24,8 +24,6 @@ def send_one_pkt(target_ip, pkt_num):
             f"http://localhost:8888/passport_send_pkt/", json=json_data, timeout=5)
         if not rep.status_code == 200:
             print(f"send packet failed with {rep.status_code}")
-
-
 if __name__ == "__main__":
     pkt_num = int(sys.argv[1])
     thread_num = int(sys.argv[2])

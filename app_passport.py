@@ -48,15 +48,7 @@ class PassportApp(SavApp):
         }
 
     def get_public_key_dict(self, source_ip=""):
-        # my_ip = ""
-        # for _, meta in self.pp_v4_dict.items():
-        #     if source_ip == meta["remote_ip"]:
-        #         my_ip = meta["local_ip"]
-        # if my_ip == "":
-        #     raise ValueError("my_ip is empty")
-        # self.logger.debug(self.agent.link_man.data)
         return {"asn": self.asn, "router_id": self.router_id,
-                # "router_ip": self,
                 "public_key": self.public_key}
 
     def update_metric(self, msg, key1, is_send, is_start, start_time=None):
@@ -180,8 +172,8 @@ class PassportApp(SavApp):
         result = result[1]["as_path"]
         if len(result) == 0:
             # indicate the target is a directly connected peer
-            self.logger.debug(self.agent.link_man.data)
-            for link_name, link_meta in self.agent.link_man.data.items():
+            for link_name, link_meta in self.agent.bird_man.protos["links"].items():
+                link_meta = link_meta["meta"]
                 self.logger.debug(link_meta)
                 self.logger.debug(target_ip)
                 if netaddr.IPAddress(link_meta["remote_ip"]) == target_ip:

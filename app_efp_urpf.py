@@ -101,15 +101,12 @@ class EfpUrpfApp(SavApp):
         # self.logger.debug(f"EFP-A old_rules:{old_rules}")
         for protocol_name in self.protocols:
             # self.logger.debug(msg=f"protocol_name:{protocol_name}")
-            link_data = self.agent.link_man.data.get(protocol_name)
-            if not link_data:
+            meta = self.agent.bird_man.get_link_meta_by_name(
+                protocol_name)
+            if not meta:
                 self.logger.warning(
                     f"get link data error for link:{protocol_name}")
-                self.logger.warning(
-                    f"self.agent.link_man:{self.agent.link_man}")
-                self.logger.warning(f"self.agent:{self.agent}")
                 continue
-            meta = link_data
             all_int_in[protocol_name] = {"meta": meta}
             all_int_in[protocol_name]["adj-in"] = self._parse_import_table(
                 protocol_name)
@@ -180,7 +177,8 @@ class EfpUrpfApp(SavApp):
         all_int_in = []
         for protocol_name in self.protocols:
             # self.logger.debug(msg=f"protocol_name:{protocol_name}")
-            link_meta = self.agent.link_man.data.get(protocol_name)
+            link_meta = self.agent.bird_man.get_link_meta_by_name(
+                protocol_name)
             data = {"meta": link_meta}
             data["adj-in"] = self._parse_import_table(protocol_name)
             all_int_in.append(data)

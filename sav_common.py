@@ -68,9 +68,12 @@ def parse_bird_table(table, logger=None):
         # if "blackhole" in heading:
         # continue
         prefix = heading.split(" ")[0]
-        prefix = prefix.replace("24-24", "24")
+
+        if "-" in prefix:
+            logger.debug(prefix)
+            prefix = prefix.split("-")[0]
+            logger.debug(prefix)
         # TODO: demo filter
-        # logger.debug(f"prefix:{prefix}")
         if prefix == "0.0.0.0/0":
             continue
         prefix = netaddr.IPNetwork(prefix)
@@ -175,8 +178,8 @@ def get_logger(file_name):
     """
     get logger function for all modules
     """
-    maxsize = 1024*1024*500
-    backup_num = 5
+    maxsize = 1024*1024*50
+    backup_num = 2
     level = logging.WARN
     level = logging.DEBUG
     logger = logging.getLogger(__name__)

@@ -219,8 +219,11 @@ def update_config():
 
 @app.route('/metric/', methods=["POST", "GET"])
 def metric():
-    rep = {"agent": sa.data["metric"], "rpdp_app": sa.rpdp_app.metric,
-           "passport_app": sa.passport_app.metric}
+    rep = {"agent": sa.data["metric"]}
+    if sa.rpdp_app:
+        rep[sa.rpdp_app.name] = sa.rpdp_app.metric
+    if sa.passport_app:
+        rep[sa.passport_app.name] = sa.passport_app.metric
     return json.dumps(rep, indent=2)
 
 
