@@ -364,17 +364,6 @@ class SavAgent():
         if self.passport_app and msg["msg"]:
             self.passport_app.init_key_publish()
 
-    def get_peers(self):
-        """
-        get all peer asn and ips, for passport app
-        """
-        result = []
-        for _, data in self.bird_man.data.items():
-            peer_as = data["remote_as"]
-            peer_ip = data["remote_ip"]
-            result.append((peer_as, peer_ip))
-        return result
-
     def _process_link_config(self, msg):
         """
         in this function, we add the config to corresponding link
@@ -455,7 +444,7 @@ class SavAgent():
 
     def _process_bgp_update(self, msg):
         """
-        process  bgp update message (from bird)
+        process bgp update message (from bird)
         """
         # self.logger.debug(f"{msg}")
         msg["msg"]["is_native_bgp"] = not (len(msg["msg"]["sav_nlri"]) > 0)
@@ -641,9 +630,13 @@ class SavAgent():
                         # self.logger.debug(paths_for_as)
                         msg = self.rpdp_app._construct_msg(
                             link, paths_for_as, "origin", True)
-                        # self.logger.warning(f"sent origin via inter{msg}")
-                        self.send_msg_to_agent(msg, link)
-                        inter_sent = True
+                        if len(msg["sav_nlri"]) > 0:
+                            # self.logger.warning(f"sent origin via inter{msg}")
+                            self.send_msg_to_agent(msg, link)
+                            inter_sent = True
+                        else:
+                            self.logger.debug(
+                                f"no sav nlri, not sending inter origin")
             else:
                 msg = f"no inter link:{len(inter_links)} or inter path:{len(inter_paths)}, not sending inter origin"
                 # self.logger.debug(msg)
