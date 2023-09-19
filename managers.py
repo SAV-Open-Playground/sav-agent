@@ -385,7 +385,7 @@ class BirdCMDManager():
     def update_link_meta(self, link_name, k, v):
         self.protos["links"][link_name]["meta"][k] = v
 
-    def get_link_meta(self, proto_data):
+    def parse_link_meta(self, proto_data):
         """
         update link meta data
         """
@@ -429,7 +429,6 @@ class BirdCMDManager():
         result = {}
         for proto, data in self.protos["links"].items():
             if proto.startswith("savbgp"):
-                # self.logger.debug(json.dumps(data, indent=2))
                 if data["meta"]:
                     result[proto] = data["meta"]
         return result
@@ -570,7 +569,7 @@ class BirdCMDManager():
         result = self._parse_links(result)
         for p, d in result.items():
             if p.startswith("savbgp"):
-                d["meta"] = self.get_link_meta(d)
+                d["meta"] = self.parse_link_meta(d)
                 result[p] = d
         return result
 
@@ -626,12 +625,15 @@ class BirdCMDManager():
         return adds, dels
 
     def get_local_fib(self):
+        """"filter out local routes from fib"""
         return self.bird_fib["local_route"]
 
     def get_remote_fib(self):
+        """"filter out remote routes from fib"""
         return self.bird_fib["remote_route"]
 
     def get_remote_local_fib(self):
+        """"filter out remote and local routes from fib"""
         temp = {}
         for prefix, data in self.bird_fib["local_route"].items():
             temp[prefix] = data

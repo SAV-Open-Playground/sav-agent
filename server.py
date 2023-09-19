@@ -159,7 +159,7 @@ def index():
             if t > TIMEIT_THRESHOLD:
                 LOGGER.warning(f"TIMEIT {time.time()-t0:.4f} seconds")
             return rep
-        msg["source_app"] = sa.rpdp_app.name
+        msg["source_app"] = "rpdp_app"
         if m_t == "link_state_change":
             msg["source_link"] = msg["protocol_name"]
         else:

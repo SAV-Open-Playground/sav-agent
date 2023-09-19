@@ -361,6 +361,7 @@ class SavAgent():
         in this function, we manage the link state
         """
         self.bird_man.update_protocols()
+        self.logger.debug(f"link state changed: {msg}")
         if self.passport_app and msg["msg"]:
             self.passport_app.init_key_publish()
 
@@ -476,10 +477,9 @@ class SavAgent():
         """
         add_rules = []
         del_rules = []
+        self.bird_man.update_protocols()
         if app_list is None:
             app_list = self.get_all_app_names()
-        # self.logger.debug(f"notifying apps: {app_list}")
-        # self.logger.debug(f"notifying apps: {self.data['apps'].keys()}")
         for app_name in app_list:
             app = self.get_app(app_name)
             self.logger.debug(f"notifying app: {app_name}")
@@ -489,6 +489,9 @@ class SavAgent():
                 a, d = app.fib_changed(adds, dels)
             elif app_type in [EfpUrpfApp, FpUrpfApp, BarApp, PassportApp]:
                 a, d = app.fib_changed()
+            # elif app_type in [PassportApp]:
+                # a, d = app.fib_changed()
+                # a, d = self._process_link_state_change({"msg": True})
             elif app_type in [RPDPApp]:
                 adds, dels = self.rpdp_app.diff_pp_v4(reset)
                 changed_routes = []
@@ -539,6 +542,9 @@ class SavAgent():
         if input_paths is None, send all local prefixes
         """
         # self.logger.debug(f"send_origin: {input_link_name} ,{input_paths}")
+        if self.rpdp_app is None:
+            self.logger.debug("rpdp_app missing,unable to send origin")
+            return True
         t0 = time.time()
         inter_sent = False
         intra_sent = False
@@ -671,7 +677,6 @@ class SavAgent():
                 self._process_link_state_change(input_msg)
             case "bird_bgp_config":
                 pass
-                # self._process_link_config(msg)
             case "bgp_update":
                 self._process_bgp_update(input_msg)
             case "native_bgp_update":
