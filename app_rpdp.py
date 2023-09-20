@@ -725,7 +725,7 @@ class RPDPApp(SavApp):
                 msg["src_id"] = self.agent.config["grpc_config"]["id"]
             if msg_type == "origin":
                 if is_inter:
-                    msg["sav_origin"] = link["local_as"]
+                    msg["sav_origin"] = self.agent.config["local_as"]
                     msg["sav_scope"] = input_msg
                 else:
                     msg["sav_origin"] = link["router_id"]
@@ -829,7 +829,7 @@ class RPDPApp(SavApp):
             "sav_nlri": msg["sav_nlri"],
             "sav_origin": msg["sav_origin"]
         }
-        new_path = msg["sav_path"]+[link_meta["local_as"]]
+        new_path = msg["sav_path"]+[self.agent.config["local_as"]]
         for i in range(len(new_path)-1):
             self.agent.add_sav_link(new_path[i], new_path[i+1])
         # self.agent._log_info_for_front(msg=None, log_type="sav_graph")
@@ -841,7 +841,7 @@ class RPDPApp(SavApp):
             for path in scope_data:
                 # self.logger.debug(path)
                 next_as = int(path.pop(0))  # for modified bgp
-                if (link_meta["local_as"] != next_as):
+                if (self.agent.config["local_as"] != next_as):
                     self.logger.debug(msg["sav_scope"])
                     self.logger.debug(
                         f"next_as {next_as}({type(next_as)}) local_as {link_meta['local_as']}({type(link_meta['local_as'])})")
@@ -903,7 +903,8 @@ class RPDPApp(SavApp):
             # self.logger.debug(inter_links)
             # self.logger.debug(sav_scope)
             relay_msg["sav_scope"] = sav_scope
-            relay_msg["sav_path"] = msg["sav_path"] + [link_meta["local_as"]]
+            relay_msg["sav_path"] = msg["sav_path"] + \
+                [self.agent.config["local_as"]]
             for link in inter_links:
                 relay_msg["sav_scope"] = sav_scope
                 relay_msg = self._construct_msg(

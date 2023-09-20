@@ -178,6 +178,7 @@ def iptables_refresh(active_app, logger, limit_rate=None):
         logger.debug("active app is None")
         return
     # TODO dynamic changing
+    # tell if current node is sav enabled
     with open('/root/savop/SavAgent_config.json', 'r') as f:
         config = json.load(f)
         enabled_sav_app = config.get("enabled_sav_app")
@@ -376,10 +377,21 @@ class BirdCMDManager():
             if l.startswith("protocol"):
                 l = l.split(" ")
                 proto_name = l[2]
-                temp[proto_name] = {"meta": {"initial_broadcast": False}}
-            elif l.startswith("loca_role"):
+                meta = {
+                    "initial_broadcast": False,
+                    "as4_session": True,
+                    "protocol_name": proto_name
+                }
+                if "sav_inter{" in l:
+                    meta["link_type"] = "modified_bgp"
+                elif "basic{" in l:
+                    meta["link_type"] = "native_bgp"
+                else:
+                    self.logger.error(f"unknown link type: {l}")
+                temp[proto_name] = {"meta": meta}
+            elif l.startswith("local role"):
                 l = l.split(" ")
-                local_role = l[3][:-1]
+                local_role = l[-1][:-1]
                 temp[proto_name]["meta"]["local_role"] = local_role
                 match local_role:
                     case "peer":

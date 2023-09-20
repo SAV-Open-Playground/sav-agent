@@ -607,6 +607,8 @@ class SavAgent():
         update sav table, and notify apps
         """
         old_table = self.data["sav_table"]
+        self.logger.debug(f"adds:{adds}")
+        self.logger.debug(f"dels:{dels}")
         for r in adds:
             self.logger.debug(r)
         # self.logger.debug(f"adds:{adds}")

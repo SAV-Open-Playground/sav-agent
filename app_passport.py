@@ -164,7 +164,7 @@ class PassportApp(SavApp):
 
     def process_key_publish(self, input_msg):
         msg = input_msg["msg"]
-        self.logger.debug(msg)
+        # self.logger.debug(msg)
         origin_asn, origin_ip = msg["origin"]
         if origin_asn == self.asn:
             return
