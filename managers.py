@@ -244,7 +244,7 @@ class IPTableManager():
         command_result = self._command_executor(command=command)
         return command_result.returncode
 
-    def add(self, data_list):
+    def add_old(self, data_list):
         """
         add list of rules to the STB
         currently only add ipv4 and inter-domain rules
@@ -302,7 +302,7 @@ class IPTableManager():
         session.close()
         self.logger.debug(f"END inserting {len(data_list)}")
 
-    def add_new(self, data_list):
+    def add(self, data_list):
         """
         add list of rules to the STB
         currently only add ipv4 and inter-domain rules
