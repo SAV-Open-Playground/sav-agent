@@ -302,6 +302,61 @@ class IPTableManager():
         session.close()
         self.logger.debug(f"END inserting {len(data_list)}")
 
+    def add_new(self, data_list):
+        """
+        add list of rules to the STB
+        currently only add ipv4 and inter-domain rules
+        """
+        if len(data_list) == 0:
+            return
+        self.logger.debug(f"BEGIN inserting {len(data_list)}")
+        session = db.session
+        interface_list = get_host_interface_list()
+        interface_list.append("*")
+        batch_data = []
+        for data in data_list:
+            prefix, src_app, interface, local_role = data.get("prefix"), data.get("source_app"), data.get("interface"), data.get("local_role")
+            if (prefix is None) or (src_app is None) or (interface is None):
+                self.logger.error(f"Missing required fields [{data.keys()}]")
+                raise ValueError("Missing required field")
+            # update local dict
+            # if not src_app in self.sav_rules:
+            #     self.sav_rules[src_app] = {}
+            neighbor_as = data.get("neighbor_as")
+            if interface not in interface_list:
+                self.logger.error(
+                    f"the interface {interface} doesn't exit in the list:{interface_list}")
+                self.logger.error(
+                    f"sav rule {data} is not added")
+                continue
+            if session.query(SavTable).filter_by(prefix=prefix, interface=interface, source=src_app).first() is not None:
+                # log_msg = f"SAV RULE EXISTS: {data}"
+                # self.logger.debug(log_msg)
+                continue
+            sib_row = SavTable(
+                prefix=prefix,
+                neighbor_as=neighbor_as,
+                interface=interface,
+                local_role=local_role,
+                source=src_app,
+                direction=None)
+            batch_data.append(sib_row)
+            if len(batch_data) == 300:
+                try:
+                    session.bulk_save_objects(batch_data)
+                    session.commit()
+                    batch_data = []
+                except Exception as e:
+                    self.logger.error(e)
+                    self.logger.exception(e)
+                    continue
+        if len(batch_data) > 0:
+            session.bulk_save_objects(batch_data)
+            session.commit()
+        session.close()
+        self.logger.debug(f"END inserting {len(data_list)}")
+
+
     def delete(self, input_id):
         session = db.session
         sib_row = session.query(SavTable).filter(
