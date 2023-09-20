@@ -84,3 +84,4 @@ class DataBase():
 
 # ensure the instance folder exists
 db = DataBase()
+session = db.session
