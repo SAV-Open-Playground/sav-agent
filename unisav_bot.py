@@ -108,6 +108,7 @@ class Bot():
         根据字段action, execute_result来判断sav协议机制已经开始
         根据last_rule_num, this_rule_num, statble_number来判断sav是否收敛
         根据stable_down_count==0和stable_time确定已经收敛无效继续监控"""
+        # self.logger.debug("monitor_sav_convergence")
         t0 = time.time()
         signal = self._read_json(self.signal_path)
         source = signal["source"]
@@ -115,8 +116,6 @@ class Bot():
             self.monitor_results = {}
             return
         exec_result = self.exec_result
-        # exec_result = self._read_json(self.exec_results_path)
-        # self.logger.debug(json.dumps(exec_result, indent=2))
         if ("judge_stable_time" in exec_result):
             # sav已经稳定，不需要继续监控
             return
@@ -133,6 +132,7 @@ class Bot():
         exec_result["last_rule_num"] = new_rule_num
         if new_rule_num != last_rule_num:
             exec_result.update({"rule_num_update_dt": t0})
+            self.exec_result = exec_result
             return
         if new_rule_num == 0:
             return
@@ -156,8 +156,8 @@ class Bot():
             try:
                 exec_result.update(
                     {"agent_metric": json.loads(self._http_request_executor(url_str="/metric/"))})
-                self._http_request_executor(
-                    url_str=f"/refresh_proto/{source}/")
+                # self._http_request_executor(
+                #     url_str=f"/refresh_proto/{source}/")
             except Exception as e:
                 self.logger.exception(e)
             dt = self._get_max_update_timestamp(source)
@@ -195,7 +195,7 @@ class Bot():
         else:
             exec_result.update({"execute_end_time": f"{self._get_current_datetime_str()}",
                                 "execute_result": "fail"})
-
+        self.exec_result = exec_result
         self._write_json(self.exec_results_path, exec_result)
 
     def start_server(self, action):
@@ -206,7 +206,7 @@ class Bot():
         # 动态更改sav-agent的配置文件
 
         sav_agent_config = self._read_json(self.sa_config_path)
-        source = sav_agent_config["enabled_sav_app"]
+        source = signal["source"]
         if source == "rpdp_app":
             sav_agent_config["apps"] = ["rpdp_app"]
         elif source == "fpurpf_app":
@@ -239,6 +239,7 @@ class Bot():
         else:
             exec_result.update({"execute_end_time": f"{self._get_current_datetime_str()}",
                                 "execute_result": "fail"})
+        self.exec_result = exec_result
         self._write_json(self.exec_results_path, exec_result)
 
     def run(self):

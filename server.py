@@ -203,7 +203,7 @@ def refresh_proto(active_app):
     elif tool == "acl":
         info = router_acl_refresh(active_app, LOGGER)
     else:
-        return {"code": "-1", "message": "the tool parameter don't exits! Please checkout your parameter"}
+        return {"code": "-1", "message": "the tool parameter don't exits! Please check your parameter"}
     return {"code": "0000", "message": f"{info}"}
 
 
