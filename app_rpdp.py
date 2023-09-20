@@ -416,7 +416,7 @@ class RPDPApp(SavApp):
         except Exception as e:
             self.logger.exception(e)
             self.logger.error(e)
-            self.logger.error(f"sending error")
+            self.logger.error(f"sending [{msg}] error")
 
     def _quic_msg_box(self, msg, bgp_meta):
         msg["sav_nlri"] = list(map(prefix2str, msg["sav_nlri"]))
@@ -753,6 +753,7 @@ class RPDPApp(SavApp):
             self.logger.error("construct msg error")
 
     def recv_http_msg(self, msg):
+        adds = []
         try:
             m_t = msg["msg_type"]
             if not m_t in ["bird_bgp_config", "bgp_update"]:
@@ -768,26 +769,26 @@ class RPDPApp(SavApp):
                 self.put_link_up(msg["source_link"], link_type)
                 msg["msg"] = self.preprocess_msg(msg["msg"])
                 # self.logger.debug("receive_http_msg")
-                self.process_rpdp_msg(msg)
+                adds = self.process_rpdp_msg(msg)
             else:
                 self.logger.error(msg)
                 self.agent.put_msg(msg)
         except Exception as e:
             self.logger.exception(e)
             self.logger.error(e)
+        return adds
 
     def process_grpc_msg(self, msg):
         # self.logger.debug(msg)
         link_meta = self.agent.bird_man.get_link_meta_by_name(
             msg["source_link"])
-        if link_meta:
-            msg["msg"]["interface_name"] = link_meta["interface_name"]
-        else:
-            self.logger.warning("no link meta??")
-            self.logger.debug(f"link name {msg['source_link']}")
-            msg["msg"]["interface_name"] = "unknown"
+        while link_meta is None:
+            self.logger.debug(f"link_meta is None, updating protos")
+            link_meta = self.agent.bird_man.get_link_meta_by_name(
+                msg["source_link"])
+
+        msg["msg"]["interface_name"] = link_meta["interface_name"]
         msg["link_type"] = "grpc"
-        # self.logger.debug("receive_grpc_msg")
         self.process_rpdp_msg(msg)
 
     def process_quic_msg(self, msg, is_test_msg=False, test_id=None):
@@ -943,16 +944,16 @@ class RPDPApp(SavApp):
         # keys_types_check(msg, key_types)
         msg["is_interior"] = tell_str_is_interior(msg["sav_origin"])
         prefixes = msg["sav_nlri"]
-        temp_list = []
+        adds = []
         for prefix in prefixes:
-            temp_list.append({"prefix": str(prefix),
-                              "neighbor_as": link_meta["remote_as"],
-                              "interface": msg["interface_name"],
-                              "source_app": self.name,
-                              "source_link": link_name,
-                              "local_role": link_meta["local_role"]
-                              })
-        self.agent.ip_man.add(temp_list)
+            adds.append({"prefix": str(prefix),
+                         "neighbor_as": link_meta["remote_as"],
+                         "interface": msg["interface_name"],
+                         "source_app": self.name,
+                         "source_link": link_name,
+                         "local_role": link_meta["local_role"]
+                         })
+        self.agent.ip_man.add(adds)
         if msg["is_interior"]:
             # in inter-domain, sav_path is as_path
             if not input_msg["msg_type"] == "grpc_msg":
@@ -968,3 +969,4 @@ class RPDPApp(SavApp):
             self._process_sav_intra(msg, link_meta)
         t = time.time()-t0
         self._add_metric(input_msg, t0, t, input_msg["link_type"], "recv")
+        return adds

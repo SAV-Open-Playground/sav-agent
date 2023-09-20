@@ -31,6 +31,7 @@ class Bot():
         self.monitor_results = {}
         self.exec_result = {}
         self.stable_threshold = 30
+        self.last_check_dt = 0
 
     def _run_cmd(self, cmd, timeout=60):
         try:
@@ -85,11 +86,10 @@ class Bot():
         if signal == self.last_signal:
             return "keep"
         local_as = self._read_json(self.sa_config_path)["local_as"]
-
         command = signal["command"]
         if not command in ["start", "stop"]:
             raise ValueError("unknown command")
-        self.is_monitor = local_as in signal["command_scope"]
+        self.is_monitor = (local_as in signal["command_scope"])
         if not self.is_monitor:
             return "keep"
 
@@ -124,6 +124,9 @@ class Bot():
             return
         if exec_result["execute_result"] != "ok":
             return
+        if t0-self.last_check_dt < 5:
+            return  # reduce db read
+        self.last_check_dt = t0
         new_rule_num = self._get_sav_rule_number(source=source)
         last_rule_num = exec_result.get("last_rule_num", 0)
         exec_result["rule_num_check_dt"] = t0
@@ -197,9 +200,9 @@ class Bot():
 
     def start_server(self, action):
         signal = self._read_json(self.signal_path)
+
         # exec_result = self._read_json(self.exec_results_path)\
-        self.exec_result = {}
-        exec_result = self.exec_result
+        exec_result = {}
         # 动态更改sav-agent的配置文件
 
         sav_agent_config = self._read_json(self.sa_config_path)
@@ -216,8 +219,12 @@ class Bot():
             sav_agent_config["apps"] = ["rpdp_app", "EFP-uRPF-A"]
         elif source == "EFP-uRPF-Algorithm-B_app":
             sav_agent_config["apps"] = ["rpdp_app", "EFP-uRPF-B"]
+        elif source == "passport":
+            sav_agent_config["apps"] = ["passport"]
         else:
+            self.logger.error(f"unknown source {source}")
             raise ValueError("unknown source")
+        self._write_json(self.sa_config_path, sav_agent_config)
         exec_result.update({"command": f'{signal["command"]}_{time.time()}',
                             "execute_start_time": f"{self._get_current_datetime_str()}",
                             "cmd_exe_dt": time.time(),
@@ -237,7 +244,7 @@ class Bot():
     def run(self):
         # 循环，监控配置文件与sav数据库的转态
         while True:
-            time.sleep(5)
+            time.sleep(0.1)
             try:
                 action = self.check_signal_file()
                 if action == "start":

@@ -41,7 +41,6 @@ class PassportApp(SavApp):
         self.asn = asn
         self.router_id = router_id
         self.test_pkt_id = 0
-        self.init_key_publish()
         self.metric = {
             "key_exchange": init_protocol_metric(),
             "pkt": init_protocol_metric(),
@@ -96,9 +95,8 @@ class PassportApp(SavApp):
         """
         initialize the key exchange process with peers
         """
-        my_peers = self.agent.get_peers()
         origin_msg = self.get_publish_msg()
-        for peer_asn, peer_ip in my_peers:
+        for peer_asn, peer_ip in self.get_peers():
             if peer_asn in self.initialized_peers:
                 continue
             rep = self._send_to_remote(peer_ip, origin_msg)
@@ -106,30 +104,67 @@ class PassportApp(SavApp):
             shared_key = (rep['public_key'] ** self._private_key) % self.p
             self.initialized_peers[peer_asn] = {
                 "shared_key": shared_key, "ip": rep["router_id"]}
-            self.logger.debug(f"initialize key success with {peer_asn}")
+            self.logger.debug(
+                f"initialize key success with {peer_asn} {len(self.initialized_peers.keys())} at {time.time()}")
 
     def get_peers(self):
-        return self.agent.link_man.data
+        result = []
+        for _, data in self.agent.bird_man.get_all_link_meta().items():
+            peer_as = data["remote_as"]
+            peer_ip = data["remote_ip"]
+            result.append((peer_as, peer_ip))
+        return result
+
+    def _send_to_remote2(self, remote_ip, msg, timeout=5, path="passport_key_exchange"):
+        """
+        use send_agent,no reply
+        """
+        metric_key = None
+        if path == "passport_key_exchange":
+            metric_key = "key_exchange"
+            start = self.update_metric(msg, metric_key, True, True)
+        url = f"http://{remote_ip}:8888/{path}/"
+        msg = {
+            "data": msg,
+            "url": url,
+            "store_req": False,
+            "type": "http-post"
+        }
+        self.agent.send_agent.put_msg(msg)
 
     def _send_to_remote(self, remote_ip, msg, timeout=5, path="passport_key_exchange"):
+        """
+        will retry until success
+        """
         # metric_key = "pkt"
         metric_key = None
         if path == "passport_key_exchange":
             metric_key = "key_exchange"
             start = self.update_metric(msg, metric_key, True, True)
         url = f"http://{remote_ip}:8888/{path}/"
-        # self.logger.debug(url)
-        rep = requests.post(url, json=msg, timeout=timeout)
-        if not metric_key is None:
-            self.update_metric(msg, metric_key, True, False, start)
-        if not rep.status_code == 200:
-            self.logger.error(f"send packet failed with {rep.status_code}")
-            raise ValueError(f"send packet failed with {rep.status_code}")
-        return rep
+        e = None
+        retry_count = 0
+        while True:
+            try:
+                rep = requests.post(url, json=msg, timeout=timeout)
+                if not metric_key is None:
+                    self.update_metric(msg, metric_key, True, False, start)
+                if not rep.status_code == 200:
+                    self.logger.error(
+                        f"send packet failed with {rep.status_code}")
+                    raise ValueError(
+                        f"send packet failed with {rep.status_code}")
+                return rep
+            except Exception as e:
+                retry_count += 1
+                self.logger.warning(
+                    f"passport send packet failed {retry_count}")
+        if e:
+            self.logger.exception(e)
 
     def process_key_publish(self, input_msg):
-        # self.logger.debug(input_msg)
         msg = input_msg["msg"]
+        self.logger.debug(msg)
         origin_asn, origin_ip = msg["origin"]
         if origin_asn == self.asn:
             return
@@ -137,17 +172,23 @@ class PassportApp(SavApp):
             shared_key = (msg["data"]["public_key"] **
                           self._private_key) % self.p
             self.initialized_peers[origin_asn] = {
-                "shared_key": shared_key, "ip": msg["data"]["router_id"]}
-            self.logger.debug(f"initialize key success with {origin_asn}")
-        if self.asn in msg["path"]:
+                # "shared_key": shared_key, "ip": msg["data"]["router_id"]}
+                "shared_key": shared_key, "ip": origin_ip}
+            self._send_to_remote(origin_ip, self.get_publish_msg())
+            self.logger.debug(
+                f"initialize key success with {origin_asn} {len(self.initialized_peers.keys())} at {time.time()} {origin_ip}")
+        if (self.asn, self.router_id) in msg["path"]:
             # terminate
             return
-        for peer_asn, data in self.initialized_peers.items():
 
-            if [peer_asn, data["ip"]] in msg["path"]:
+        relay_scope = {}
+        for peer_asn, peer_ip in self.get_peers():
+            if [peer_asn, peer_ip] in msg["path"]:
                 continue
-            msg["path"].append((self.asn, self.router_id))
-            self._send_to_remote(data["ip"], msg)
+            relay_scope[peer_asn] = peer_ip
+        msg["path"].append([self.asn, self.router_id])
+        for peer_asn, peer_ip in relay_scope.items():
+            self._send_to_remote(peer_ip, msg)
 
     def fib_changed(self):
         # always return empty list,since the passport needs to modify the packet directly
@@ -157,7 +198,9 @@ class PassportApp(SavApp):
     def _get_next_hop(self, target_ip):
         target_ip = netaddr.IPAddress(target_ip)
         result = None
-        for prefix, data in self.agent.bird_man.bird_fib["data"].items():
+        # TODO is using remote_route correct?
+        # self.logger.debug(self.agent.bird_man.bird_fib["remote_route"])
+        for prefix, data in self.agent.bird_man.bird_fib["remote_route"].items():
             # self.logger.debug(f"prefix {prefix} data {data}")
             if not target_ip in prefix:
                 continue
@@ -195,7 +238,7 @@ class PassportApp(SavApp):
         self.test_pkt_id += 1
         if msg is None:
             msg = f"testing packet_{self.test_pkt_id} from asn: {self.asn}"
-
+        # self.logger.debug(f"send packet {msg}")
         data_for_mac = f"{self.router_id}{target_ip}{len(msg)}ipv4{msg[:8]}".encode(
         )
         mac = self.calculate_mac(data_for_mac, key)

@@ -358,16 +358,68 @@ class BirdCMDManager():
         self.is_running = False
         return ret
 
-    def update_protocols(self):
+    def update_protocols(self, my_asn):
         """
-        update bird protocols, including native bgp and d-sav data
+        read link meta from birdc config, call if needed
+        """
+        f = open("/usr/local/etc/bird.conf", "r")
+        data = f.readlines()
+        f.close()
+        for i in range(len(data)):
+            if data[i].startswith("protocol bgp savbgp"):
+                data = data[i:]
+                break
+        temp = {}
+        proto_name = None
+        for l in data:
+            l = l.strip()
+            if l.startswith("protocol"):
+                l = l.split(" ")
+                proto_name = l[2]
+                temp[proto_name] = {"meta": {"initial_broadcast": False}}
+            elif l.startswith("loca_role"):
+                l = l.split(" ")
+                local_role = l[3][:-1]
+                temp[proto_name]["meta"]["local_role"] = local_role
+                match local_role:
+                    case "peer":
+                        temp[proto_name]["meta"]["remote_role"] = local_role
+                    case "provider":
+                        temp[proto_name]["meta"]["remote_role"] = "customer"
+                    case "customer":
+                        temp[proto_name]["meta"]["remote_role"] = "provider"
+            elif l.startswith("neighbor"):
+                l = l.split(" ")
+                temp[proto_name]["meta"]["remote_ip"] = l[1]
+                temp[proto_name]["meta"]["remote_as"] = int(l[-1][:-1])
+                is_inter = temp[proto_name]["meta"]["remote_as"] != my_asn
+                temp[proto_name]["meta"]["is_interior"] = is_inter
+            elif l.startswith("source address"):
+                l = l.split(" ")
+                temp[proto_name]["meta"]["local_ip"] = l[-1][:-1]
+            elif l.startswith("interface"):
+                temp[proto_name]["meta"]["interface_name"] = l.split("\"")[1]
+        self.protos["check_time"] = time.time()
+        self.protos["links"] = temp
+        self.protos["update_time"] = self.protos["check_time"]
+
+    def update_protocols2(self):
+        """
+        update bird protocols, including native bgp and d-sav data ,too slow
         """
         while True:
             raw_result = self.bird_cmd("show protocols all", False)
             if raw_result:
-                break
+                new_ = self._parse_protocols(raw_result)
+                all_good = True
+                for p, d in new_.items():
+                    if p.startswith("savbgp"):
+                        if d["meta"] is None:
+                            self.logger.warning(f"{p} meta is None")
+                        all_good = False
+                if all_good:
+                    break
             time.sleep(0.1)
-        new_ = self._parse_protocols(raw_result)
         self.protos["check_time"] = time.time()
         old_ = self.protos["links"]
         if new_ != old_:

@@ -18,12 +18,15 @@ import sys
 
 def send_one_pkt(target_ip, pkt_num):
     json_data = {"target_ip": target_ip,
-                 "msg": f"testing_msg at {time.time()}{'A'*500}"}
+                 "data": f"testing_msg at {time.time()}{'A'*500}"}
+    s = requests.Session()
     for i in range(pkt_num):
-        rep = requests.post(
+        rep = s.post(
             f"http://localhost:8888/passport_send_pkt/", json=json_data, timeout=5)
         if not rep.status_code == 200:
             print(f"send packet failed with {rep.status_code}")
+
+
 if __name__ == "__main__":
     pkt_num = int(sys.argv[1])
     thread_num = int(sys.argv[2])

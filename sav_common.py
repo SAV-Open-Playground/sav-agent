@@ -179,7 +179,7 @@ def get_logger(file_name):
     get logger function for all modules
     """
     maxsize = 1024*1024*50
-    backup_num = 2
+    backup_num = 1
     level = logging.WARN
     level = logging.DEBUG
     logger = logging.getLogger(__name__)
@@ -539,7 +539,7 @@ def birdc_get_import(logger, protocol_name, channel_name="ipv4"):
     return []
 
 
-def get_roa(logger, t_name='r4'):
+def get_roa(logger, t_name='r4', ns_scope=None):
     """
     get ROA info from bird table
     """
@@ -570,8 +570,14 @@ def get_roa(logger, t_name='r4'):
         for row in row_str:
             d = row.split(" ")
             as_number = int(d[1][2:])
-            prefix = d[0]
-            prefix = prefix.replace('24-24', '24')
+            temp = d[0]
+            temp = temp.split("/")
+            if "-" in temp[1]:
+                temp[1] = temp[1].split("-")[0]
+            prefix = temp[0] + '/' + temp[1]
+            if ns_scope:
+                if not as_number in ns_scope:
+                    continue
             if as_number not in result:
                 result[as_number] = []
             result[as_number].append(netaddr.IPNetwork(prefix))
