@@ -306,6 +306,7 @@ class RPDPApp(SavApp):
         self.quic_config = QuicConfiguration(
             is_client=True, alpn_protocols=H3_ALPN)
         self.quic_config.load_verify_locations(r'/root/savop/ca_cert.pem')
+        self.stub_dict = {}
 
     def get_init_metric_dict(self):
         return {
@@ -380,7 +381,6 @@ class RPDPApp(SavApp):
         t0 = time.time()
         # self.logger.debug(f"sending {msg}")
         # self.logger.debug(f"link: {link}")
-
         try:
             map_data = {}
             link_name = link["protocol_name"]
@@ -520,7 +520,6 @@ class RPDPApp(SavApp):
     def _send_grpc(self, msg, bgp_meta, grpc_id, grpc_link):
         t0 = time.time()
         try:
-
             if isinstance(msg["sav_nlri"][0], netaddr.IPNetwork):
                 msg["sav_nlri"] = list(map(prefix2str, msg["sav_nlri"]))
             remote_addr = grpc_link["remote_addr"]
@@ -564,9 +563,12 @@ class RPDPApp(SavApp):
     def perf_test_send(self, msgs):
         count = 0
         self.logger.debug("perf test send start")
+        using_link = "savbgp_34224_3356"
+        self.metric["perf_test"] = self.get_init_metric_dict()
+        self.metric["perf_test"]["bgp"] = init_protocol_metric()
         for msg in msgs:
             count += 1
-            # self.logger.debug(f"START {count} msg ({msg['msg_type']})")
+            t0 = time.time()
             match msg["msg_type"]:
                 case "dsav":
                     self.add_prepared_cmd(msg)
@@ -575,21 +577,30 @@ class RPDPApp(SavApp):
                     self.add_prepared_cmd(msg)
                     self.agent.bird_man.bird_cmd("call_agent")
                 case "grpc":
-                    link = self.agent.bird_man.get_link_by_name(
-                        "savbgp_65502_65501")
+                    link = self.agent.bird_man.get_link_by_name(using_link)
                     self._send_grpc(msg["msg"],
                                     link,
                                     self.agent.config["rpdp_id"],
-                                    {"remote_addr": "10.0.1.1:5000", "remote_id": "10.0.1.1"})
+                                    {"remote_addr": "10.0.0.1:5000",
+                                     "remote_id": "10.0.0.1"})
                 case "quic":
                     msg["msg"]["sav_nlri"] = list(
                         map(netaddr.IPNetwork, msg["msg"]["sav_nlri"]))
                     link = self.agent.bird_man.get_link_meta_by_name(
-                        "savbgp_65502_65501")
+                        using_link)
                     self.send_msg(msg["msg"], self.agent.config, link)
                 case _:
                     self.logger.error(
                         f"unknown msg type {msg['msg_type']}({type(msg['msg_type'])})")
+            process_time = time.time()-t0
+            temp = self.metric["perf_test"][msg["msg_type"]]
+            if temp["start"] is None:
+                temp["start"] = t0
+            temp["end"] = t0+process_time
+            temp["send"]["count"] += 1
+            temp["send"]["size"] += len(str(msg))
+            temp["send"]["time"] += process_time
+            self.metric["perf_test"][msg["msg_type"]] = temp
             self.logger.debug(f"SENT {count} msg ({msg['msg_type']})")
         self.logger.debug("perf test send finished")
 
@@ -843,11 +854,9 @@ class RPDPApp(SavApp):
                 next_as = int(path.pop(0))  # for modified bgp
                 if (self.agent.config["local_as"] != next_as):
                     self.logger.debug(msg["sav_scope"])
-                    self.logger.debug(
-                        f"next_as {next_as}({type(next_as)}) local_as {link_meta['local_as']}({type(link_meta['local_as'])})")
                     path.append(next_as)
                     self.logger.error(
-                        f"as number mismatch msg:{path} local_as {link_meta['local_as']},next_as {next_as}")
+                        f"as number mismatch msg:{path} local_as {self.agent.config['local_as']},next_as {next_as}")
                     return
                 if len(path) == 0:
                     # self.agent._log_info_for_front(msg, "terminate")

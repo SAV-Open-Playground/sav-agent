@@ -352,32 +352,10 @@ def init_direction_metric():
 
 
 def init_protocol_metric():
-    return {"recv": init_direction_metric(), "send": init_direction_metric(), "start": None, "end": None}
-# def birdc_cmd(logger, cmd):
-#     """
-#     execute bird command and return the output in std
-#     """
-#     cmd = "/usr/local/sbin/birdc "+cmd
-#     proc = subprocess.Popen(
-#         # [cmd],
-#         cmd.split(" "),
-#         shell=True,
-#         stdout=subprocess.PIPE,
-#         stdin=subprocess.PIPE,
-#         stderr=subprocess.PIPE)
-#     proc.stdin.write("\n".encode("utf-8"))
-#     proc.stdin.flush()
-#     proc.wait()
-#     out = proc.stdout.read().decode()
-#     temp = out.split("\n")[0]
-#     temp = temp.split()
-#     if len(temp) < 2:
-#         return None
-#     if not (temp[0] == "BIRD" and temp[-1] == "ready."):
-#         logger.error(f"birdc execute error:{out}")
-#         return None
-#     out = "\n".join(out.split("\n")[1:])
-#     return out
+    return {"recv": init_direction_metric(),
+            "send": init_direction_metric(),
+            "start": None,
+            "end": None}
 
 
 def birdc_cmd(logger, cmd, log_err=True):
@@ -385,26 +363,11 @@ def birdc_cmd(logger, cmd, log_err=True):
     execute bird command and return the output in std
     """
     t0 = time.time()
-    # logger.debug(cmd)
-    # cmd = f"/usr/local/sbin/birdc {cmd}"
-    # cmd = ['birdc',cmd]
-    # cmd = "birdc "+cmd
-
     cmd = f"/usr/local/sbin/birdc {cmd}"
-    # cmd = shlex.split(cmd)
-    # cmd = [cmd]
-    # cmd = ["/usr/local/sbin/birdc",cmd]
-
-    # logger.debug(cmd)
     try:
-        # logger.debug(os.system(cmd))
-        # proc = subprocess.run(cmd,capture_output=True,shell=True)
         if "call_agent" in cmd:
-            # logger.debug("111111")
-            # t1 = time.time()
             proc = subprocess.Popen(
                 ["/usr/local/sbin/birdc", "call_agent"],
-                # shell=True,
                 stdout=subprocess.PIPE,
                 stdin=subprocess.PIPE,
                 stderr=subprocess.PIPE)
@@ -412,26 +375,15 @@ def birdc_cmd(logger, cmd, log_err=True):
             proc.stdin.flush()
             proc.wait()
             out = proc.stdout.read().decode()
-            # t2 = time.time()
-            # logger.debug(t2-t1)
-
         else:
             cmd = cmd.split(" ")
             proc = subprocess.Popen(
                 cmd,
-                # executable="/usr/local/sbin/birdc",
-                # args=cmd,
-                # shell=True,
                 stdout=subprocess.PIPE,
                 stdin=subprocess.PIPE,
                 stderr=subprocess.PIPE)
-            # proc = subprocess.check_output(cmd,shell=True)
-            # logger.debug(proc)
-            # logger.debug(proc.stderr.read())
             out = proc.stdout.read()
-            # logger.debug(out)
             out = out.decode()
-        # out = proc.stdout.decode('utf-8')
     except Exception as e:
         logger.debug(cmd)
         logger.debug(type(e))

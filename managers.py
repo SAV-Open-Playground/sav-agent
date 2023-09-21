@@ -315,7 +315,8 @@ class IPTableManager():
         interface_list.append("*")
         batch_data = []
         for data in data_list:
-            prefix, src_app, interface, local_role = data.get("prefix"), data.get("source_app"), data.get("interface"), data.get("local_role")
+            prefix, src_app, interface, local_role = data.get("prefix"), data.get(
+                "source_app"), data.get("interface"), data.get("local_role")
             if (prefix is None) or (src_app is None) or (interface is None):
                 self.logger.error(f"Missing required fields [{data.keys()}]")
                 raise ValueError("Missing required field")
@@ -355,7 +356,6 @@ class IPTableManager():
             session.commit()
         session.close()
         self.logger.debug(f"END inserting {len(data_list)}")
-
 
     def delete(self, input_id):
         session = db.session
@@ -537,12 +537,14 @@ class BirdCMDManager():
 
     def get_all_rpdp_meta(self, link_map):
         data = self.get_all_link_meta()
-        # self.logger.debug(json.dumps(data, indent=2))
-        result = {}
-        for link_name, meta in data.items():
-            if link_name in link_map:
-                result[link_name] = meta
-        return result
+        # result = {}
+        # for link_name, meta in data.items():
+        #     if link_name in link_map:
+        #         result[link_name] = meta
+        #     else:
+        #         self.logger.debug(meta)
+        #         result[link_name]
+        return data
 
     def get_all_link_meta(self):
         result = {}

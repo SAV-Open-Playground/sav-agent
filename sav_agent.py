@@ -654,17 +654,8 @@ class SavAgent():
             intra_links = []
             if input_link_name is None:
                 # when sending origin, we send to all links
-                # link_names = []
-                # # self.logger.debug(self.link_man.data.keys())
-                # for link_name, link_data in self.bird_man.get_all_link_meta().items():
-                #     if self.config["link_map"].get(link_name):
-                #         link_names.append(link_name)
-                #     else:
-                #         if link_data["status"]:
-                #             link_names.append(link_name)
                 up_links = self.bird_man.get_all_rpdp_meta(
                     self.config["link_map"])
-                # self.logger.debug(f"up_links:{up_links}")
                 # pre checking
                 if len(up_links) == 0:
                     self.logger.debug("no link is up, not sending")
@@ -681,20 +672,6 @@ class SavAgent():
                         inter_links.append((link_name, meta))
                     else:
                         intra_links.append((link_name, meta))
-            # for link_name in link_names:
-            #     link = self.link_man.data[link_name]
-            #     mapped_type = self.config["link_map"].get(link_name)
-            #     if link["link_type"] == "modified_bgp" or mapped_type:
-            #         if link["is_interior"]:
-            #             inter_links.append((link_name, link))
-            #         else:
-            #             intra_links.append((link_name, link))
-            #     else:
-
-            #         self.logger.error(
-            #             f"sending origin on native-bgp link? {link_name}")
-            # self.logger.debug(f"inter_links:{inter_links}")
-            # self.logger.debug(f"intra_links:{intra_links}")
             inter_paths = []
             intra_paths = []
             if input_paths is None:
