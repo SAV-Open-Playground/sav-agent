@@ -213,7 +213,7 @@ class Bot():
         elif source == "strict_urpf_app":
             sav_agent_config["apps"] = ["rpdp_app", "strict-uRPF"]
         elif source == "loose_urpf_app":
-            sav_agent_config["apps"] = ["rpdp_app", "loose-uRPF"]
+            sav_agent_config["apps"] = ["loose-uRPF"]
         elif source == "EFP-uRPF-Algorithm-A_app":
             sav_agent_config["apps"] = ["rpdp_app", "EFP-uRPF-A"]
         elif source == "EFP-uRPF-Algorithm-B_app":

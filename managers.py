@@ -434,7 +434,8 @@ class BirdCMDManager():
                 meta = {
                     "initial_broadcast": False,
                     "as4_session": True,
-                    "protocol_name": proto_name
+                    "protocol_name": proto_name,
+                    "state":True # faster
                 }
                 if "sav_inter{" in l:
                     meta["link_type"] = "modified_bgp"
@@ -577,10 +578,13 @@ class BirdCMDManager():
         # self.logger.debug(json.dumps(self.protos, indent=2))
         result = {}
         for proto, data in self.protos["links"].items():
+            if "meta" not in data:
+                continue
+            data = data["meta"]
             if not proto.startswith("savbgp"):
                 continue
-            if data["State"] == "up":
-                result[proto] = data["meta"]
+            if data["state"]:
+                result[proto] = data
         return result
 
     def get_up_intra_links(self):

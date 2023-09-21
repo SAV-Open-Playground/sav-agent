@@ -435,8 +435,15 @@ class SavAgent():
         """
         in this function, we manage the link state
         """
-        if not msg["msg"]:
-            return
+        new_state = msg["msg"]
+        link_name = msg["protocol_name"]
+        if not new_state:
+            return  # ignore link down
+        try:
+            self.bird_man.update_link_meta(link_name, "state", new_state)
+        except KeyError:
+            pass
+
         if self.passport_app:
             self.passport_app.init_key_publish()
 
