@@ -173,35 +173,41 @@ def iptables_link_tc(active_app, logger, rules):
 
 
 def iptables_refresh(active_app, logger, limit_rate=None):
-    if active_app is None:
-        logger.debug("active app is None")
-        return
-    # TODO dynamic changing
-    # tell if current node is sav enabled
-    with open('/root/savop/SavAgent_config.json', 'r') as f:
-        config = json.load(f)
-        enabled_sav_app = config.get("enabled_sav_app")
-    if enabled_sav_app is None:
-        logger.debug("enabled_sav_app app is None")
-        return
-    session = db.session
-    rules = session.query(SavTable).filter(SavTable.source == active_app).all()
-    session.close()
-    if len(rules) == 0:
-        return f"there is no {active_app} sav rules, so don't need to refresh iptables"
-    for r in rules:
-        # logger.debug(f" 'direction':{r.direction}, 'id':{r.id}, 'interface':{r.interface}, 'metadata':{r.metadata}, \
-        # 'neighbor_as':{r.neighbor_as}, 'prefix':{r.prefix}, 'source':{r.source}, 'local_role:{r.local_role}")
-        pass
-    # flush existing rules
-    flush_chain_status = subprocess.call(['iptables', '-F', KEY_WORD])
-    if flush_chain_status != 0:
-        logger.error(f"flush {active_app} iptables failed")
-    if (limit_rate is None) or (limit_rate is not True):
-        log_info = iptable_static_refresh(active_app, logger, rules)
-    else:
-        log_info = iptables_link_tc(active_app, logger, rules)
-    return log_info
+    try:
+        if active_app is None:
+            logger.debug("active app is None")
+            return
+        # TODO dynamic changing
+        # tell if current node is sav enabled
+        with open('/root/savop/SavAgent_config.json', 'r') as f:
+            config = json.load(f)
+            enabled_sav_app = config.get("enabled_sav_app")
+        if enabled_sav_app is None:
+            logger.debug("enabled_sav_app app is None")
+            return
+        session = db.session
+        rules = session.query(SavTable).filter(
+            SavTable.source == active_app).all()
+        session.close()
+        if len(rules) == 0:
+            return f"there is no {active_app} sav rules, so don't need to refresh iptables"
+        for r in rules:
+            # logger.debug(f" 'direction':{r.direction}, 'id':{r.id}, 'interface':{r.interface}, 'metadata':{r.metadata}, \
+            # 'neighbor_as':{r.neighbor_as}, 'prefix':{r.prefix}, 'source':{r.source}, 'local_role:{r.local_role}")
+            pass
+        # flush existing rules
+        flush_chain_status = subprocess.call(['iptables', '-F', KEY_WORD])
+        if flush_chain_status != 0:
+            logger.error(f"flush {active_app} iptables failed")
+        if (limit_rate is None) or (limit_rate is not True):
+            log_info = iptable_static_refresh(active_app, logger, rules)
+        else:
+            log_info = iptables_link_tc(active_app, logger, rules)
+        return log_info
+    except Exception as e:
+        logger.error(e)
+        logger.exception(e)
+        return f"refresh {active_app} iptables failed"
 
 
 class IPTableManager():
@@ -435,7 +441,7 @@ class BirdCMDManager():
                     "initial_broadcast": False,
                     "as4_session": True,
                     "protocol_name": proto_name,
-                    "state":True # faster
+                    "state": True  # faster
                 }
                 if "sav_inter{" in l:
                     meta["link_type"] = "modified_bgp"
