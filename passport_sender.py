@@ -28,10 +28,12 @@ def send_one_pkt(target_ip, pkt_num):
 
 
 if __name__ == "__main__":
+    # print(11)
     pkt_num = int(sys.argv[1])
     thread_num = int(sys.argv[2])
     target_ip = sys.argv[3]
     thread_pool = []
+    # send_one_pkt(target_ip, pkt_num)
     for _ in range(thread_num):
         t = threading.Thread(target=send_one_pkt, args=(
             target_ip, pkt_num,))

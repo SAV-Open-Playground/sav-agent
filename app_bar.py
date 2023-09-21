@@ -22,7 +22,7 @@ class BarApp(SavApp):
 
     def _update_rpki_cache(self):
         """
-        TODO will wait untill we have roa and aspa info
+        TODO will wait until we have roa and aspa info
         """
         while True:
             self.roa_cache = get_roa(self.logger)
@@ -86,16 +86,15 @@ class BarApp(SavApp):
 
         self._update_rpki_cache()
         # find direct connected customer or peer
-        links_data = self.agent.bird_man.protos["links"]
+        links_data = self.agent.bird_man.get_all_link_meta()
+        # self.logger.debug(links_data)
         direct = {}
         # A:
-        for link_name, link_data in links_data.items():
-            # link_meta = link_data
-            # self.logger.debug(list(link_data.keys()))
-            if "bgp" in link_data["link_type"]:
-                if link_data["local_role"] in ["peer", "provider"]:
-                    direct[link_data["interface_name"]
-                           ] = link_data["remote_as"]
+        for link_name, link_meta in links_data.items():
+            if "bgp" in link_meta["link_type"]:
+                if link_meta["local_role"] in ["peer", "provider"]:
+                    direct[link_meta["interface_name"]
+                           ] = link_meta["remote_as"]
             else:
                 # self.logger.debug(link_data)
                 pass

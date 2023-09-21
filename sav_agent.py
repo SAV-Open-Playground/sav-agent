@@ -277,7 +277,7 @@ class SavAgent():
                 app_instance = RPDPApp(self, logger=self.logger)
                 self.add_app(app_instance)
                 self.rpdp_app = app_instance
-            elif name == "BAR":
+            elif name == "bar_app":
                 app_instance = BarApp(self, logger=self.logger)
                 self.add_app(app_instance)
             elif name == "passport":
@@ -331,6 +331,8 @@ class SavAgent():
             self.data["initial_bgp_stable"] = True
             if self.rpdp_app:
                 self._notify_apps({}, {}, ["rpdp_app"])
+            if self.passport_app:
+                self._notify_apps({}, {}, ["passport_app"])
             # self.logger.info(
             # f"INITIAL PREFIX-AS_PATH TABLE {self.rpdp_app.get_pp_v4_dict()}")
             return
@@ -600,7 +602,8 @@ class SavAgent():
                     add_rules.append(row)
             # TODO d
             del_rules.extend(d)
-        self.update_sav_table(add_rules, del_rules)
+        self.ip_man.add(add_rules)
+        # self.update_sav_table(add_rules, del_rules)
 
     def update_sav_table(self, adds, dels):
         """
@@ -790,14 +793,14 @@ class SavAgent():
                         list(map(json.loads, msg)))
             case "passport_key_exchange":
                 key = "key_exchange"
-                start = self.passport_app.update_metric(
+                self.passport_app.update_metric(
                     msg, key, False, True)
                 self.passport_app.process_key_publish(input_msg)
                 self.passport_app.update_metric(
-                    msg, key, False, False, start)
+                    msg, key, False, False, t0)
             case "passport_send_pkt":
                 key = "pkt"
-                start = self.passport_app.update_metric(
+                self.passport_app.update_metric(
                     msg, key, True, True)
                 target_ip = msg["target_ip"]
                 self.passport_app.send_pkt(target_ip, msg["data"])

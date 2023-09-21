@@ -662,8 +662,8 @@ class BirdCMDManager():
         """
         result = []
         for _, link in self.protos["links"].items():
-            if link["interface_name"] == interface_name:
-                result.append(link)
+            if link["meta"]["interface_name"] == interface_name:
+                result.append(link["meta"])
         return result
 
     def _parse_protocols(self, raw_input):
@@ -837,6 +837,9 @@ class BirdCMDManager():
             if len(prefix) < 9:
                 self.logger.error(f"incorrect prefix len: {row}")
             # self.logger.debug(prefix)
+            # TODO check correctness
+            if "-" in prefix:
+                prefix = prefix.split("-")[0]
             prefix = netaddr.IPNetwork(prefix)
             # if prefix.is_private():
             #     # self.logger.debug(f"private prefix {prefix} ignored")
@@ -1058,7 +1061,6 @@ class LinkManager(InfoManager):
         """
         return a list of bgp(modified or native) link_dict that has the same interface_name
         """
-        # self.logger.debug(f"interface_name:{interface_name}")
         result = []
         # self.logger.debug(self.data)
         for _, link in self.data.items():

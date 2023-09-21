@@ -314,7 +314,9 @@ def passport_send_pkt():
         "source_link": "",
         "pkt_rec_dt": time.time()
     }
+    # LOGGER.debug(msg)
     sa.put_msg(msg)
+    # LOGGER.debug("good")
     return "received"
 
 

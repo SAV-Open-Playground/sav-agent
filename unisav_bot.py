@@ -160,8 +160,8 @@ class Bot():
                 #     url_str=f"/refresh_proto/{source}/")
             except Exception as e:
                 self.logger.exception(e)
-            dt = self._get_max_update_timestamp(source)
-            exec_result["dt"] = dt
+            exec_result["sav_last_update_dt"] = self._get_max_update_timestamp(
+                source)
             self._write_json(self.exec_results_path, exec_result)
         else:
             exec_result.update({"stable_down_count": 10})
@@ -221,6 +221,8 @@ class Bot():
             sav_agent_config["apps"] = ["rpdp_app", "EFP-uRPF-B"]
         elif source == "passport":
             sav_agent_config["apps"] = ["passport"]
+        elif source == "bar_app":
+            sav_agent_config["apps"] = ["bar_app"]
         else:
             self.logger.error(f"unknown source {source}")
             raise ValueError("unknown source")
