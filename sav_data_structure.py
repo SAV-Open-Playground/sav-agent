@@ -3,7 +3,6 @@
 """
 @File    :   data_structure.py
 @Time    :   2023/08/08
-@Author  :   Yuqian Shi
 @Version :   0.1
 @Desc    :   The data_structure.py is responsible  project defined data structure and related conversions
 """

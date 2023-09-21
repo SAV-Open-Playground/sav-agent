@@ -2,7 +2,6 @@
 """
 @File    :   sav_agent.py
 @Time    :   2023/01/10
-@Author  :   Yuqian Shi
 @Version :   0.1
 
 @Desc    :   the sav_agent.py 

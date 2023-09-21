@@ -2,7 +2,6 @@
 """
 @File    :   app_passport.py
 @Time    :   2023/09/04
-@Author  :   Yuqian Shi
 @Version :   0.1
 
 @Desc    :   implements internal key generation and handling

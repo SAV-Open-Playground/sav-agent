@@ -3,7 +3,6 @@
 """
 @File    :   sav_common.py
 @Time    :   2023/01/17 16:04:22
-@Author  :   Yuqian Shi
 @Version :   0.1
 
 @Desc    :   The sav_common.py contains shared functions and classes

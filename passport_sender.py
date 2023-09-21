@@ -4,7 +4,6 @@
 """
 @File    :   passport_sender.py
 @Time    :   2023/09/12
-@Author  :   Yuqian Shi
 @Version :   0.1
 @Desc    :   The passport_sender.py 
 """

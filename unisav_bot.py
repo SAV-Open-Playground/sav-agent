@@ -3,7 +3,6 @@
 """
 @File    :   unisav_bot.py
 @Time    :   2023/09/14
-@Author  :   Yuqian Shi
 @Version :   0.1
 @Desc    :   The unisav_bot.py is responsible for the container 
 status and metric report during the emulation process. it should be run as main process inside the container.

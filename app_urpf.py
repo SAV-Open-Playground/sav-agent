@@ -2,7 +2,6 @@
 """
 @File    :   app_urpf.py
 @Time    :   2023/07/24
-@Author  :   Yuqian Shi
 @Version :   0.1
 
 @Desc    :   the app_urpf.py is responsible for uRPF-SAV rule generation (Strict and Loose)

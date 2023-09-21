@@ -2,7 +2,6 @@
 '''
 @File    :   managers.py
 @Time    :   2023/01/17
-@Author  :   Yuqian Shi
 @Version :   0.1
 
 @Desc    :   the managers.py is responsible for the execution of selected sav mechanism and other manager classes

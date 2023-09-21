@@ -2,7 +2,6 @@
 """
 @File    :   app_bar.py
 @Time    :   2023/07/24
-@Author  :   Yuqian Shi
 @Version :   0.1
 
 @Desc    :   the app_bar.py is responsible for BAR-SAV rule generation (when ROA and ASPA are available)

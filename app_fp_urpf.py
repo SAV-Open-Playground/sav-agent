@@ -2,7 +2,6 @@
 """
 @File    :   app_fp_urpf.py
 @Time    :   2023/07/24
-@Author  :   Yuqian Shi
 @Version :   0.1
 
 @Desc    :   the app_fp_urpf.py is responsible for Fp-uRPF-SAV rule generation

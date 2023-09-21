@@ -1,7 +1,6 @@
 """
 @File    :   app_rpdp.py
 @Time    :   2023/07/24
-@Author  :   Yuqian Shi
 @Version :   0.1
 
 @Desc    :   the app_rpdp.py is responsible for RPDP-SAV rule generation
