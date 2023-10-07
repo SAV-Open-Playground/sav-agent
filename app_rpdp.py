@@ -7,7 +7,6 @@
              In this implementation, the SPA and SPD is encoded into standard BGP Update message
 """
 
-from multiprocessing import Manager
 import grpc
 import agent_msg_pb2
 import agent_msg_pb2_grpc
@@ -298,7 +297,6 @@ class RPDPApp(SavApp):
 
     def __init__(self, agent, name="rpdp_app", logger=None):
         super(RPDPApp, self).__init__(agent, name, logger)
-        self.prepared_cmd = Manager().list()
         self.pp_v4_dict = {}
         self.connect_objs = {}
         self.metric = self.get_init_metric_dict()
@@ -328,14 +326,15 @@ class RPDPApp(SavApp):
         if reset:
             self.pp_v4_dict = {}
         old_ = self.pp_v4_dict
-        # new_ = self._parse_bird_fib()
         new_ = self.agent.bird_man.get_remote_fib()
+        # self.logger.debug(f"new_ {new_}")
         dels = []
         adds = []
         # self.logger.debug(new_)
         # self.logger.debug(old_)
         for prefix, paths in new_.items():
             if prefix not in old_:
+                # self.logger.debug(paths)
                 for path in paths["as_path"]:
                     adds.append((prefix, path))
             else:
@@ -570,10 +569,10 @@ class RPDPApp(SavApp):
             t0 = time.time()
             match msg["msg_type"]:
                 case "dsav":
-                    self.add_prepared_cmd(msg)
+                    self.agent.put_out_msg(msg)
                     self.agent.bird_man.bird_cmd("call_agent")
                 case "bgp":
-                    self.add_prepared_cmd(msg)
+                    self.agent.put_out_msg(msg)
                     self.agent.bird_man.bird_cmd("call_agent")
                 case "grpc":
                     link = self.agent.bird_man.get_link_by_name(using_link)
@@ -611,23 +610,23 @@ class RPDPApp(SavApp):
         if not isinstance(msg, dict):
             self.logger.error(f"msg is not a dictionary msg is {type(msg)}")
             return
-        cmd_len = len(self.prepared_cmd)
+        cmd_len = self.agent.get_out_msg_len()
         if cmd_len > 0:
             self.logger.warn(
                 f"last message not finished, {cmd_len} remaining")
-            # self.logger.debug(self.prepared_cmd)
             time.sleep(0.01)
         # specialized for bird app, we need to convert the msg to byte array
         nlri = copy.deepcopy(msg["sav_nlri"])
         # split into multi mesgs
         max_nlri_len = 50
-        # self.logger.debug(max_nlri_len)
         while len(nlri) > max_nlri_len:
             msg["sav_nlri"] = nlri[:max_nlri_len]
             nlri = nlri[max_nlri_len:]
-            # self.logger.debug(len(nlri))
             msg_byte = self._msg_to_hex_str(msg)
-            self.add_prepared_cmd(msg_byte)
+            self.agent.put_out_msg(msg_byte)
+        msg["sav_nlri"] = nlri
+        msg_byte = self._msg_to_hex_str(msg)
+        self.agent.put_out_msg(msg_byte)
             # self._bird_cmd(cmd="call_agent")
         # self.logger.info(
             # f"SENT MSG ON LINK [{msg['protocol_name']}]:{msg}, time_stamp: [{time.time()}]]")
@@ -703,12 +702,6 @@ class RPDPApp(SavApp):
             if t > TIMEIT_THRESHOLD:
                 self.logger.warning(f"TIMEIT {time.time()-t0:.4f} seconds")
             return hex_str_msg
-
-    def add_prepared_cmd(self, cmd):
-        self.prepared_cmd.append(cmd)
-
-    def get_prepared_cmd(self):
-        return self.prepared_cmd.pop(0)
 
     def _construct_msg(self, link, input_msg, msg_type, is_inter):
         """
@@ -799,13 +792,13 @@ class RPDPApp(SavApp):
 
         msg["msg"]["interface_name"] = link_meta["interface_name"]
         msg["link_type"] = "grpc"
-        self.process_rpdp_msg(msg)
+        return self.process_rpdp_msg(msg)
 
     def process_quic_msg(self, msg, is_test_msg=False, test_id=None):
         self.logger.debug("enter")
         msg = self._quic_msg_unbox(msg)
         self.logger.debug("unboxed")
-        self.process_rpdp_msg(msg)
+        return self.process_rpdp_msg(msg)
 
     def preprocess_msg(self, msg):
         # as_path is easier to process in string format, so we keep it
@@ -963,6 +956,9 @@ class RPDPApp(SavApp):
                          "local_role": link_meta["local_role"]
                          })
         self.agent.ip_man.add(adds)
+        # TODO delete is not supported for now
+        # self.agent.update_sav_table(adds,[])
+        
         if msg["is_interior"]:
             # in inter-domain, sav_path is as_path
             if not input_msg["msg_type"] == "grpc_msg":
