@@ -15,8 +15,8 @@ import logging
 import logging.handlers
 import netaddr
 import requests
-import copy
 import subprocess
+import copy
 
 
 from sav_data_structure import *
@@ -470,7 +470,7 @@ def parse_kernel_fib():
 
 def birdc_get_import(logger, protocol_name, channel_name="ipv4"):
     """
-    using birdc show all import to get bird fib
+    using birdc show all import to get import table
     return a list
     """
     cmd = f"show route all import table {protocol_name}.{channel_name}"

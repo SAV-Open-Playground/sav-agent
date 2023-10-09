@@ -40,9 +40,10 @@ class Bot():
             return 255
         return result.returncode
 
-    def _http_request_executor(self, url_str):
+    def _http_request_executor(self, url_str, log=True):
         url = f"http://localhost:8888{url_str}"
-        self.logger.debug(url)
+        if log:
+            self.logger.debug(url)
         rep = requests.get(url, timeout=30)
         if rep.status_code != 200:
             self.logger.error(f"request {url} failed")
@@ -72,7 +73,6 @@ class Bot():
         cursor.close()
         conn.close()
         return results
-
     def check_signal_file(self):
         # 根据signal.json, sav_agent_config判断下一步路由器的执行动作
         # 执行动作有：start, stop, keep
@@ -105,7 +105,7 @@ class Bot():
         """功能：监控sav-agent与bird的状态，并计算sav_rule的收敛时间
         根据monitor_node字段判断是否为监控结点，非监控结点不需要打开监控功能
         根据字段action, execute_result来判断sav协议机制已经开始
-        根据last_rule_num, this_rule_num, statble_number来判断sav是否收敛
+        根据last_rule_num, this_rule_num, stable_number来判断sav是否收敛
         根据stable_down_count==0和stable_time确定已经收敛无效继续监控"""
         # self.logger.debug("monitor_sav_convergence")
         t0 = time.time()
@@ -125,12 +125,18 @@ class Bot():
         if t0-self.last_check_dt < 5:
             return  # reduce db read
         self.last_check_dt = t0
-        new_rule_num = self._get_sav_rule_number(source=source)
+        
         last_rule_num = exec_result.get("last_rule_num", 0)
         exec_result["rule_num_check_dt"] = t0
+        exec_result.update(
+                    {"agent_metric": json.loads(self._http_request_executor("/metric/",False))})
+        # self.logger.debug(f"agent_metric:{exec_result['agent_metric']}")
+        temp = exec_result['agent_metric']["agent"].get("sav_rule_nums",{source:{"sav_rule_num":0,"update_dt":time.time()}})[source]
+        new_rule_num = temp["sav_rule_num"]
         exec_result["last_rule_num"] = new_rule_num
         if new_rule_num != last_rule_num:
-            exec_result.update({"rule_num_update_dt": t0})
+            exec_result.update({"rule_num_update_dt": temp["update_dt"]})
+            self.logger.debug(f"new_rule_num for {source}: {new_rule_num}")
             self.exec_result = exec_result
             return
         if new_rule_num == 0:
@@ -152,16 +158,18 @@ class Bot():
             if not fib_stable_dt:
                 self.logger.warning("fib not stabled")
             exec_result["fib_stable_time"] = fib_stable_dt - sav_start_time
-            try:
-                exec_result.update(
-                    {"agent_metric": json.loads(self._http_request_executor(url_str="/metric/"))})
-                # self._http_request_executor(
-                #     url_str=f"/refresh_proto/{source}/")
-            except Exception as e:
-                self.logger.exception(e)
+            
+            # try:
+            #     self._http_request_executor(
+            #         url_str=f"/refresh_proto/{source}/")
+            # except Exception as e:
+            #     self.logger.exception(e)
             exec_result["sav_last_update_dt"] = self._get_max_update_timestamp(
                 source)
+            with open(f"{self.data_path}/logs/sav_table.json", "w") as f:
+                f.write(self._http_request_executor(url_str="/sav_table/"))
             self._write_json(self.exec_results_path, exec_result)
+            
         else:
             exec_result.update({"stable_down_count": 10})
             exec_result.update({"source": source})
@@ -206,12 +214,12 @@ class Bot():
 
         sav_agent_config = self._read_json(self.sa_config_path)
         source = signal["source"]
-        if source == "rpdp_app":
-            sav_agent_config["apps"] = ["rpdp_app"]
+        if source in ["rpdp_app"]:
+            sav_agent_config["apps"] = [source]
         elif source == "fpurpf_app":
             sav_agent_config["apps"] = ["rpdp_app", "FP-uRPF"]
         elif source == "strict_urpf_app":
-            sav_agent_config["apps"] = ["rpdp_app", "strict-uRPF"]
+            sav_agent_config["apps"] = ["strict-uRPF"]
         elif source == "loose_urpf_app":
             sav_agent_config["apps"] = ["loose-uRPF"]
         elif source == "EFP-uRPF-Algorithm-A_app":

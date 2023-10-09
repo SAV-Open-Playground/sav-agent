@@ -7,11 +7,7 @@
 @Desc    :   implements internal key generation and handling
 """
 
-from multiprocessing import Manager
 from sav_common import *
-import threading
-import pickle
-import json
 import time
 import random
 import requests
@@ -30,7 +26,6 @@ class PassportApp(SavApp):
 
     def __init__(self, agent, asn, router_id, name="passport_app", logger=None):
         super(PassportApp, self).__init__(agent, name, logger)
-        self.prepared_cmd = Manager().list()
         self.pp_v4_dict = {}
         self.p = 10007
         self.g = 5
@@ -45,6 +40,7 @@ class PassportApp(SavApp):
             "pkt": init_protocol_metric(),
         }
         self.relay_history = {}
+
     def get_public_key_dict(self, source_ip=""):
         return {"asn": self.asn, "router_id": self.router_id,
                 "public_key": self.public_key}
@@ -120,7 +116,7 @@ class PassportApp(SavApp):
             #         # self.logger.warning(f"existing {result[peer_as]}, new :{peer_ip}")
             # else:
             #     result[peer_as]=peer_ip
-            result.append((peer_as,peer_ip))
+            result.append((peer_as, peer_ip))
         return result
 
     def _send_to_remote2(self, remote_ip, msg, timeout=5, path="passport_key_exchange"):
@@ -170,7 +166,7 @@ class PassportApp(SavApp):
         else:
             if metric_key == "key_exchange":
                 self.update_metric(msg, metric_key, True, False)
-                
+
     def process_key_publish(self, input_msg):
         msg = input_msg["msg"]
         # self.logger.debug(msg)
@@ -262,11 +258,10 @@ class PassportApp(SavApp):
             "src_asn": self.asn,
             "mac": mac
         }
-        
+
         # self.logger.debug(f"http://{next_hop_ip}:8888/passport_rec_pkt")
         self.logger.debug(f"sending packet to {target_ip}({next_hop_ip})")
         self._send_to_remote(next_hop_ip, pkt, path="passport_rec_pkt")
-        
 
     def calculate_mac(self, data, key):
         key = str(key).encode()

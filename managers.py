@@ -8,6 +8,7 @@
 '''
 import subprocess
 import json
+import copy
 
 from model import db
 from model import SavInformationBase, SavTable
@@ -407,7 +408,20 @@ class BirdCMDManager():
         self.bird_fib = {"check_time": None, "update_time": None, "local_route": {},
                          "remote_route": {}, "default_route": {}}
         self.protos = {"check_time": None, "update_time": None, "links": {}}
-
+    
+    def is_bird_ready(self):
+        """
+        return True if bird is ready
+        """
+        try:
+            result = self.bird_cmd("show status",log_err=False)
+            if result:
+                return True
+            else:
+                return False
+        except:
+            return False
+    
     def bird_cmd(self, cmd, log_err=True):
         # if self.is_running:
         # self.logger.debug(f"pausing {cmd}")
@@ -774,7 +788,7 @@ class BirdCMDManager():
     def _parse_bird_fib(self, log_err):
         """
         using birdc show all to get bird fib,
-        return pre-as_path dict
+        return prefix-as_path dict
         """
         t0 = time.time()
         data = self.bird_cmd("show route all", log_err)
@@ -813,6 +827,9 @@ class BirdCMDManager():
         t = time.time() - t0
         if t > TIMEIT_THRESHOLD:
             self.logger.warning(f"TIMEIT {time.time()-t0:.4f} seconds")
+        # self.logger.debug(remote)
+        # self.logger.debug(local)
+        # self.logger.debug(default)
         return default, local, remote
 
     def _parse_bird_table(self, table):

@@ -44,6 +44,8 @@ class UrpfApp(SavApp):
         """
         add_rules = []
         del_rules = []
+        # self.logger.debug(adds)
+        # self.logger.debug(dels)
         for prefix, row in adds.items():
             add_rules.append(sav_rule_tuple(
                 prefix, row.get("Iface"), self.name))

@@ -9,9 +9,9 @@ This is a benchmark to test the performance of BIRD
 """
 
 import threading
-from multiprocessing import Manager
 
 import sys
+import asyncio
 
 from sav_common import *
 from managers import *
@@ -52,7 +52,7 @@ class SendAgent():
     def __init__(self, config, logger=None):
         if logger is None:
             logger = get_logger(__name__)
-        self.send_buff = Manager().list()
+        self._send_msgs = []
         self.post_session = requests.Session()
         self.result_buff = {}
         self._job_id = 0
@@ -62,15 +62,15 @@ class SendAgent():
     def update_config(self, config):
         self.config = config
 
-    def put_msg(self, msg):
+    def put_send_async(self, msg):
         """
         supported type : ["http-post","grpc","quic"]
         timeout is in seconds, if set to 0, then will keep trying until sent
-        "retry" is optional, if set, then will retry for that many times otehrwise will retry for 10 times  
+        "retry" is optional, if set, then will retry for the given times (default is 10)  
         """
-        while self._add_lock:
-            pass
-        self._add_lock = True
+        # while self._add_lock:
+        #     pass
+        # self._add_lock = True
         key_types = [("type", str), ("data", dict),
                      ("timeout", int), ("store_rep", bool)]
         keys_types_check(msg, key_types)
@@ -80,9 +80,14 @@ class SendAgent():
                 f"unknown msg type {msg['type']} / {supported_type}")
 
         msg["pkt_id"] = self._job_id
-        self.send_buff.append(msg)
+        self._send_msgs.append(msg)
         self._job_id += 1
-        self._add_lock = False
+        # self._add_lock = False
+
+    def put_send_sync(self, msg):
+        """
+        will return the response
+        """
 
     def send_msgs(self, msgs):
         for msg in msgs:
@@ -135,7 +140,8 @@ class SavAgent():
         self.path_to_config = path_to_config
         self.update_config(path_to_config)
         self._init_data()
-        self.in_buff = Manager().list()
+        self._in_msgs = []
+        self._out_msgs = []
         self._init_apps()
         self.sib_man = SIBManager(logger=self.logger)
         self.ip_man = IPTableManager(self.logger, self.data["active_app"])
@@ -146,6 +152,15 @@ class SavAgent():
         self.sender = SendAgent(self.logger, self.config)
         self._start()
         # self.grpc_server = None
+
+    def put_out_msg(self, msg):
+        self._out_msgs.append(msg)
+
+    def get_out_msg(self):
+        return self._out_msgs.pop(0)
+
+    def get_out_msg_len(self):
+        return len(self._out_msgs)
 
     def update_config(self, path_to_config):
         """
@@ -315,7 +330,7 @@ class SavAgent():
             self.data["kernel_fib"]["data"] = new_
         return self.data["kernel_fib"]["data"], adds, dels
 
-    def _if_bird_ready(self, stable_span=5):
+    def _if_fib_stable(self, stable_span=5):
         """
         check if the fib table is stabilized and if bird sent link meta to us
         """
@@ -328,6 +343,7 @@ class SavAgent():
             self.logger.debug(
                 f"FIB STABILIZED at {self.data['kernel_fib']['update_time']}")
             self.data["initial_bgp_stable"] = True
+            self.bird_man.update_fib(sib_man=self.sib_man)
             if self.rpdp_app:
                 self._notify_apps({}, {}, ["rpdp_app"])
             if self.passport_app:
@@ -336,36 +352,44 @@ class SavAgent():
             # f"INITIAL PREFIX-AS_PATH TABLE {self.rpdp_app.get_pp_v4_dict()}")
             return
         # self.logger.debug("FIB NOT STABILIZED")
-
+    def _initial_wait(self,check_span=0.1):
+        """
+        1. wait for bird to be ready
+        2. wait for fib to be stable
+        3. perform initial events
+        """
+        while not self.bird_man.is_bird_ready():
+            time.sleep(check_span)
+            # self.logger.debug("waiting for bird to be ready")
+        while not self.data.get("initial_bgp_stable",False):
+            self._if_fib_stable(
+                        stable_span=self.config.get("fib_stable_threshold"))
+            # self.logger.debug("waiting for fib")
+        return 
+            
     def _run(self):
         """
         start a thread to check the cmd queue and process each cmd
         """
+        self._initial_wait()
         while True:
             try:
-                if self.data["initial_bgp_stable"]:
-                    while len(self.in_buff) > 0:
-                        try:
-                            msg = self.in_buff.pop(0)
-                            self.data["pkt_id"] += 1
-                            msg["pkt_id"] = self.data["pkt_id"]
-                            self._process_msg(msg)
-                        except Exception as err:
-                            self.logger.exception(err)
-                            self.logger.error(
-                                f"error when processing: [{err}]:{msg}")
-                    self._send_init()
-                    if self.rpdp_app:
-                        while len(self.rpdp_app.prepared_cmd) > 0:
-                            # may call_agent more than once
-                            self.logger.debug("sending prepared cmd")
-                            self.bird_man.bird_cmd("call_agent")
-
-                else:
-                    self._if_bird_ready(
-                        stable_span=self.config.get("fib_stable_threshold"))
-                    # TODO add initial notify_apps?
-                    time.sleep(0.1)
+                while len(self._in_msgs) > 0:
+                    try:
+                        msg = self._in_msgs.pop(0)
+                        self.data["pkt_id"] += 1
+                        msg["pkt_id"] = self.data["pkt_id"]
+                        self._process_msg(msg)
+                    except Exception as err:
+                        self.logger.exception(err)
+                        self.logger.error(
+                            f"error when processing: [{err}]:{msg}")
+                self._send_init()
+                if self.rpdp_app:
+                    while len(self._out_msgs) > 0:
+                        # may call_agent more than once
+                        self.logger.debug("sending prepared cmd")
+                        self.bird_man.bird_cmd("call_agent")
             except Exception as e:
                 self.logger.exception(e)
                 self.logger.error(e)
@@ -425,7 +449,7 @@ class SavAgent():
         if not "msg" in msg:
             raise KeyError(f"msg missing in msg:{msg}")
         keys_types_check(msg, key_types)
-        self.in_buff.append(msg)
+        self._in_msgs.append(msg)
 
     def _send_init_broadcast_on_link(self, link, link_name):
         # self.logger.debug(f"sending initial broadcast on link {link_name}")
@@ -435,8 +459,10 @@ class SavAgent():
         """
         in this function, we manage the link state
         """
+        key_types = [("msg", bool), ("source_link", str)]
+        keys_types_check(msg, key_types)
         new_state = msg["msg"]
-        link_name = msg["protocol_name"]
+        link_name = msg["source_link"]
         if not new_state:
             return  # ignore link down
         try:
@@ -567,7 +593,8 @@ class SavAgent():
             a, d = [], []
             app_type = type(app)
             if app_type in [UrpfApp]:
-                a, d = app.fib_changed(adds, dels)
+                if len(adds) > 0 or len(dels) > 0:
+                    a, d = app.fib_changed(adds, dels)
             elif app_type in [EfpUrpfApp, FpUrpfApp, BarApp, PassportApp]:
                 a, d = app.fib_changed()
             elif app_type in [RPDPApp]:
@@ -608,39 +635,48 @@ class SavAgent():
                     add_rules.append(row)
             # TODO d
             del_rules.extend(d)
-        self.ip_man.add(add_rules)
+        self.logger.debug(f"add_rules:{add_rules}")
+        self.logger.debug(f"del_rules:{del_rules}")
         # self.update_sav_table(add_rules, del_rules)
-
+        # self.ip_man.add(add_rules)
+    def _get_key_from_r(self,r):
+        str_key = str(r["prefix"])+'_'+str(r["neighbor_as"])+"_"+str(r["interface"])
+        # self.logger.debug(str_key)
+        return str_key
     def update_sav_table(self, adds, dels):
         """
         update sav table, and notify apps
         """
-        old_table = self.data["sav_table"]
-        self.logger.debug(f"adds:{adds}")
-        self.logger.debug(f"dels:{dels}")
+        cur_t = time.time()
+        new_table = copy.deepcopy(self.data["sav_table"])
+        for r in dels:
+            str_key = self._get_key_from_r(r)
+            if not str_key in new_table[r["source_app"]]:
+                self.logger.error(f"key missing in sav_table (old):{r}/{str_key}")
+            else:
+                del new_table[r["source_app"]][str_key]
         for r in adds:
-            self.logger.debug(r)
-        # self.logger.debug(f"adds:{adds}")
-        # self.logger.debug(f"dels:{dels}")
-        # for prefix in adds:
-        #     if prefix not in self.data["sav_table"]:
-        #         self.data["sav_table"][prefix] = []
-        #     for path in adds[prefix]:
-        #         add_path(path, self.data["sav_table"][prefix])
-        # for prefix in dels:
-        #     if prefix not in self.data["sav_table"]:
-        #         self.logger.error(
-        #             f"prefix {prefix} not in sav_table when deleting")
-        #         continue
-        #     for path in dels[prefix]:
-        #         if path in self.data["sav_table"][prefix]:
-        #             self.data["sav_table"][prefix].remove(path)
-        #         else:
-        #             self.logger.error(
-        #                 f"path {path} not in sav_table when deleting")
-        # self._update_sav_graph(adds, dels)
-        # self._notify_apps(adds, dels, False)
-
+            # self.logger.debug(r)
+            if not r["source_app"] in new_table:
+                new_table[r["source_app"]] = {}
+            str_key = self._get_key_from_r(r)
+            # self.logger.debug(str_key)
+            if not str_key in new_table[r["source_app"]]:
+                r["create_time"] = cur_t
+                r["update_time"] = cur_t
+                new_table[r["source_app"]][str_key] = r
+            else:
+                old_value = new_table[r["source_app"]][str_key]
+                r["create_time"] = old_value['create_time']
+                r["update_time"] = old_value['update_time']
+                if not r == old_value:
+                    self.logger.error(f"conflict in sav_table (old):{old_value}")
+                    self.logger.error(f"conflict in sav_table (new):{r}")
+                r["update_time"] = cur_t
+                new_table[r["source_app"]][str_key] = r
+        self.data["sav_table"]=new_table
+        # self.logger.debug(f"rpdp_len:{len(new_table['rpdp_app'])}")
+        
     def _send_origin(self, input_link_name=None, input_paths=None):
         """
         send origin messages,
@@ -681,8 +717,7 @@ class SavAgent():
             inter_paths = []
             intra_paths = []
             if input_paths is None:
-
-                ppv4 = self.bird_man.bird_fib["remote_route"]
+                ppv4 = self.bird_man.get_remote_fib()
                 for prefix in ppv4:
                     for path in ppv4[prefix]["as_path"]:
                         inter_paths.append({prefix: path})
@@ -700,8 +735,18 @@ class SavAgent():
                             intra_paths.append(path)
             # self.logger.debug(f"intra_paths:{intra_paths}")
             # self.logger.debug(f"inter_paths:{inter_paths}")
+            # temp = []
+            # self.logger.debug(len(inter_paths))
+            # for i in inter_paths:
+            #     for k,v in i.items():
+            #         if not k.is_private():
+            #             temp.append({k:v})
+            # inter_paths = temp
+            # self.logger.debug(len(inter_paths))
             inter_paths = aggregate_asn_path(inter_paths)
             # self.logger.debug(f"inter_paths:{inter_paths}")
+            # TODO here we filter out private prefixes
+            
             if len(inter_links) > 0 and len(inter_paths) > 0:
                 # we send origin to all links no matter inter or intra
                 for link_name, link in inter_links:
@@ -731,6 +776,7 @@ class SavAgent():
                 # self.logger.debug(msg)
                 return False
             if len(intra_links) > 0:
+                self.logger.error("intra origin not implemented")
                 for link in intra_links:
                     for remote_as, path in inter_paths.items():
                         msg = self.rpdp_app._construct_msg(
@@ -814,7 +860,28 @@ class SavAgent():
         metric["count"] += 1
         metric["time"] += t1-t0
         metric["size"] += len(str(input_msg))
-
+        self._update_sav_rule_nums()
+        
+    def _update_sav_rule_nums(self):
+        metric = self.data["metric"].get("sav_rule_nums",{})
+        old_metric = copy.deepcopy(metric)
+        data = self.data["sav_table"]
+        for app,rules in data.items():
+            metric[f"{app}"] ={"sav_rule_num":len(rules)}
+            metric[f"{app}"]["update_dt"] = 0
+            for k,v in rules.items():
+                if v["update_time"] > metric[f"{app}"]["update_dt"]:
+                    metric[f"{app}"]["update_dt"] = v["update_time"]
+            metric[f"{app}_rule_num"] = metric[f"{app}"]["sav_rule_num"]
+        if not old_metric == metric:
+            self.data["metric"]["sav_rule_nums"] = metric
+            metric["total"] = 0
+            for k,v in metric.items():
+                if k.endswith("_rule_num"):
+                    metric["total"] += v
+            self.logger.debug(f"latest SAV RULE NUMS: {metric['total']}")
+            with open('sa_metric.json', 'w') as f:
+                f.write(json.dumps(metric,indent=2))
     def _start(self):
         self._thread_pool = []
         self._thread_pool.append(threading.Thread(target=self._run))

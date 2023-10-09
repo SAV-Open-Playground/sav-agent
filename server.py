@@ -100,7 +100,7 @@ def _update_gprc_server(sa, logger, grpc_server, grpc_addr):
             logger.debug(grpc_server)
             grpc_server.stop(0)
         grpc_server = start_grpc(new_addr, logger)
-        logger.debug(f"GRPC server updated at {new_addr}")
+        logger.debug(f"GRPC server running at {new_addr}")
     else:
         if grpc_server is None:
             return grpc_server, grpc_addr
@@ -151,7 +151,7 @@ def index():
         if m_t == "request_cmd":
             rep = {"code": "0000", "message": "success"}
             try:
-                cmd = sa.rpdp_app.get_prepared_cmd()
+                cmd = sa.get_out_msg()
                 return {"code": "2000", "data": cmd, "message": "success"}
             except IndexError as err:
                 pass
@@ -226,6 +226,10 @@ def metric():
         rep[sa.passport_app.name] = sa.passport_app.metric
     return json.dumps(rep, indent=2)
 
+@app.route('/sav_table/', methods=["POST", "GET"])
+def sav_table():
+    rep = sa.data["sav_table"]
+    return json.dumps(rep, indent=2)
 
 @app.route('/savop_quic/', methods=["POST"])
 def savop_quic():
@@ -348,3 +352,4 @@ def perf_test():
 
 if __name__ == '__main__':
     app.run("0.0.0.0:8888", debug=True)
+    

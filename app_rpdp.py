@@ -619,15 +619,11 @@ class RPDPApp(SavApp):
         nlri = copy.deepcopy(msg["sav_nlri"])
         # split into multi mesgs
         max_nlri_len = 50
-        while len(nlri) > max_nlri_len:
+        while len(nlri) > 0:
             msg["sav_nlri"] = nlri[:max_nlri_len]
-            nlri = nlri[max_nlri_len:]
             msg_byte = self._msg_to_hex_str(msg)
             self.agent.put_out_msg(msg_byte)
-        msg["sav_nlri"] = nlri
-        msg_byte = self._msg_to_hex_str(msg)
-        self.agent.put_out_msg(msg_byte)
-            # self._bird_cmd(cmd="call_agent")
+            nlri = nlri[max_nlri_len:]
         # self.logger.info(
             # f"SENT MSG ON LINK [{msg['protocol_name']}]:{msg}, time_stamp: [{time.time()}]]")
 
@@ -948,6 +944,10 @@ class RPDPApp(SavApp):
         prefixes = msg["sav_nlri"]
         adds = []
         for prefix in prefixes:
+            if isinstance(prefix, str):
+                prefix = netaddr.IPNetwork(prefix)
+            if prefix.is_private():
+                continue
             adds.append({"prefix": str(prefix),
                          "neighbor_as": link_meta["remote_as"],
                          "interface": msg["interface_name"],
@@ -957,7 +957,7 @@ class RPDPApp(SavApp):
                          })
         self.agent.ip_man.add(adds)
         # TODO delete is not supported for now
-        # self.agent.update_sav_table(adds,[])
+        self.agent.update_sav_table(adds,[])
         
         if msg["is_interior"]:
             # in inter-domain, sav_path is as_path
