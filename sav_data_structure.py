@@ -7,7 +7,6 @@
 @Desc    :   The data_structure.py is responsible  project defined data structure and related conversions
 """
 import netaddr
-
 # AS
 
 
@@ -16,6 +15,19 @@ def is_asn(in_put):
         if in_put > 0 and in_put < 65535:
             return True
     return False
+
+
+def keys_types_check(d, key_types):
+    """
+    raise KeyError if key is missing
+    raise TypeError if key is not the right type
+    """
+    for k, t in key_types:
+        if not k in d:
+            raise KeyError(f"{k} missing in {d}")
+        if not isinstance(d[k], t):
+            raise TypeError(f"{k} should be {t} but {type(d[k])} found")
+
 
 def asn2hex(asn, as_session=False):
     """
@@ -101,6 +113,60 @@ def get_inter_spa(origin_as, prefixes):
     return msg
 
 
+def get_intra_spd_dict():
+    """get a human readable intra-spd message"""
+    msg = {
+        "type": 2,
+        "sub_type": 1,
+        "length": 0,
+        "sn": 0,
+        "origin_router_id": "",
+        "opt_data_len": 0,
+        "opt_data": "",
+        "addresses": []
+    }
+    return msg
+
+
+def get_intra_spd_nlri_dict():
+    """get a human readable intra-spd-nlri message"""
+    nlri = {
+        "afi": 0,
+        "safi": 0,
+        "next_hoop_len": 0,
+        "next_hop": "",
+        "reserved": 0,
+        "nlri": ""
+    }
+    return nlri
+
+
+def get_intra_spa_dict():
+    """get a human readable intra-spa message"""
+    msg = {
+        "afi": 0,
+        "safi": 0,
+        "next_hoop_len": 0,
+        "reserved": 0,
+        "nlri_data": [],
+    }
+    return msg
+
+
+def get_intra_spa_nlri_dict():
+    """get a human readable intra-spa-nlri message"""
+    nlri = {
+        "route_type": 1,
+        "len": 0,
+        "origin_router_id": "",
+        "mask_len": 0,
+        "ip_prefix": "",
+        "flags": 0,
+        "miig_tag": 0,
+    }
+    return nlri
+
+
 # description of all msg used between functions,each key must have a description
 SAV_META = {
     "example": {
@@ -109,10 +175,27 @@ SAV_META = {
     }
 }
 
-# sa_agent in_buff msg
-def is_in_buff_msg(msg):
-    pass
-    # if not isinstance(msg, dict):
+
+def get_send_buff_msg(src_app, type, argv, msg, retry_forever, response):
+    argv["retry_forever"] = retry_forever
+    argv["response"] = response
+    ret = {"source_app": src_app, "type": type, "argv": argv, "msg": msg}
+    check_send_buff_msg(ret)
+    return ret
+
+
+def check_send_buff_msg(msg):
+    """
+    check if the msg is a valid msg to put in send buff
+    """
+    key_types = [("source_app", str), ("type", str),
+                 ("argv", dict), ("msg", _)]
+    keys_types_check(msg, key_types)
+    keys_types_check(msg["argv"], ("retry_forever", bool), ("response", bool))
+
+    # def is_in_buff_msg(msg):
+    # pass
+    # # if not isinstance(msg, dict):
     #     return False
     # if "type" not in msg:
     #     return False
@@ -124,3 +207,14 @@ def is_in_buff_msg(msg):
     #     if key not in msg:
     #         return False
     # return True
+
+
+def init_direction_metric():
+    return {"count": 0, "time": 0.0, "size": 0}
+
+
+def init_protocol_metric():
+    return {"recv": init_direction_metric(),
+            "send": init_direction_metric(),
+            "start": None,
+            "end": None}

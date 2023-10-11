@@ -148,19 +148,6 @@ def sav_rule_tuple(prefix, interface_name, rule_source, as_number=-1):
 def run_cmd(command, shell=True, capture_output=True, encoding='utf-8'):
     return subprocess.run(command, shell=shell, capture_output=capture_output, encoding=encoding)
 
-
-def keys_types_check(d, key_types):
-    """
-    raise KeyError if key is missing
-    raise TypeError if key is not the right type
-    """
-    for k, t in key_types:
-        if not k in d:
-            raise KeyError(f"{k} missing in {d}")
-        if not isinstance(d[k], t):
-            raise TypeError(f"{k} should be {t} but {type(d[k])} found")
-
-
 def get_host_interface_list():
     """
     return a list of 'clean' interface names
