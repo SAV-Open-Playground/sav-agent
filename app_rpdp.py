@@ -307,7 +307,7 @@ class RPDPApp(SavApp):
 
     def get_init_metric_dict(self):
         return {
-            "modified_bgp": init_protocol_metric(),
+            "dsav": init_protocol_metric(),
             "grpc": init_protocol_metric(),
             "quic": init_protocol_metric()
         }
@@ -390,7 +390,7 @@ class RPDPApp(SavApp):
 
             if link_type == "grpc":
                 self._send_grpc(msg, config["rpdp_id"], map_data)
-            elif link_type == "modified_bgp":
+            elif link_type == "dsav":
                 # using reference router
                 self._send_dsav(msg)
             elif link_type == "quic":
@@ -722,7 +722,7 @@ class RPDPApp(SavApp):
                 "protocol_name": link["protocol_name"],
                 "is_native_bgp": 0
             }
-            if "bgp" in link["link_type"]:
+            if link["link_type"]== "dsav":
                 pass
             else:
                 msg["dst_id"] = link["remote_id"]
@@ -763,7 +763,7 @@ class RPDPApp(SavApp):
             if not m_t in ["bird_bgp_config", "bgp_update"]:
                 raise ValueError(f"unknown msg_type: {m_t} received via http")
             if "rpdp" in msg["msg"]["channels"]:
-                link_type = "modified_bgp"
+                link_type = "dsav"
             else:
                 link_type = "native_bgp"
             msg["source_app"] = self.name
@@ -896,7 +896,7 @@ class RPDPApp(SavApp):
             inter_links_temp = []
 
             for i in inter_links:
-                if i["link_type"] == "modified_bgp":
+                if i["link_type"] == "dsav":
                     inter_links_temp.append(i)
                 else:
                     if i["protocol_name"] in self.agent.config["link_map"]:

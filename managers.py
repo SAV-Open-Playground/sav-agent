@@ -458,7 +458,7 @@ class BirdCMDManager():
                     "state": True  # faster
                 }
                 if "sav_inter{" in l:
-                    meta["link_type"] = "modified_bgp"
+                    meta["link_type"] = "dsav"
                 elif "basic{" in l:
                     meta["link_type"] = "native_bgp"
                 else:
@@ -544,7 +544,7 @@ class BirdCMDManager():
                 "protocol_name": proto_data["Name"]
             }
             if "rpdp" in str(t):
-                meta["link_type"] = "modified_bgp"
+                meta["link_type"] = "dsav"
             else:
                 meta["link_type"] = "native_bgp"
             meta["is_interior"] = (meta["remote_as"] != meta["local_as"])
@@ -1027,7 +1027,7 @@ class LinkManager(InfoManager):
         if link_name in self.data:
             self.logger.warning(f"key {link_name} already exists")
             return
-        if not link_type in ["native_bgp", "modified_bgp",]:
+        if not link_type in ["native_bgp", "dsav"]:
             self.logger.error(f'unknown link_type: {link_type}')
             return
         self.data[link_name] = meta_dict
@@ -1054,7 +1054,7 @@ class LinkManager(InfoManager):
             # self.logger.debug(link_map.keys() )
             if link["protocol_name"] in link_map:
                 results.append((link_name, link))
-            elif link["link_type"] == "modified_bgp":
+            elif link["link_type"] == "dsav":
                 results.append((link_name, link))
             else:
                 self.logger.debug(f"ignoring no sav link: {link_name}")
@@ -1112,7 +1112,7 @@ class LinkManager(InfoManager):
                      ("is_interior", bool), ("status", bool),
                      ("initial_broadcast", bool)]
         keys_types_check(meta, key_types)
-        if not meta["link_type"] in ["native_bgp", "modified_bgp"]:
+        if not meta["link_type"] in ["native_bgp", "dsav"]:
             raise ValueError(f'unknown link_type: {meta["link_type"]}')
         return True
 

@@ -210,7 +210,7 @@ def check_send_buff_msg(msg):
 
 
 def init_direction_metric():
-    return {"count": 0, "time": 0.0, "size": 0}
+    return {"count": 0, "time": 0.0, "size": 0,"wait_time": 0.0}
 
 
 def init_protocol_metric():

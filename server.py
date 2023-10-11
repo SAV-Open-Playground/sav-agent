@@ -171,7 +171,7 @@ def index():
             if not m_t == "link_state_change":
                 msg['link_type'] = "native_bgp"
                 if "rpdp" in msg["msg"]["channels"]:
-                    msg['link_type'] = "modified_bgp"
+                    msg['link_type'] = "dsav"
         msg["pkt_rec_dt"] = t0
         sa.put_msg(msg)
         rep = {"code": "0000", "message": "success"}

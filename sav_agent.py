@@ -2,8 +2,7 @@
 """
 @File    :   sav_agent.py
 @Time    :   2023/01/10
-@Version :   0.1
-
+@Version :   0.2
 @Desc    :   the sav_agent.py 
 This is a benchmark to test the performance of BIRD
 """
@@ -50,7 +49,7 @@ def aggregate_asn_path(list_of_asn_path):
 
 
 class SendAgent():
-    def __init__(self, bird_man, config, logger):
+    def __init__(self, agent, config, logger):
         """
         currently we don't handle the reply ()ignore, don't use if you need reply
         """
@@ -62,7 +61,9 @@ class SendAgent():
         self._job_id = 0
         self._add_lock = False
         self.update_config(config)
-        self.bird_man = bird_man
+        self.agent = agent
+        self.bird_man = agent.bird_man
+        
 
     def update_config(self, config):
         self.config = config
@@ -74,16 +75,16 @@ class SendAgent():
         "retry" is optional, if set, then will retry for the given times (default is 10)  
         """
         # check if msg is valid
-        key_types = [("msg_type", str), ("data", dict),("source_app",str),
+        key_types = [("msg_type", str), ("data", dict), ("source_app", str),
                      ("timeout", int), ("store_rep", bool)]
         keys_types_check(msg, key_types)
-        
-        supported_type = ["http-post","dsav"]
+
+        supported_type = ["http-post", "dsav"]
         
         if not msg["msg_type"] in supported_type:
             raise ValueError(
                 f"unknown msg type {msg['msg_type']} / {supported_type}")
-        supported_apps = ["rpdp_app","passport_app"]
+        supported_apps = ["rpdp_app", "passport_app"]
         if not msg["source_app"] in supported_apps:
             raise ValueError(
                 f"unknown msg source_app {msg['source_app']} / {supported_apps}")
@@ -92,15 +93,22 @@ class SendAgent():
         self._send_buff.put(msg)
         self._job_id += 1
         
+        
+
+
 
     def put_send_sync(self, msg):
         """
         will return response
         """
         raise NotImplementedError
-
+    def _update_metric(self,d,msg):
+        self.logger.debug(d)
+        self.logger.debug(msg)
+        return d
     def send_msg(self, msg):
         # self.logger.debug(msg)
+        msg["schedule_dt"] = time.time()
         match msg["msg_type"]:
             case "http-post":
                 sent = self._send_http_post(msg)
@@ -112,6 +120,18 @@ class SendAgent():
                 raise NotImplementedError
             case _:
                 raise ValueError(f"unknown msg type {msg['type']}")
+        msg["finished_dt"] = time.time()
+        # update_metric
+        match msg["source_app"]:
+            case "rpdp_app":
+                match msg["msg_type"]:
+                    case "dsav":
+                        temp = self._update_metric(self.agent.rpdp_app.metric["dsav"], msg)
+                        self.agent.rpdp_app.metric["dsav"] = temp
+                    case _:
+                        raise ValueError(f"unknown msg type {msg['type']}")
+            case _:
+                raise ValueError(f"unknown msg source_app {msg['source_app']}")
         if not sent:
             self.logger.warning(f"send failed {msg}")
             self.send_buff.append(msg)
@@ -136,20 +156,6 @@ class SendAgent():
             time.sleep(msg["timeout"])
         return False
 
-    # def run(self):
-    #     self.logger.debug("")
-    #     while True:
-    #         self.logger.debug("")
-    #         msg = self._send_buff.get()
-    #         self.logger.debug(msg)
-    #         try:
-    #             msg["scheduled_dt"] = time.time()
-    #             self.send_msg(msg)
-    #         except Exception as e:
-    #             self.logger.exception(e)
-    #             self.logger.error(e)
-    #         self._send_buff.task_done()
-
 
 class SavAgent():
     def __init__(self, logger=None, path_to_config=os.path.join(
@@ -160,7 +166,6 @@ class SavAgent():
         self.config = {}
         self.link_man = None
         self.temp_for_link_man = []  # will be deleted after __init__
-        self.path_to_config = path_to_config
         self.update_config(path_to_config)
         self._init_data()
         self._in_msgs = queue.Queue()
@@ -172,7 +177,7 @@ class SavAgent():
         self.sib_man.upsert("active_app", json.dumps(self.data["active_app"]))
         self.bird_man = BirdCMDManager(logger=self.logger)
         self.bird_man.update_protocols(self.config["local_as"])
-        self.sender = SendAgent(self.bird_man, self.config,self.logger)
+        self.sender = SendAgent(self, self.config, self.logger)
         self._start()
         # self.grpc_server = None
 
@@ -192,7 +197,7 @@ class SavAgent():
         Otherwise, raise ValueError
         we should ALWAYS check self.config for latest values
         """
-        for i in range(3):
+        for _ in range(3):
             try:
                 config = read_json(path_to_config)
                 required_keys = [
@@ -207,6 +212,10 @@ class SavAgent():
                 quic_config = config["quic_config"]
                 grpc_keys = [("server_enabled", bool)]
                 keys_types_check(quic_config, grpc_keys)
+                
+                valid_location = ["edge_full","internal","gray"]
+                if not config["location"] in valid_location:
+                    raise ValueError(f"invalid location {config['location']}, should be one of {valid_location}")
                 self.config = config
                 return
             except Exception as e:
@@ -222,7 +231,6 @@ class SavAgent():
         currently, only rpdp will sent to agent
         """
         # using grpc
-        # self.logger.debug(msg["sav_scope"])
         link = self.bird_man.get_link_meta_by_name(link["protocol_name"])
         self.rpdp_app.send_msg(msg, self.config, link)
 
@@ -541,45 +549,6 @@ class SavAgent():
 
         if self.passport_app:
             self.passport_app.init_key_publish()
-
-    def _process_link_config(self, msg):
-        """
-        in this function, we add the config to corresponding link
-        """
-
-        msg["remote_as"] = int(msg["remote_as"])
-        msg["local_as"] = int(msg["local_as"])
-        if msg["remote_as"] == msg["local_as"]:
-            msg["is_interior"] = False
-        else:
-            msg["is_interior"] = True
-        if msg["as4_session"] == "True":
-            msg["as4_session"] = True
-        elif msg["as4_session"] == "False":
-            msg["as4_session"] = False
-        else:
-            self.logger.error(
-                f"unknown as4_session value {msg['as4_session']}")
-        # the router_id we have is a int presentation of ipv4 address,
-        # now convert it to standard ipv4 string
-        # now we transform bird internal router id to ipv4
-        msg["remote_id"] = str(hex(int(msg["router_id"])))[2:]
-        while len(msg["remote_id"]) < 8:
-            msg["remote_id"] = "0" + msg["remote_id"]
-        temp = []
-        while len(msg["remote_id"]) > 1:
-            temp.append(str(int(msg["remote_id"][:2], 16)))
-            msg["remote_id"] = msg["remote_id"][2:]
-        msg["remote_id"] = ".".join(temp)
-        if "rpdp" in msg["channels"]:
-            msg["link_type"] = "modified_bgp"
-        else:
-            # self.logger.warning(msg)
-            msg["link_type"] = "native_bgp"
-        data_dict = get_new_link_meta("rpdp_app", msg["link_type"])
-        for key in msg:
-            if key in data_dict:
-                data_dict[key] = msg[key]
 
     def _log_info_for_front(self, msg, log_type, link_name=None):
         """
@@ -969,4 +938,3 @@ class SavAgent():
         for t in self._thread_pool:
             t.daemon = True
             t.start()
-            
