@@ -389,13 +389,13 @@ class RPDPApp(SavApp):
                 link_type = link["link_type"]
 
             if link_type == "grpc":
-                self._send_grpc(msg, link, config["rpdp_id"], map_data)
+                self._send_grpc(msg, config["rpdp_id"], map_data)
             elif link_type == "modified_bgp":
                 # using reference router
-                self._send_modified_bgp(msg)
+                self._send_dsav(msg)
             elif link_type == "quic":
                 a = threading.Thread(target=self._send_quic, args=(
-                    msg, link, self.quic_config, config["quic_config"], map_data))
+                    msg, link, self.quic_config))
                 # a.setDaemon(True)
                 a.start()
                 a.join()
@@ -498,7 +498,7 @@ class RPDPApp(SavApp):
                 self.logger.debug(rep)
                 self.logger.error("not good")
 
-    def _send_quic(self, msg, bgp_meta, configuration, quic_meta, quic_link):
+    def _send_quic(self, msg, bgp_meta, configuration):
         # self.logger.debug(msg)
         t0 = time.time()
         try:
@@ -515,7 +515,7 @@ class RPDPApp(SavApp):
         if t > TIMEIT_THRESHOLD:
             self.logger.debug(f"TIMEIT {time.time()-t0:.4f} seconds")
 
-    def _send_grpc(self, msg, bgp_meta, grpc_id, grpc_link):
+    def _send_grpc(self, msg, grpc_id, grpc_link):
         t0 = time.time()
         try:
             if isinstance(msg["sav_nlri"][0], netaddr.IPNetwork):
@@ -525,23 +525,28 @@ class RPDPApp(SavApp):
             remote_id = grpc_link["remote_id"]
             msg["dst_ip"] = remote_ip
             str_msg = json.dumps(msg)
-            # self.logger.debug(remote_addr)
+            self.logger.debug(remote_addr)
             while True:
                 try:
-                    with grpc.insecure_channel(remote_addr) as channel:
+                    if not remote_addr in self.stub_dict:
+                        channel = grpc.insecure_channel(remote_addr)
                         stub = agent_msg_pb2_grpc.AgentLinkStub(channel)
-                        agent_msg = agent_msg_pb2.AgentMsg(
+                        self.stub_dict[remote_addr] = stub
+                    # else:
+                        # self.logger.warning("resuing stub")
+                    # self.logger.debug(self.stub_dict)
+                    agent_msg = agent_msg_pb2.AgentMsg(
                             sender_id=grpc_id, json_str=str_msg)
-                        rep = stub.Simple(agent_msg)
-                        expected_str = f"got {str_msg}"
-                        if not rep.json_str == expected_str:
-                            raise ValueError(
-                                f"json expected {expected_str}, got {rep.json_str}")
-                        if not rep.sender_id == remote_id:
-                            self.logger.debug(
-                                f"sending to {remote_addr},{remote_id}")
-                            raise ValueError(
-                                f"remote id expected {remote_id}, got {rep.sender_id}")
+                    rep = self.stub_dict[remote_addr].Simple(agent_msg)
+                    expected_str = f"got {str_msg}"
+                    if not rep.json_str == expected_str:
+                        raise ValueError(
+                            f"json expected {expected_str}, got {rep.json_str}")
+                    if not rep.sender_id == remote_id:
+                        self.logger.debug(
+                            f"sending to {remote_addr},{remote_id}")
+                        raise ValueError(
+                            f"remote id expected {remote_id}, got {rep.sender_id}")
                     t = time.time()-t0
                     if t > TIMEIT_THRESHOLD:
                         self.logger.warning(
@@ -577,7 +582,6 @@ class RPDPApp(SavApp):
                 case "grpc":
                     link = self.agent.bird_man.get_link_by_name(using_link)
                     self._send_grpc(msg["msg"],
-                                    link,
                                     self.agent.config["rpdp_id"],
                                     {"remote_addr": "10.0.0.1:5000",
                                      "remote_id": "10.0.0.1"})
@@ -602,7 +606,7 @@ class RPDPApp(SavApp):
             self.logger.debug(f"SENT {count} msg ({msg['msg_type']})")
         self.logger.debug("perf test send finished")
 
-    def _send_modified_bgp(self, msg):
+    def _send_dsav(self, msg):
         """
         notify the bird to retrieve the msg from flask server and execute it.
         """
@@ -622,7 +626,8 @@ class RPDPApp(SavApp):
         while len(nlri) > 0:
             msg["sav_nlri"] = nlri[:max_nlri_len]
             msg_byte = self._msg_to_hex_str(msg)
-            self.agent.put_out_msg(msg_byte)
+            out_msg = {"msg_type": "dsav", "data": msg_byte,"source_app":self.name,"timeout":0,"store_rep":False}
+            self.agent.put_out_msg(out_msg)
             nlri = nlri[max_nlri_len:]
         # self.logger.info(
             # f"SENT MSG ON LINK [{msg['protocol_name']}]:{msg}, time_stamp: [{time.time()}]]")
@@ -955,7 +960,7 @@ class RPDPApp(SavApp):
                          "source_link": link_name,
                          "local_role": link_meta["local_role"]
                          })
-        self.agent.ip_man.add(adds)
+        # self.agent.ip_man.add(adds)
         # TODO delete is not supported for now
         self.agent.update_sav_table(adds,[])
         

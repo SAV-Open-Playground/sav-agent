@@ -717,11 +717,13 @@ class BirdCMDManager():
                 result[p] = d
         return result
 
-    def update_fib(self, log_err=True, insert_db=True, sib_man=None):
+    def update_fib(self, log_err=True, insert_db=False, sib_man=None):
         """return adds, dels of modifications"""
         self.bird_fib["check_time"] = time.time()
         default, local, remote = self._parse_bird_fib(log_err)
-        # default , is ingored
+        # self.logger.debug(default)
+        # self.logger.debug(local)
+        # self.logger.debug(remote)
         something_updated = False
         local_adds, local_dels = self._diff_fib(
             self.bird_fib["local_route"], local)
@@ -742,16 +744,16 @@ class BirdCMDManager():
         if something_updated:
             self.bird_fib["update_time"] = self.bird_fib["check_time"]
             # self.logger.debug(self.bird_fib)
-            if insert_db:
-                temp = copy.deepcopy(self.bird_fib)
-                for k, d in temp.items():
-                    if type(d) == dict:
-                        temp2 = {}
-                        for k2, d2 in d.items():
-                            if type(k2) == netaddr.IPNetwork:
-                                temp2[str(k2)] = d2
-                        temp[k] = temp2
-                sib_man.upsert("bird_fib", json.dumps(temp))
+            # if insert_db:
+            #     temp = copy.deepcopy(self.bird_fib)
+            #     for k, d in temp.items():
+            #         if type(d) == dict:
+            #             temp2 = {}
+            #             for k2, d2 in d.items():
+            #                 if type(k2) == netaddr.IPNetwork:
+            #                     temp2[str(k2)] = d2
+            #             temp[k] = temp2
+            #     sib_man.upsert("bird_fib", json.dumps(temp))
 
     def _diff_fib(self, old_fib, new_fib):
         """

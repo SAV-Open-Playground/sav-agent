@@ -8,10 +8,11 @@
 This is a benchmark to test the performance of BIRD
 """
 
-import threading
 
 import sys
 import asyncio
+import queue
+import threading
 
 from sav_common import *
 from managers import *
@@ -49,56 +50,71 @@ def aggregate_asn_path(list_of_asn_path):
 
 
 class SendAgent():
-    def __init__(self, config, logger=None):
-        if logger is None:
-            logger = get_logger(__name__)
-        self._send_msgs = []
+    def __init__(self, bird_man, config, logger):
+        """
+        currently we don't handle the reply ()ignore, don't use if you need reply
+        """
+        self.logger = logger
+        self._send_buff = queue.Queue()
+        self.bird_cmd_buff = queue.Queue()
         self.post_session = requests.Session()
         self.result_buff = {}
         self._job_id = 0
         self._add_lock = False
         self.update_config(config)
+        self.bird_man = bird_man
 
     def update_config(self, config):
         self.config = config
 
     def put_send_async(self, msg):
         """
-        supported type : ["http-post","grpc","quic"]
+        supported type : ["http-post","grpc","quic","dsav"]
         timeout is in seconds, if set to 0, then will keep trying until sent
         "retry" is optional, if set, then will retry for the given times (default is 10)  
         """
-        # while self._add_lock:
-        #     pass
-        # self._add_lock = True
-        key_types = [("type", str), ("data", dict),
+        # check if msg is valid
+        key_types = [("msg_type", str), ("data", dict),("source_app",str),
                      ("timeout", int), ("store_rep", bool)]
         keys_types_check(msg, key_types)
-        supported_type = ["http-post"]
-        if not msg["type"] in supported_type:
+        
+        supported_type = ["http-post","dsav"]
+        
+        if not msg["msg_type"] in supported_type:
             raise ValueError(
-                f"unknown msg type {msg['type']} / {supported_type}")
-
+                f"unknown msg type {msg['msg_type']} / {supported_type}")
+        supported_apps = ["rpdp_app","passport_app"]
+        if not msg["source_app"] in supported_apps:
+            raise ValueError(
+                f"unknown msg source_app {msg['source_app']} / {supported_apps}")
         msg["pkt_id"] = self._job_id
-        self._send_msgs.append(msg)
+        msg["created_dt"] = time.time()
+        self._send_buff.put(msg)
         self._job_id += 1
-        # self._add_lock = False
+        
 
     def put_send_sync(self, msg):
         """
-        will return the response
+        will return response
         """
+        raise NotImplementedError
 
-    def send_msgs(self, msgs):
-        for msg in msgs:
-            match msg["type"]:
-                case "http-post":
-                    sent = self._send_http_post(msg)
-                case _:
-                    raise ValueError(f"unknown msg type {msg['type']}")
-            if not sent:
-                self.logger.warning(f"send failed {msg}")
-                self.send_buff.append(msg)
+    def send_msg(self, msg):
+        # self.logger.debug(msg)
+        match msg["msg_type"]:
+            case "http-post":
+                sent = self._send_http_post(msg)
+            case "dsav":
+                self.bird_cmd_buff.put(msg["data"])
+                self.bird_man.bird_cmd("call_agent")
+                sent = True
+            case "grpc":
+                raise NotImplementedError
+            case _:
+                raise ValueError(f"unknown msg type {msg['type']}")
+        if not sent:
+            self.logger.warning(f"send failed {msg}")
+            self.send_buff.append(msg)
 
     def _send_http_post(self, msg):
         if msg["timeout"] == 0:
@@ -120,12 +136,19 @@ class SendAgent():
             time.sleep(msg["timeout"])
         return False
 
-    def run(self):
-        while True:
-            temp = []
-            while len(self.send_buff) > 0:
-                temp.append(self.send_buff.pop(0))
-            self.send_msgs(temp)
+    # def run(self):
+    #     self.logger.debug("")
+    #     while True:
+    #         self.logger.debug("")
+    #         msg = self._send_buff.get()
+    #         self.logger.debug(msg)
+    #         try:
+    #             msg["scheduled_dt"] = time.time()
+    #             self.send_msg(msg)
+    #         except Exception as e:
+    #             self.logger.exception(e)
+    #             self.logger.error(e)
+    #         self._send_buff.task_done()
 
 
 class SavAgent():
@@ -140,7 +163,7 @@ class SavAgent():
         self.path_to_config = path_to_config
         self.update_config(path_to_config)
         self._init_data()
-        self._in_msgs = []
+        self._in_msgs = queue.Queue()
         self._out_msgs = []
         self._init_apps()
         self.sib_man = SIBManager(logger=self.logger)
@@ -149,12 +172,13 @@ class SavAgent():
         self.sib_man.upsert("active_app", json.dumps(self.data["active_app"]))
         self.bird_man = BirdCMDManager(logger=self.logger)
         self.bird_man.update_protocols(self.config["local_as"])
-        self.sender = SendAgent(self.logger, self.config)
+        self.sender = SendAgent(self.bird_man, self.config,self.logger)
         self._start()
         # self.grpc_server = None
 
     def put_out_msg(self, msg):
-        self._out_msgs.append(msg)
+        # self.logger.debug(f"putting out msg {msg}")
+        self.sender.put_send_async(msg)
 
     def get_out_msg(self):
         return self._out_msgs.pop(0)
@@ -167,7 +191,6 @@ class SavAgent():
         return dictionary object if is a valid config file (only check type not value). 
         Otherwise, raise ValueError
         we should ALWAYS check self.config for latest values
-
         """
         for i in range(3):
             try:
@@ -208,7 +231,8 @@ class SavAgent():
         all major data should be initialized here
         """
         self.data = {}
-        self.data["metric"] = init_direction_metric()
+        self.data["metric"] = init_protocol_metric()
+        self.data["metric"]["skipped_bgp_update"] = 0
         self.data["pkt_id"] = 0
         self.data["msg_count"] = 0
         self.data["links"] = {}  # link manager"s data
@@ -238,8 +262,9 @@ class SavAgent():
                 # self.logger.info(f"SAV GRAPH NODE ADDED :{node}")
                 added = True
         if added:
-            self.sib_man.upsert(
-                "sav_graph", json.dumps((self.data["sav_graph"])))
+            # self.sib_man.upsert(
+            #     "sav_graph", json.dumps((self.data["sav_graph"])))
+            pass
 
     def add_sav_link(self, asn_a, asn_b):
         data_dict = self.data["sav_graph"]
@@ -253,13 +278,13 @@ class SavAgent():
         value_asn = max(asn_a, asn_b)
         if not key_asn in data_dict["links"]:
             data_dict["links"][key_asn] = [value_asn]
-            self.sib_man.upsert("sav_graph", json.dumps((data_dict)))
+            # self.sib_man.upsert("sav_graph", json.dumps((data_dict)))
             self.logger.info(f"SAV GRAPH LINK ADDED :{key_asn}-{value_asn}")
             return
         # now key_asn in data_dict["links"]
         if value_asn not in data_dict["links"][key_asn]:
             data_dict["links"][key_asn].append(value_asn)
-            self.sib_man.upsert("sav_graph", json.dumps((data_dict)))
+            # self.sib_man.upsert("sav_graph", json.dumps((data_dict)))
             self.logger.info(f"SAV GRAPH LINK ADDED :{key_asn}-{value_asn}")
 
     def _init_apps(self):
@@ -352,7 +377,8 @@ class SavAgent():
             # f"INITIAL PREFIX-AS_PATH TABLE {self.rpdp_app.get_pp_v4_dict()}")
             return
         # self.logger.debug("FIB NOT STABILIZED")
-    def _initial_wait(self,check_span=0.1):
+
+    def _initial_wait(self, check_span=0.1):
         """
         1. wait for bird to be ready
         2. wait for fib to be stable
@@ -361,12 +387,45 @@ class SavAgent():
         while not self.bird_man.is_bird_ready():
             time.sleep(check_span)
             # self.logger.debug("waiting for bird to be ready")
-        while not self.data.get("initial_bgp_stable",False):
+        while not self.data.get("initial_bgp_stable", False):
             self._if_fib_stable(
-                        stable_span=self.config.get("fib_stable_threshold"))
+                stable_span=self.config.get("fib_stable_threshold"))
+            time.sleep(check_span)
             # self.logger.debug("waiting for fib")
-        return 
-            
+        return
+
+    def is_all_msgs_finished(self):
+        """
+        check if all msgs are finished
+        """
+        ret = self._in_msgs.all_tasks_done()
+        return ret
+
+    def _add_pkt_id(self, msg):
+        self.data["pkt_id"] += 1
+        msg["pkt_id"] = self.data["pkt_id"]
+        return msg
+
+    def _precheck_msg(self, msg, native_bgp_update, msgs):
+        """
+        aggregate native bgp update msg
+        """
+        if msg["msg_type"] == "bgp_update":
+            if self._is_native_bgp_update(msg):
+                if native_bgp_update is None:
+                    msg = self._add_pkt_id(msg)
+                    native_bgp_update = msg
+                else:
+                    # self.logger.debug("skipping native bgp update")
+                    self._in_msgs.task_done()
+            else:
+                msg = self._add_pkt_id(msg)
+                msgs.append(msg)
+        else:
+            msg["pkt_id"] = self.data["pkt_id"]
+            msgs.append(msg)
+        return native_bgp_update, msgs
+
     def _run(self):
         """
         start a thread to check the cmd queue and process each cmd
@@ -374,22 +433,33 @@ class SavAgent():
         self._initial_wait()
         while True:
             try:
-                while len(self._in_msgs) > 0:
-                    try:
-                        msg = self._in_msgs.pop(0)
-                        self.data["pkt_id"] += 1
-                        msg["pkt_id"] = self.data["pkt_id"]
-                        self._process_msg(msg)
-                    except Exception as err:
-                        self.logger.exception(err)
-                        self.logger.error(
-                            f"error when processing: [{err}]:{msg}")
+                try:
+                    msgs = []
+                    # we first detect all native bgp update,
+                    # if we detect one native bgp update, we insert a msg to trigger the kernel fib update
+                    native_bgp_update = None
+                    msg0 = self._in_msgs.get()
+                    native_bgp_update, msgs = self._precheck_msg(
+                        msg0, native_bgp_update, msgs)
+                    # self.logger.debug(self._in_msgs.qsize())
+                    for _ in range(self._in_msgs.qsize()):
+                        msg = self._in_msgs.get()
+                        native_bgp_update, msgs = self._precheck_msg(
+                            msg, native_bgp_update, msgs)
+                    if not native_bgp_update is None:
+                        msgs = [native_bgp_update] + msgs
+                    for m in msgs:
+                        self._process_msg(m)
+                        self._in_msgs.task_done()
+                except Exception as err:
+                    self.logger.exception(err)
+                    self.logger.error(
+                        f"error when processing: [{err}]:{msg}")
                 self._send_init()
-                if self.rpdp_app:
-                    while len(self._out_msgs) > 0:
-                        # may call_agent more than once
-                        self.logger.debug("sending prepared cmd")
-                        self.bird_man.bird_cmd("call_agent")
+                while self.sender._send_buff.qsize() > 0:
+                    msg = self.sender._send_buff.get()
+                    self.sender.send_msg(msg)
+                    self.sender._send_buff.task_done()
             except Exception as e:
                 self.logger.exception(e)
                 self.logger.error(e)
@@ -406,8 +476,7 @@ class SavAgent():
         for link_name, link in rpdp_links.items():
             if link["initial_broadcast"]:
                 continue
-            if self._send_init_broadcast_on_link(
-                    link, link_name):
+            if self._send_init_broadcast_on_link(link_name):
                 self.logger.info(
                     f"initial broadcast sent on {link_name} ")
                 self.bird_man.update_link_meta(
@@ -449,10 +518,10 @@ class SavAgent():
         if not "msg" in msg:
             raise KeyError(f"msg missing in msg:{msg}")
         keys_types_check(msg, key_types)
-        self._in_msgs.append(msg)
+        self._in_msgs.put(msg)
 
-    def _send_init_broadcast_on_link(self, link, link_name):
-        # self.logger.debug(f"sending initial broadcast on link {link_name}")
+    def _send_init_broadcast_on_link(self, link_name):
+        self.logger.debug(f"sending initial broadcast on link {link_name}")
         return self._send_origin(link_name, None)
 
     def _process_link_state_change(self, msg):
@@ -551,6 +620,9 @@ class SavAgent():
         """return the cached fib"""
         return self.data["kernel_fib"]["data"]
 
+    def _is_native_bgp_update(self, msg):
+        return msg['msg']["sav_nlri"] == ''
+
     def _process_bgp_update(self, msg):
         """
         process bgp update message (from bird)
@@ -639,10 +711,13 @@ class SavAgent():
         self.logger.debug(f"del_rules:{del_rules}")
         # self.update_sav_table(add_rules, del_rules)
         # self.ip_man.add(add_rules)
-    def _get_key_from_r(self,r):
-        str_key = str(r["prefix"])+'_'+str(r["neighbor_as"])+"_"+str(r["interface"])
+
+    def _get_key_from_r(self, r):
+        str_key = str(r["prefix"])+'_'+str(r["neighbor_as"]) + \
+            "_"+str(r["interface"])
         # self.logger.debug(str_key)
         return str_key
+
     def update_sav_table(self, adds, dels):
         """
         update sav table, and notify apps
@@ -652,7 +727,8 @@ class SavAgent():
         for r in dels:
             str_key = self._get_key_from_r(r)
             if not str_key in new_table[r["source_app"]]:
-                self.logger.error(f"key missing in sav_table (old):{r}/{str_key}")
+                self.logger.error(
+                    f"key missing in sav_table (old):{r}/{str_key}")
             else:
                 del new_table[r["source_app"]][str_key]
         for r in adds:
@@ -670,13 +746,14 @@ class SavAgent():
                 r["create_time"] = old_value['create_time']
                 r["update_time"] = old_value['update_time']
                 if not r == old_value:
-                    self.logger.error(f"conflict in sav_table (old):{old_value}")
+                    self.logger.error(
+                        f"conflict in sav_table (old):{old_value}")
                     self.logger.error(f"conflict in sav_table (new):{r}")
                 r["update_time"] = cur_t
                 new_table[r["source_app"]][str_key] = r
-        self.data["sav_table"]=new_table
+        self.data["sav_table"] = new_table
         # self.logger.debug(f"rpdp_len:{len(new_table['rpdp_app'])}")
-        
+
     def _send_origin(self, input_link_name=None, input_paths=None):
         """
         send origin messages,
@@ -714,8 +791,8 @@ class SavAgent():
                         inter_links.append((link_name, meta))
                     else:
                         intra_links.append((link_name, meta))
-            inter_paths = []
             intra_paths = []
+            inter_paths = []
             if input_paths is None:
                 ppv4 = self.bird_man.get_remote_fib()
                 for prefix in ppv4:
@@ -746,7 +823,7 @@ class SavAgent():
             inter_paths = aggregate_asn_path(inter_paths)
             # self.logger.debug(f"inter_paths:{inter_paths}")
             # TODO here we filter out private prefixes
-            
+
             if len(inter_links) > 0 and len(inter_paths) > 0:
                 # we send origin to all links no matter inter or intra
                 for link_name, link in inter_links:
@@ -770,7 +847,7 @@ class SavAgent():
                             inter_sent = True
                         else:
                             self.logger.debug(
-                                f"no sav nlri, not sending inter origin")
+                                f"no sav nlri, not sending inter origin on link {link_name}")
             else:
                 msg = f"no inter link:{len(inter_links)} or inter path:{len(inter_paths)}, not sending inter origin"
                 # self.logger.debug(msg)
@@ -796,6 +873,7 @@ class SavAgent():
 
     def _process_msg(self, input_msg):
         t0 = time.time()
+        # self.logger.debug(input_msg)
         log_msg = f"start msg, pkt_id:{input_msg['pkt_id']}, msg_type: {input_msg['msg_type']}"
         key_types = [("msg_type", str), ("pkt_id", int), ("pkt_rec_dt", float)]
         keys_types_check(input_msg, key_types)
@@ -805,6 +883,7 @@ class SavAgent():
             case "link_state_change":
                 self._process_link_state_change(input_msg)
             case "bird_bgp_config":
+                # TODO for faster performance
                 pass
             case "bgp_update":
                 self._process_bgp_update(input_msg)
@@ -856,36 +935,38 @@ class SavAgent():
             log_msg = log_msg.replace("start", "finish")
             log_msg += f", time used: {t1-t0:.4f}"
             self.logger.debug(log_msg)
-        metric = self.data["metric"]
+        metric = self.data["metric"]["recv"]
         metric["count"] += 1
         metric["time"] += t1-t0
+        # self.logger.debug(f", time used: {t1-t0:.4f}; msg:{input_msg}")
         metric["size"] += len(str(input_msg))
-        self._update_sav_rule_nums()
-        
+        if not m_t.startswith("passport"):
+            self._update_sav_rule_nums()
+
     def _update_sav_rule_nums(self):
-        metric = self.data["metric"].get("sav_rule_nums",{})
+        metric = self.data["metric"].get("sav_rule_nums", {})
         old_metric = copy.deepcopy(metric)
         data = self.data["sav_table"]
-        for app,rules in data.items():
-            metric[f"{app}"] ={"sav_rule_num":len(rules)}
+        for app, rules in data.items():
+            metric[f"{app}"] = {"sav_rule_num": len(rules)}
             metric[f"{app}"]["update_dt"] = 0
-            for k,v in rules.items():
+            for k, v in rules.items():
                 if v["update_time"] > metric[f"{app}"]["update_dt"]:
                     metric[f"{app}"]["update_dt"] = v["update_time"]
             metric[f"{app}_rule_num"] = metric[f"{app}"]["sav_rule_num"]
         if not old_metric == metric:
             self.data["metric"]["sav_rule_nums"] = metric
             metric["total"] = 0
-            for k,v in metric.items():
+            for k, v in metric.items():
                 if k.endswith("_rule_num"):
                     metric["total"] += v
             self.logger.debug(f"latest SAV RULE NUMS: {metric['total']}")
-            with open('sa_metric.json', 'w') as f:
-                f.write(json.dumps(metric,indent=2))
+
     def _start(self):
         self._thread_pool = []
         self._thread_pool.append(threading.Thread(target=self._run))
-        self._thread_pool.append(threading.Thread(target=self.sender.run))
+        # self._thread_pool.append(threading.Thread(target=self.sender.run))
         for t in self._thread_pool:
             t.daemon = True
             t.start()
+            

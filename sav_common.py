@@ -17,7 +17,7 @@ import netaddr
 import requests
 import subprocess
 import copy
-
+import requests
 
 from sav_data_structure import *
 
@@ -144,7 +144,8 @@ def sav_rule_tuple(prefix, interface_name, rule_source, as_number=-1):
         prefix = str(prefix)
     return (prefix, interface_name, rule_source, as_number)
 
-
+def subproc_run(cmd, shell=True, capture_output=True, encoding='utf-8'):
+    return subprocess.run(cmd, shell=shell, capture_output=capture_output, encoding=encoding)
 def run_cmd(command, shell=True, capture_output=True, encoding='utf-8'):
     return subprocess.run(command, shell=shell, capture_output=capture_output, encoding=encoding)
 
@@ -333,15 +334,10 @@ class SavApp():
         return get_roa(self.logger, t_name)
 
 
-def init_direction_metric():
-    return {"count": 0, "time": 0.0, "size": 0}
 
 
-def init_protocol_metric():
-    return {"recv": init_direction_metric(),
-            "send": init_direction_metric(),
-            "start": None,
-            "end": None}
+
+
 
 
 def birdc_cmd(logger, cmd, log_err=True):

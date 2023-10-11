@@ -151,9 +151,13 @@ def index():
         if m_t == "request_cmd":
             rep = {"code": "0000", "message": "success"}
             try:
-                cmd = sa.get_out_msg()
+                # LOGGER.debug(f"bird try to get cmd")
+                cmd = sa.sender.bird_cmd_buff.get()
+                sa.sender.bird_cmd_buff.task_done()
+                # LOGGER.debug(f"bird got cmd {cmd}")
                 return {"code": "2000", "data": cmd, "message": "success"}
             except IndexError as err:
+                sa.logger.warning(f"bird try to get cmd but no cmd in queue")
                 pass
             t = time.time()-t0
             if t > TIMEIT_THRESHOLD:
@@ -219,6 +223,7 @@ def update_config():
 
 @app.route('/metric/', methods=["POST", "GET"])
 def metric():
+    sa.data["metric"]["is_processing"] = sa._in_msgs.unfinished_tasks > 0 or sa.sender._send_buff.unfinished_tasks > 0
     rep = {"agent": sa.data["metric"]}
     if sa.rpdp_app:
         rep[sa.rpdp_app.name] = sa.rpdp_app.metric

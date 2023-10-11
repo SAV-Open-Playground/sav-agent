@@ -24,7 +24,7 @@ def keys_types_check(d, key_types):
     """
     for k, t in key_types:
         if not k in d:
-            raise KeyError(f"{k} missing in {d}")
+            raise KeyError(f"{k} missing in {d.keys()}")
         if not isinstance(d[k], t):
             raise TypeError(f"{k} should be {t} but {type(d[k])} found")
 
