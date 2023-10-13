@@ -8,7 +8,7 @@
 '''
 import subprocess
 import json
-import copy
+import queue
 
 from model import db
 from model import SavInformationBase, SavTable
@@ -1015,8 +1015,111 @@ class LinkManager(InfoManager):
     """
     # TODO: we have three types of link: native bgp, modified bgp and grpc
 
-    def __init__(self, data, logger=None):
+    def __init__(self, data, agent,logger=None):
         super(LinkManager, self).__init__(data, logger)
+        self._send_buff = queue.Queue()
+        self.bird_cmd_buff = queue.Queue()
+        self.post_session = requests.Session()
+        self.result_buff = {}
+        self._job_id = 0
+        self._add_lock = False
+        self.agent = agent
+        
+
+    def update_config(self, config):
+        self.config = config
+
+    def put_send_async(self, msg):
+        """
+        supported type : ["http-post","grpc","quic","dsav"]
+        timeout is in seconds, if set to 0, then will keep trying until sent
+        "retry" is optional, if set, then will retry for the given times (default is 10)  
+        """
+        # check if msg is valid
+        key_types = [("msg_type", str), ("data", dict), ("source_app", str),
+                     ("timeout", int), ("store_rep", bool)]
+        keys_types_check(msg, key_types)
+
+        supported_type = ["http-post", "dsav"]
+        
+        if not msg["msg_type"] in supported_type:
+            raise ValueError(
+                f"unknown msg type {msg['msg_type']} / {supported_type}")
+        supported_apps = ["rpdp_app", "passport_app"]
+        if not msg["source_app"] in supported_apps:
+            raise ValueError(
+                f"unknown msg source_app {msg['source_app']} / {supported_apps}")
+        msg["pkt_id"] = self._job_id
+        msg["created_dt"] = time.time()
+        self._send_buff.put(msg)
+        self._job_id += 1
+
+
+
+    def put_send_sync(self, msg):
+        """
+        will return response
+        """
+        raise NotImplementedError
+    def _update_metric(self,d,msg):
+        send = d["send"]
+        send["count"] += 1
+        send["size"] += len(str(msg["data"]))
+        send["time"] += msg["finished_dt"] - msg["schedule_dt"]
+        send["wait_time"] += msg["schedule_dt"] - msg["created_dt"]
+        if d["start"] is None:
+            d["start"] = msg["created_dt"]
+        d["end"] = msg["finished_dt"]
+        return d
+    def send_msg(self, msg):
+        # self.logger.debug(msg)
+        msg["schedule_dt"] = time.time()
+        match msg["msg_type"]:
+            case "http-post":
+                sent = self._send_http_post(msg)
+            case "dsav":
+                self.bird_cmd_buff.put(msg["data"])
+                self.agent.bird_man.bird_cmd("call_agent")
+                sent = True
+            case "grpc":
+                raise NotImplementedError
+            case _:
+                raise ValueError(f"unknown msg type {msg['type']}")
+        msg["finished_dt"] = time.time()
+        # update_metric
+        match msg["source_app"]:
+            case "rpdp_app":
+                match msg["msg_type"]:
+                    case "dsav":
+                        temp = self._update_metric(self.agent.rpdp_app.metric["dsav"], msg)
+                        self.agent.rpdp_app.metric["dsav"] = temp
+                    case _:
+                        raise ValueError(f"unknown msg type {msg['type']}")
+            case _:
+                raise ValueError(f"unknown msg source_app {msg['source_app']}")
+        if not sent:
+            self.logger.warning(f"send failed {msg}")
+            self.send_buff.append(msg)
+
+    def _send_http_post(self, msg):
+        if msg["timeout"] == 0:
+            while True:
+                rep = self.post_session.post(
+                    msg["url"], json=msg["data"], timeout=3)
+                if rep.status_code == 200:
+                    if msg["store_rep"]:
+                        self.result_buff[msg["pkt_id"]] = rep.json()
+                    return True
+        if not "retry" in msg:
+            retry = 10
+        for i in range(retry):
+            rep = self.post_session.post(
+                msg["url"], json=msg["data"], timeout=msg["timeout"])
+            if rep.status_code == 200:
+                self.result_buff[msg["pkt_id"]] = rep.json()
+                return True
+            time.sleep(msg["timeout"])
+        return False
 
     def add(self, meta_dict):
         self._is_good_meta(meta_dict)
@@ -1116,7 +1219,12 @@ class LinkManager(InfoManager):
             raise ValueError(f'unknown link_type: {meta["link_type"]}')
         return True
 
-
+    # def send_msg(self, msg,link_name):
+    #     """
+    #     send msg to using the given link_name
+    #     """
+    #     for link_name, link in self.data.items():
+    #         link["send_msg"](msg)
 def get_new_link_meta(app_name, link_type, initial_status=False):
     """
     generate a new link meta dict for adding,dummy data provided, remember to change it

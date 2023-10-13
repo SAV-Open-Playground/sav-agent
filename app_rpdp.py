@@ -406,11 +406,11 @@ class RPDPApp(SavApp):
             else:
                 self.logger.error(f"unhandled msg {msg}")
             t = time.time()
-            self.logger.debug(f"sending {link_type} took {t-t0:.4f} seconds")
+            # self.logger.debug(f"sending {link_type} took {t-t0:.4f} seconds")
             process_time = t-t0
             if process_time > TIMEIT_THRESHOLD:
                 self.logger.warning(f"TIMEIT {t:.4f} seconds")
-            self._add_metric(msg, t0, process_time, link_type, "send")
+            # self._add_metric(msg, t0, process_time, link_type, "send")
         except Exception as e:
             self.logger.exception(e)
             self.logger.error(e)
@@ -532,9 +532,6 @@ class RPDPApp(SavApp):
                         channel = grpc.insecure_channel(remote_addr)
                         stub = agent_msg_pb2_grpc.AgentLinkStub(channel)
                         self.stub_dict[remote_addr] = stub
-                    # else:
-                        # self.logger.warning("resuing stub")
-                    # self.logger.debug(self.stub_dict)
                     agent_msg = agent_msg_pb2.AgentMsg(
                             sender_id=grpc_id, json_str=str_msg)
                     rep = self.stub_dict[remote_addr].Simple(agent_msg)
@@ -722,9 +719,7 @@ class RPDPApp(SavApp):
                 "protocol_name": link["protocol_name"],
                 "is_native_bgp": 0
             }
-            if link["link_type"]== "dsav":
-                pass
-            else:
+            if link["link_type"] == "grpc":
                 msg["dst_id"] = link["remote_id"]
                 msg["src_id"] = self.agent.config["grpc_config"]["id"]
             if msg_type == "origin":

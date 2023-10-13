@@ -52,7 +52,6 @@ class GrpcServer(agent_msg_pb2_grpc.AgentLinkServicer):
             msg_dict["msg_type"] = "grpc_msg"
             msg_dict["pkt_rec_dt"] = t0
             self.agent.put_msg(msg_dict)
-            # self.agent.grpc_recv(msg_dict, req.sender_id)
         except Exception as err:
             self.logger.exception(err)
             self.logger.debug(msg_str)
@@ -152,8 +151,8 @@ def index():
             rep = {"code": "0000", "message": "success"}
             try:
                 # LOGGER.debug(f"bird try to get cmd")
-                cmd = sa.sender.bird_cmd_buff.get()
-                sa.sender.bird_cmd_buff.task_done()
+                cmd = sa.link_man.bird_cmd_buff.get()
+                sa.link_man.bird_cmd_buff.task_done()
                 # LOGGER.debug(f"bird got cmd {cmd}")
                 return {"code": "2000", "data": cmd, "message": "success"}
             except IndexError as err:
@@ -223,7 +222,7 @@ def update_config():
 
 @app.route('/metric/', methods=["POST", "GET"])
 def metric():
-    sa.data["metric"]["is_processing"] = sa._in_msgs.unfinished_tasks > 0 or sa.sender._send_buff.unfinished_tasks > 0
+    sa.data["metric"]["is_processing"] = sa._in_msgs.unfinished_tasks > 0 or sa.link_man._send_buff.unfinished_tasks > 0
     rep = {"agent": sa.data["metric"]}
     if sa.rpdp_app:
         rep[sa.rpdp_app.name] = sa.rpdp_app.metric

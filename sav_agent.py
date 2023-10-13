@@ -53,108 +53,7 @@ class SendAgent():
         """
         currently we don't handle the reply ()ignore, don't use if you need reply
         """
-        self.logger = logger
-        self._send_buff = queue.Queue()
-        self.bird_cmd_buff = queue.Queue()
-        self.post_session = requests.Session()
-        self.result_buff = {}
-        self._job_id = 0
-        self._add_lock = False
-        self.update_config(config)
-        self.agent = agent
-        self.bird_man = agent.bird_man
-        
 
-    def update_config(self, config):
-        self.config = config
-
-    def put_send_async(self, msg):
-        """
-        supported type : ["http-post","grpc","quic","dsav"]
-        timeout is in seconds, if set to 0, then will keep trying until sent
-        "retry" is optional, if set, then will retry for the given times (default is 10)  
-        """
-        # check if msg is valid
-        key_types = [("msg_type", str), ("data", dict), ("source_app", str),
-                     ("timeout", int), ("store_rep", bool)]
-        keys_types_check(msg, key_types)
-
-        supported_type = ["http-post", "dsav"]
-        
-        if not msg["msg_type"] in supported_type:
-            raise ValueError(
-                f"unknown msg type {msg['msg_type']} / {supported_type}")
-        supported_apps = ["rpdp_app", "passport_app"]
-        if not msg["source_app"] in supported_apps:
-            raise ValueError(
-                f"unknown msg source_app {msg['source_app']} / {supported_apps}")
-        msg["pkt_id"] = self._job_id
-        msg["created_dt"] = time.time()
-        self._send_buff.put(msg)
-        self._job_id += 1
-        
-        
-
-
-
-    def put_send_sync(self, msg):
-        """
-        will return response
-        """
-        raise NotImplementedError
-    def _update_metric(self,d,msg):
-        self.logger.debug(d)
-        self.logger.debug(msg)
-        return d
-    def send_msg(self, msg):
-        # self.logger.debug(msg)
-        msg["schedule_dt"] = time.time()
-        match msg["msg_type"]:
-            case "http-post":
-                sent = self._send_http_post(msg)
-            case "dsav":
-                self.bird_cmd_buff.put(msg["data"])
-                self.bird_man.bird_cmd("call_agent")
-                sent = True
-            case "grpc":
-                raise NotImplementedError
-            case _:
-                raise ValueError(f"unknown msg type {msg['type']}")
-        msg["finished_dt"] = time.time()
-        # update_metric
-        match msg["source_app"]:
-            case "rpdp_app":
-                match msg["msg_type"]:
-                    case "dsav":
-                        temp = self._update_metric(self.agent.rpdp_app.metric["dsav"], msg)
-                        self.agent.rpdp_app.metric["dsav"] = temp
-                    case _:
-                        raise ValueError(f"unknown msg type {msg['type']}")
-            case _:
-                raise ValueError(f"unknown msg source_app {msg['source_app']}")
-        if not sent:
-            self.logger.warning(f"send failed {msg}")
-            self.send_buff.append(msg)
-
-    def _send_http_post(self, msg):
-        if msg["timeout"] == 0:
-            while True:
-                rep = self.post_session.post(
-                    msg["url"], json=msg["data"], timeout=3)
-                if rep.status_code == 200:
-                    if msg["store_rep"]:
-                        self.result_buff[msg["pkt_id"]] = rep.json()
-                    return True
-        if not "retry" in msg:
-            retry = 10
-        for i in range(retry):
-            rep = self.post_session.post(
-                msg["url"], json=msg["data"], timeout=msg["timeout"])
-            if rep.status_code == 200:
-                self.result_buff[msg["pkt_id"]] = rep.json()
-                return True
-            time.sleep(msg["timeout"])
-        return False
 
 
 class SavAgent():
@@ -177,13 +76,12 @@ class SavAgent():
         self.sib_man.upsert("active_app", json.dumps(self.data["active_app"]))
         self.bird_man = BirdCMDManager(logger=self.logger)
         self.bird_man.update_protocols(self.config["local_as"])
-        self.sender = SendAgent(self, self.config, self.logger)
         self._start()
         # self.grpc_server = None
 
     def put_out_msg(self, msg):
         # self.logger.debug(f"putting out msg {msg}")
-        self.sender.put_send_async(msg)
+        self.link_man.put_send_async(msg)
 
     def get_out_msg(self):
         return self._out_msgs.pop(0)
@@ -250,7 +148,7 @@ class SavAgent():
         # node key is as number, value is None; link key is as number,
         # value is list of directly connected as numbers, link is undirected
         self.data["sav_graph"] = {"nodes": {}, "links": {}}
-        self.link_man = LinkManager(self.data["links"], logger=self.logger)
+        self.link_man = LinkManager(self.data["links"],self, logger=self.logger)
         for link_name, link_dict, link_type in self.temp_for_link_man:
             self.link_man.add(link_name, link_dict, link_type)
             self.temp_for_link_man = []
@@ -425,6 +323,7 @@ class SavAgent():
                     native_bgp_update = msg
                 else:
                     # self.logger.debug("skipping native bgp update")
+                    self.data["metric"]["skipped_bgp_update"] += 1
                     self._in_msgs.task_done()
             else:
                 msg = self._add_pkt_id(msg)
@@ -464,17 +363,14 @@ class SavAgent():
                     self.logger.error(
                         f"error when processing: [{err}]:{msg}")
                 self._send_init()
-                while self.sender._send_buff.qsize() > 0:
-                    msg = self.sender._send_buff.get()
-                    self.sender.send_msg(msg)
-                    self.sender._send_buff.task_done()
+                while self.link_man._send_buff.qsize() > 0:
+                    msg = self.link_man._send_buff.get()
+                    self.link_man.send_msg(msg)
+                    self.link_man._send_buff.task_done()
             except Exception as e:
                 self.logger.exception(e)
                 self.logger.error(e)
                 self.logger.error(type(e))
-
-    def grpc_recv(self, msg, sender):
-        self.logger.debug(f"agent recv via grpc: {msg} from {sender}")
 
     def _send_init(self):
         """
@@ -526,6 +422,7 @@ class SavAgent():
         if not "msg" in msg:
             raise KeyError(f"msg missing in msg:{msg}")
         keys_types_check(msg, key_types)
+        msg["created_dt"] = time.time()
         self._in_msgs.put(msg)
 
     def _send_init_broadcast_on_link(self, link_name):
@@ -841,7 +738,8 @@ class SavAgent():
             return inter_sent
 
     def _process_msg(self, input_msg):
-        t0 = time.time()
+        input_msg["schedule_dt"] = time.time()
+        t0 = input_msg["schedule_dt"] 
         # self.logger.debug(input_msg)
         log_msg = f"start msg, pkt_id:{input_msg['pkt_id']}, msg_type: {input_msg['msg_type']}"
         key_types = [("msg_type", str), ("pkt_id", int), ("pkt_rec_dt", float)]
@@ -934,7 +832,7 @@ class SavAgent():
     def _start(self):
         self._thread_pool = []
         self._thread_pool.append(threading.Thread(target=self._run))
-        # self._thread_pool.append(threading.Thread(target=self.sender.run))
+        # self._thread_pool.append(threading.Thread(target=self.link_man.run))
         for t in self._thread_pool:
             t.daemon = True
             t.start()
