@@ -259,15 +259,15 @@ def write_response(
             output_file.write(http_event.data)
 
 
-def save_session_ticket(ticket: SessionTicket) -> None:
-    """
-    Callback which is invoked by the TLS engine when a new session ticket
-    is received.
-    """
-    logger.info("New session ticket received")
-    if args.session_ticket:
-        with open(args.session_ticket, "wb") as fp:
-            pickle.dump(ticket, fp)
+# def save_session_ticket(ticket: SessionTicket) -> None:
+#     """
+#     Callback which is invoked by the TLS engine when a new session ticket
+#     is received.
+#     """
+#     logger.info("New session ticket received")
+#     if args.session_ticket:
+#         with open(args.session_ticket, "wb") as fp:
+#             pickle.dump(ticket, fp)
 
 # class QuicClientManager():
 #     """establish quic connection and reuse it for sending"""
@@ -304,7 +304,7 @@ class RPDPApp(SavApp):
             is_client=True, alpn_protocols=H3_ALPN)
         self.quic_config.load_verify_locations(r'/root/savop/ca_cert.pem')
         self.stub_dict = {}
-
+        self.snd_spd_id_inter = 0
     def get_init_metric_dict(self):
         return {
             "dsav": init_protocol_metric(),
@@ -363,8 +363,18 @@ class RPDPApp(SavApp):
     def _build_inter_sav_spa_nlri(self, origin_asn, prefix, route_type=2, flag=1):
         return (route_type, origin_asn, prefix, flag)
 
-    def _build_inter_sav_spd(self, sn, origin_router_id, origin_asn, validation_asn, optional_data, type=2, sub_type=2):
-        return (type, sub_type, sn, origin_router_id, origin_asn, validation_asn, optional_data)
+    def _build_inter_spd(self, validation_asn, optional_data):
+        if self.snd_spd_id_inter == 4294967296: # 256*256*256*256
+            self.snd_spd_id_inter = 0
+        sn = self.snd_spd_id_inter
+        type =2
+        sub_type = 2
+        origin_router_id = self.agent.config["router_id"]
+        source_asn = self.agent.config["local_as"]
+        validation_asn
+        
+        self.snd_spd_id_inter += 1
+        return (type, sub_type, origin_router_id, source_asn, validation_asn, optional_data)
 
     def _add_metric(self, msg, in_time, process_time, link_type, direction):
         self.metric[link_type][direction]["count"] += 1
@@ -389,7 +399,7 @@ class RPDPApp(SavApp):
                 link_type = link["link_type"]
 
             if link_type == "grpc":
-                self._send_grpc(msg, config["rpdp_id"], map_data)
+                self._send_grpc(msg, config["router_id"], map_data)
             elif link_type == "dsav":
                 # using reference router
                 self._send_dsav(msg)
@@ -579,7 +589,7 @@ class RPDPApp(SavApp):
                 case "grpc":
                     link = self.agent.bird_man.get_link_by_name(using_link)
                     self._send_grpc(msg["msg"],
-                                    self.agent.config["rpdp_id"],
+                                    self.agent.config["router_id"],
                                     {"remote_addr": "10.0.0.1:5000",
                                      "remote_id": "10.0.0.1"})
                 case "quic":
@@ -611,11 +621,6 @@ class RPDPApp(SavApp):
         if not isinstance(msg, dict):
             self.logger.error(f"msg is not a dictionary msg is {type(msg)}")
             return
-        cmd_len = self.agent.get_out_msg_len()
-        if cmd_len > 0:
-            self.logger.warn(
-                f"last message not finished, {cmd_len} remaining")
-            time.sleep(0.01)
         # specialized for bird app, we need to convert the msg to byte array
         nlri = copy.deepcopy(msg["sav_nlri"])
         # split into multi mesgs
@@ -719,6 +724,7 @@ class RPDPApp(SavApp):
                 "protocol_name": link["protocol_name"],
                 "is_native_bgp": 0
             }
+            spd_msg = {}
             if link["link_type"] == "grpc":
                 msg["dst_id"] = link["remote_id"]
                 msg["src_id"] = self.agent.config["grpc_config"]["id"]

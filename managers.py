@@ -457,9 +457,9 @@ class BirdCMDManager():
                     "protocol_name": proto_name,
                     "state": True  # faster
                 }
-                if "sav_inter{" in l:
+                if "sav_inter" in l:
                     meta["link_type"] = "dsav"
-                elif "basic{" in l:
+                elif "basic" in l:
                     meta["link_type"] = "native_bgp"
                 else:
                     self.logger.error(f"unknown link type: {l}")
@@ -718,12 +718,15 @@ class BirdCMDManager():
         return result
 
     def update_fib(self, log_err=True, insert_db=False, sib_man=None):
-        """return adds, dels of modifications"""
+        """
+        return adds, dels of bird fib
+        """
+        self.logger.debug("updating fib")
         self.bird_fib["check_time"] = time.time()
         default, local, remote = self._parse_bird_fib(log_err)
-        # self.logger.debug(default)
-        # self.logger.debug(local)
-        # self.logger.debug(remote)
+        self.logger.debug(default)
+        self.logger.debug(local)
+        self.logger.debug(remote)
         something_updated = False
         local_adds, local_dels = self._diff_fib(
             self.bird_fib["local_route"], local)
@@ -786,7 +789,25 @@ class BirdCMDManager():
         for prefix, data in self.bird_fib["remote_route"].items():
             temp[prefix] = data
         return temp
-
+    def pre_process_table(self, table):
+        """
+        format the out put for latter use
+        only tested in iBGP with IPv6
+        """
+        temp = {}
+        for table_name,table_value in table.items():
+            temp[table_name] = {}
+            for prefix,data in table_value.items():
+                temp[table_name][prefix] = {}
+                for k,v in data.items():
+                    new_k = k
+                    if new_k.startswith("BGP."):
+                        new_k = new_k[4:]
+                    if new_k.endswith(":"):
+                        new_k = new_k[:-1]
+                    temp[table_name][prefix][new_k] = v
+        del table
+        return temp
     def _parse_bird_fib(self, log_err):
         """
         using birdc show all to get bird fib,
@@ -794,7 +815,7 @@ class BirdCMDManager():
         """
         t0 = time.time()
         data = self.bird_cmd("show route all", log_err)
-        # data = self._bird_cmd(cmd="show route all")
+        # self.logger.debug(data)
         if data is None:
             return {}
         data = data.split("Table")
@@ -804,27 +825,34 @@ class BirdCMDManager():
         for table in data:
             table_name, table_data = self._parse_bird_table(table)
             result[table_name] = table_data
-        if not "master4" in result:
+        temp_ret = {}
+        if "master4" in result:
+            temp_ret["master4"] = result["master4"]
+        elif "master6" in result:
+            temp_ret["master6"] = result["master6"]
+        else:
             self.logger.warning(
                 "no master4 table. Is BIRD ready?")
             return {}
-        result = result["master4"]
-        # self.logger.debug(result)
+        temp_ret = self.pre_process_table(temp_ret)
         default = {}
         local = {}
         remote = {}
-        for prefix, data in result.items():
-            if str(prefix) == "0.0.0.0/0":
-                default[prefix] = data
-            elif not "as_path" in data:
-                local[prefix] = data
-            elif "as_path" in data:
-                remote[prefix] = data
-            else:
-                self.logger.error(prefix)
-                self.logger.error(json.dumps(data, indent=2))
-                self.logger.error("unknown prefix type")
-
+        # self.logger.debug(f"{temp_ret}")
+        for table_name,table_value in temp_ret.items():
+            for prefix, data in table_value.items():
+                # self.logger.debug(f"{prefix}:{data}")
+                is_remote =  ("as_path" in data)
+                if prefix.prefixlen ==0:
+                    default[prefix] = data
+                elif not is_remote:
+                    local[prefix] = data
+                elif is_remote:
+                    remote[prefix] = data
+                else:
+                    self.logger.error(prefix)
+                    self.logger.error(json.dumps(data, indent=2))
+                    self.logger.error("unknown prefix type")
             # del result[prefix]
         t = time.time() - t0
         if t > TIMEIT_THRESHOLD:

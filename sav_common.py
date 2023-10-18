@@ -18,6 +18,7 @@ import requests
 import subprocess
 import copy
 import requests
+import timeit
 
 from sav_data_structure import *
 
@@ -124,16 +125,7 @@ def rule_list_diff(old_rules, new_rules):
     return adds_, dels_
 
 
-def decode_csv(input_str):
-    """
-    return a list of strings
-    """
-    if input_str == "":
-        return []
-    if "," in input_str:
-        return input_str.split(",")
 
-    return [input_str]
 
 
 def sav_rule_tuple(prefix, interface_name, rule_source, as_number=-1):
@@ -146,16 +138,18 @@ def sav_rule_tuple(prefix, interface_name, rule_source, as_number=-1):
 
 def subproc_run(cmd, shell=True, capture_output=True, encoding='utf-8'):
     return subprocess.run(cmd, shell=shell, capture_output=capture_output, encoding=encoding)
-def run_cmd(command, shell=True, capture_output=True, encoding='utf-8'):
-    return subprocess.run(command, shell=shell, capture_output=capture_output, encoding=encoding)
+def run_cmd(command):
+    ret = subproc_run(command, shell=True, capture_output=True, encoding='utf-8')
+    if ret.returncode != 0:
+        print(ret)
+    return ret.stdout
 
 def get_host_interface_list():
     """
     return a list of 'clean' interface names
     """
     command = "ip link|grep -v 'link' | grep -v -E 'docker0|lo' | awk -F: '{ print $2 }' | sed 's/ //g'"
-    command_result = run_cmd(command=command)
-    std_out = command_result.stdout
+    std_out = run_cmd(command=command)
     result = std_out.split("\n")[:-1]
     result = list(map(lambda x: x.split('@')[0], result))
     return [i for i in result if len(i) != 0]
@@ -427,28 +421,27 @@ def parse_kernel_fib():
     """
     parsing the output of "route -n -F" command
     """
-    proc = subprocess.Popen(
-        "route -n -F", shell=True, stdout=subprocess.PIPE)
-
-    output = proc.stdout.read().decode()
-    while "  " in output:
-        output = output.replace("  ", " ")
-    output = output.split("\n")
-    output.pop()  # removing tailing empty line
-    _ = output.pop(0)
-    output = list(map(lambda x: x.split(" "), output))
-    headings = output.pop(0)
-    output = list(map(lambda x: dict(zip(headings, x)), output))
-    # remove default route
-    temp = {}
-    for row in output:
-        if row["Destination"] == "0.0.0.0":
-            continue
-        # Intra is not implemented,so filter out private
-        prefix = netaddr.IPNetwork(row["Destination"]+"/"+row["Genmask"])
-        if not prefix.is_private():
-            temp[prefix] = row
-    return temp
+    v4_table = run_cmd("route -n -F")
+    v6_table = run_cmd("route -6 -n -F")
+    v4_v6 = []
+    for table in [v4_table, v6_table]:
+        while "  " in table:
+            table = table.replace("  ", " ")
+        table = table.split("\n")
+        table.pop()  # removing tailing empty line
+        _ = table.pop(0)
+        table = list(map(lambda x: x.split(" "), table))
+        headings = table.pop(0)
+        table = list(map(lambda x: dict(zip(headings, x)), table))
+        v4_v6.extend(table)
+    ret = {}
+    for row in v4_v6:
+        if 'Genmask' in row:
+            prefix = netaddr.IPNetwork(row["Destination"]+"/"+row["Genmask"])
+        else:
+            prefix = netaddr.IPNetwork(row["Destination"])
+            ret[prefix] = row
+    return ret
 
 
 def birdc_get_import(logger, protocol_name, channel_name="ipv4"):

@@ -29,7 +29,7 @@ class GrpcServer(agent_msg_pb2_grpc.AgentLinkServicer):
         t0 = time.time()
         msg_str = req.json_str
         req_src_ip = context.peer().split(":")[1]
-        my_id = self.agent.config["rpdp_id"]
+        my_id = self.agent.config["router_id"]
         reply = f"got {msg_str}"
         response = agent_msg_pb2.AgentMsg(sender_id=my_id, json_str=reply)
         try:
@@ -185,7 +185,30 @@ def index():
         LOGGER.warning(f"TIMEIT {time.time()-t0:.4f} seconds")
     return rep
 
-
+@app.route("/put_bgp_update/", methods=["POST", "GET"])
+def put_bgp_update():
+    """
+    put a bpg update message
+    """
+    t0 = time.time()
+    try:
+        msg = {"msg":{"protocol_name":"eth_r3"},
+               "msg_type":"bgp_update",
+               "source_link":"eth_r3"}
+        msg["source_app"] = "rpdp_app"
+        msg["pkt_rec_dt"] = t0
+        sa.put_msg(msg)
+        rep = {"code": "0000", "message": "success"}
+    except Exception as err:
+        LOGGER.exception(err)
+        LOGGER.error(type(err))
+        LOGGER.error(msg)
+        LOGGER.error(err)
+        rep = {"code": "5004", "message": str(err), "data": str(request.data)}
+    t = time.time()-t0
+    if t > TIMEIT_THRESHOLD:
+        LOGGER.warning(f"TIMEIT {time.time()-t0:.4f} seconds")
+    return rep
 @app.route("/sib_table/", methods=["POST", "GET"])
 def search_sib():
     """

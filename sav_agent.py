@@ -68,7 +68,6 @@ class SavAgent():
         self.update_config(path_to_config)
         self._init_data()
         self._in_msgs = queue.Queue()
-        self._out_msgs = []
         self._init_apps()
         self.sib_man = SIBManager(logger=self.logger)
         self.ip_man = IPTableManager(self.logger, self.data["active_app"])
@@ -83,11 +82,6 @@ class SavAgent():
         # self.logger.debug(f"putting out msg {msg}")
         self.link_man.put_send_async(msg)
 
-    def get_out_msg(self):
-        return self._out_msgs.pop(0)
-
-    def get_out_msg_len(self):
-        return len(self._out_msgs)
 
     def update_config(self, path_to_config):
         """
@@ -100,7 +94,7 @@ class SavAgent():
                 config = read_json(path_to_config)
                 required_keys = [
                     ("apps", list), ("grpc_config", dict), ("location", str),
-                    ("quic_config", dict), ("link_map", dict), ("rpdp_id", str), ("local_as", int)]
+                    ("quic_config", dict), ("link_map", dict), ("router_id", str), ("local_as", int)]
                 keys_types_check(config, required_keys)
 
                 grpc_config = config["grpc_config"]
@@ -227,7 +221,7 @@ class SavAgent():
                 self.add_app(app_instance)
             elif name == "passport":
                 app_instance = PassportApp(
-                    self, self.config["local_as"], self.config["rpdp_id"], logger=self.logger)
+                    self, self.config["local_as"], self.config["router_id"], logger=self.logger)
                 self.passport_app = app_instance
                 self.add_app(app_instance)
 
@@ -242,8 +236,11 @@ class SavAgent():
         self.logger.debug(
             msg=f"initialized apps: {list(self.data['apps'].keys())},using {self.data['active_app']}")
 
-    def _update_kernel_fib(self):
-        """return new_fib, adds, dels"""
+    def _refresh_kernel_fib(self):
+        """
+        update kernel fib
+        return new_fib, adds, dels
+        """
         new_ = parse_kernel_fib()
         t0 = time.time()
         old_ = self.data["kernel_fib"]["data"]
@@ -268,9 +265,8 @@ class SavAgent():
         if self.data["initial_bgp_stable"]:
             return
         # self.logger.debug(self.bird_man.bird_fib)
-        self._update_kernel_fib()
+        self._refresh_kernel_fib()
         if time.time() - self.data["kernel_fib"]["update_time"] > stable_span:
-
             self.logger.debug(
                 f"FIB STABILIZED at {self.data['kernel_fib']['update_time']}")
             self.data["initial_bgp_stable"] = True
@@ -312,26 +308,22 @@ class SavAgent():
         msg["pkt_id"] = self.data["pkt_id"]
         return msg
 
-    def _precheck_msg(self, msg, native_bgp_update, msgs):
+    def _precheck_msg(self, msg, bgp_update_msg, msgs):
         """
         aggregate native bgp update msg
         """
         if msg["msg_type"] == "bgp_update":
-            if self._is_native_bgp_update(msg):
-                if native_bgp_update is None:
-                    msg = self._add_pkt_id(msg)
-                    native_bgp_update = msg
-                else:
-                    # self.logger.debug("skipping native bgp update")
-                    self.data["metric"]["skipped_bgp_update"] += 1
-                    self._in_msgs.task_done()
-            else:
+            if bgp_update_msg is None:
                 msg = self._add_pkt_id(msg)
-                msgs.append(msg)
+                bgp_update_msg = msg
+            else:
+                # self.logger.debug("skipping native bgp update")
+                self.data["metric"]["skipped_bgp_update"] += 1
+                self._in_msgs.task_done()
         else:
-            msg["pkt_id"] = self.data["pkt_id"]
+            msg = self._add_pkt_id(msg)
             msgs.append(msg)
-        return native_bgp_update, msgs
+        return bgp_update_msg, msgs
 
     def _run(self):
         """
@@ -344,17 +336,17 @@ class SavAgent():
                     msgs = []
                     # we first detect all native bgp update,
                     # if we detect one native bgp update, we insert a msg to trigger the kernel fib update
-                    native_bgp_update = None
+                    bgp_update_msg = None
                     msg0 = self._in_msgs.get()
-                    native_bgp_update, msgs = self._precheck_msg(
-                        msg0, native_bgp_update, msgs)
+                    bgp_update_msg, msgs = self._precheck_msg(
+                        msg0, bgp_update_msg, msgs)
                     # self.logger.debug(self._in_msgs.qsize())
                     for _ in range(self._in_msgs.qsize()):
                         msg = self._in_msgs.get()
-                        native_bgp_update, msgs = self._precheck_msg(
-                            msg, native_bgp_update, msgs)
-                    if not native_bgp_update is None:
-                        msgs = [native_bgp_update] + msgs
+                        bgp_update_msg, msgs = self._precheck_msg(
+                            msg, bgp_update_msg, msgs)
+                    if  bgp_update_msg:
+                        msgs = [bgp_update_msg] + msgs
                     for m in msgs:
                         self._process_msg(m)
                         self._in_msgs.task_done()
@@ -505,7 +497,8 @@ class SavAgent():
         """
         the msg is not used here
         """
-        _, adds, dels = self._update_kernel_fib()
+        _, adds, dels = self._refresh_kernel_fib()
+        
         if len(adds) == 0 and len(dels) == 0:
             return
         self.bird_man.update_fib(sib_man=self.sib_man)
@@ -619,77 +612,83 @@ class SavAgent():
                 new_table[r["source_app"]][str_key] = r
         self.data["sav_table"] = new_table
         # self.logger.debug(f"rpdp_len:{len(new_table['rpdp_app'])}")
+    def _find_links_for_origin(self,input_link_name):
+        inter_links = []
+        intra_links = []
+        if input_link_name is None:
+            # when sending origin, we send to all links
+            up_links = self.bird_man.get_all_rpdp_meta(
+                self.config["link_map"])
+            # pre checking
+            if len(up_links) == 0:
+                self.logger.debug("no link is up, not sending")
+                return False
+            for link_name, meta in up_links.items():
+                if meta["is_interior"]:
+                    inter_links.append((link_name, meta))
+                else:
+                    intra_links.append((link_name, meta))
+        else:
+            meta = self.bird_man.get_link_meta_by_name(input_link_name)
+            if meta["is_interior"]:
+                inter_links.append((input_link_name, meta))
+            else:
+                intra_links.append((input_link_name, meta))
+        return inter_links,intra_links
+    def _find_paths_for_origin(self, input_paths):
+        intra_paths = []
+        inter_paths = []
+        if input_paths is None:
+            pp = self.bird_man.get_remote_fib()
+            self.logger.debug(f"pp:{pp}")
+            for prefix in pp:
+                for path in pp[prefix]["as_path"]:
+                    inter_paths.append({prefix: path})
+                # prepare data for inter-msg TODO: intra-msg broadcast
+        else:
+            # self.logger.debug(input_paths)
+            for path in input_paths:
+                for prefix in path:
+                    path_data = list(map(str, path[prefix]))
+                    # transfrom the data first
+                    if tell_str_is_interior(",".join(path_data)):
+                        # self.logger.debug(f"{path}")
+                        inter_paths.append(path)
+                    else:
+                        intra_paths.append(path)
+        # self.logger.debug(f"intra_paths:{intra_paths}")
+        # self.logger.debug(f"inter_paths:{inter_paths}")
+        # temp = []
+        # self.logger.debug(len(inter_paths))
+        # for i in inter_paths:
+        #     for k,v in i.items():
+        #         if not k.is_private():
+        #             temp.append({k:v})
+        # inter_paths = temp
+        
+        inter_paths = aggregate_asn_path(inter_paths)
+        self.logger.debug(inter_paths)
+        # self.logger.debug(f"inter_paths:{inter_paths}")
+        # TODO here we filter out private prefixes
+        
+        return inter_paths,intra_paths
 
     def _send_origin(self, input_link_name=None, input_paths=None):
         """
         send origin messages,
         if input_link_name is None, send to all available links
-        if input_paths is None, send all local prefixes
+        if input_paths is None, send all suitable prefixes
         """
-        # self.logger.debug(f"send_origin: {input_link_name} ,{input_paths}")
+        func_start = time.time()
         if self.rpdp_app is None:
             self.logger.debug("rpdp_app missing,unable to send origin")
             return True
-        t0 = time.time()
+        
         inter_sent = False
         intra_sent = False
         try:
-            link_names = [input_link_name]
-            inter_links = []
-            intra_links = []
-            if input_link_name is None:
-                # when sending origin, we send to all links
-                up_links = self.bird_man.get_all_rpdp_meta(
-                    self.config["link_map"])
-                # pre checking
-                if len(up_links) == 0:
-                    self.logger.debug("no link is up, not sending")
-                    return False
-                for link_name, meta in up_links.items():
-                    if meta["is_interior"]:
-                        inter_links.append((link_name, meta))
-                    else:
-                        intra_links.append((link_name, meta))
-            else:
-                for link_name in link_names:
-                    meta = self.bird_man.get_link_meta_by_name(link_name)
-                    if meta["is_interior"]:
-                        inter_links.append((link_name, meta))
-                    else:
-                        intra_links.append((link_name, meta))
-            intra_paths = []
-            inter_paths = []
-            if input_paths is None:
-                ppv4 = self.bird_man.get_remote_fib()
-                for prefix in ppv4:
-                    for path in ppv4[prefix]["as_path"]:
-                        inter_paths.append({prefix: path})
-                    # prepare data for inter-msg TODO: intra-msg broadcast
-            else:
-                # self.logger.debug(input_paths)
-                for path in input_paths:
-                    for prefix in path:
-                        path_data = list(map(str, path[prefix]))
-                        # transfrom the data first
-                        if tell_str_is_interior(",".join(path_data)):
-                            # self.logger.debug(f"{path}")
-                            inter_paths.append(path)
-                        else:
-                            intra_paths.append(path)
-            # self.logger.debug(f"intra_paths:{intra_paths}")
-            # self.logger.debug(f"inter_paths:{inter_paths}")
-            # temp = []
-            # self.logger.debug(len(inter_paths))
-            # for i in inter_paths:
-            #     for k,v in i.items():
-            #         if not k.is_private():
-            #             temp.append({k:v})
-            # inter_paths = temp
-            # self.logger.debug(len(inter_paths))
-            inter_paths = aggregate_asn_path(inter_paths)
-            # self.logger.debug(f"inter_paths:{inter_paths}")
-            # TODO here we filter out private prefixes
-
+            inter_links,intra_links = self._find_links_for_origin(input_link_name)
+            inter_paths,intra_paths = self._find_paths_for_origin(input_paths)
             if len(inter_links) > 0 and len(inter_paths) > 0:
                 # we send origin to all links no matter inter or intra
                 for link_name, link in inter_links:
@@ -728,9 +727,9 @@ class SavAgent():
                         self.send_msg_to_agent(msg, link)
                         self.logger.debug(f"sent origin via intra{msg}")
                     # TODO intra origin
-            t = time.time()-t0
+            t = time.time()-func_start
             if t > TIMEIT_THRESHOLD:
-                self.logger.debug(f"TIMEIT {time.time()-t0:.4f} seconds")
+                self.logger.debug(f"TIMEIT {t:.4f} seconds")
             return inter_sent
         except Exception as e:
             self.logger.exception(e)
@@ -753,8 +752,6 @@ class SavAgent():
                 # TODO for faster performance
                 pass
             case "bgp_update":
-                self._process_bgp_update(input_msg)
-            case "native_bgp_update":
                 self._process_native_bgp_update()
             case "grpc_msg":
                 if self.rpdp_app:
@@ -791,13 +788,13 @@ class SavAgent():
             case _:
                 self.logger.warning(f"unknown msg type: [{m_t}]\n{input_msg}")
         t1 = time.time()
-        if m_t in ["quic_msg", "passport_pkt", "grpc_msg", "bgp_update"]:
-            if len(input_msg["msg"]["sav_nlri"]) > 0:
-                self.data["msg_count"] += 1
-                self.logger.debug(
-                    f"PERF-TEST: got {m_t} packet ({self.data['msg_count']}) at {t0}")
-                self.logger.debug(
-                    f"PERF-TEST: finished PROCESSING ({self.data['msg_count']}) at {t1}")
+        # if m_t in ["quic_msg", "passport_pkt", "grpc_msg", "bgp_update"]:
+        #     if len(input_msg["msg"]["sav_nlri"]) > 0:
+        #         self.data["msg_count"] += 1
+        #         self.logger.debug(
+        #             f"PERF-TEST: got {m_t} packet ({self.data['msg_count']}) at {t0}")
+        #         self.logger.debug(
+        #             f"PERF-TEST: finished PROCESSING ({self.data['msg_count']}) at {t1}")
         if t1-t0 > TIMEIT_THRESHOLD:
             log_msg = log_msg.replace("start", "finish")
             log_msg += f", time used: {t1-t0:.4f}"
@@ -832,7 +829,6 @@ class SavAgent():
     def _start(self):
         self._thread_pool = []
         self._thread_pool.append(threading.Thread(target=self._run))
-        # self._thread_pool.append(threading.Thread(target=self.link_man.run))
         for t in self._thread_pool:
             t.daemon = True
             t.start()

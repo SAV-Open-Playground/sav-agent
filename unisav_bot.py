@@ -88,7 +88,8 @@ class Bot():
         command = signal["command"]
         if not command in ["start", "stop"]:
             raise ValueError("unknown command")
-        self.is_monitor = (local_as in signal["command_scope"])
+        # self.is_monitor = (local_as in signal["command_scope"])
+        self.is_monitor = True
         if not self.is_monitor:
             return "keep"
 
@@ -253,6 +254,7 @@ class Bot():
 
     def run(self):
         # 循环，监控配置文件与sav数据库的转态
+        # self.logger.debug("unisav_bot start")
         while True:
             time.sleep(0.1)
             try:
