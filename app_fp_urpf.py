@@ -48,7 +48,7 @@ class FpUrpfApp(SavApp):
             for prefix in table[as_number]["prefixes"]:
                 self.logger.debug(table[as_number]["interface_names"])
                 for interface_name in table[as_number]["interface_names"]:
-                    result.append(sav_rule_tuple(
+                    result.append(get_sav_rule(
                         prefix, interface_name, self.name, as_number))
         return result
 
@@ -72,20 +72,20 @@ class FpUrpfApp(SavApp):
             if prefix in old_rules:
                 for interface_name in new_[prefix]:
                     if not interface_name in old_rules[prefix]:
-                        add_rules.append(sav_rule_tuple(
+                        add_rules.append(get_sav_rule(
                             prefix, interface_name, self.name))
                 for interface_name in old_rules[prefix]:
                     if not interface_name in new_[prefix]:
-                        del_rules.append(sav_rule_tuple(
+                        del_rules.append(get_sav_rule(
                             prefix, interface_name, self.name))
             else:
                 for interface_name in new_[prefix]:
-                    add_rules.append(sav_rule_tuple(
+                    add_rules.append(get_sav_rule(
                         prefix, interface_name, self.name))
         for prefix in old_rules:
             if not prefix in new_:
                 for interface_name in old_rules[prefix]:
-                    del_rules.append(sav_rule_tuple(
+                    del_rules.append(get_sav_rule(
                         prefix, interface_name, self.name))
         self.rules = new_
         # self.logger.debug(f"{self.name}: add_rules={add_rules}")

@@ -18,53 +18,49 @@ KEY_WORD = "SAVAGENT"
 DATA_PATH = "/root/sav-agent/data"
 
 
-def command_executor(command):
-    return subprocess.run(command, shell=True, capture_output=True, encoding='utf-8')
-
-
 def huawei_acl_generator(acl_sav_rule):
-    status = command_executor(
+    status = subprocess_run(
         command=f'cat /dev/null > {DATA_PATH}/huawei_acl_rule.txt')
-    status = command_executor(
+    status = subprocess_run(
         command=f'echo "system-view" >> {DATA_PATH}/huawei_acl_rule.txt')
     for iface, prefix_set in acl_sav_rule.items():
-        status = command_executor(
+        status = subprocess_run(
             command=f'echo "acl name sav_{iface}" >> {DATA_PATH}/huawei_acl_rule.txt')
         for prefix in prefix_set:
-            status = command_executor(
+            status = subprocess_run(
                 command=f'echo "rule deny {prefix} 0.0.0.255" >> {DATA_PATH}/huawei_acl_rule.txt')
-        status = command_executor(
+        status = subprocess_run(
             command=f'echo "quit" >> {DATA_PATH}/huawei_acl_rule.txt')
-        status = command_executor(
+        status = subprocess_run(
             command=f'echo "interface Ethernet {iface}" >> {DATA_PATH}/huawei_acl_rule.txt')
-        status = command_executor(
+        status = subprocess_run(
             command=f'echo acl sav_{iface} inbound >> {DATA_PATH}/huawei_acl_rule.txt')
-        status = command_executor(
+        status = subprocess_run(
             command=f'echo "quit" >> {DATA_PATH}/huawei_acl_rule.txt')
-    status = command_executor(
+    status = subprocess_run(
         command=f'echo "save" >> {DATA_PATH}/huawei_acl_rule.txt')
 
 
 def h3c_acl_generator(acl_sav_rule):
-    status = command_executor(
+    status = subprocess_run(
         command=f'cat /dev/null > {DATA_PATH}/h3c_acl_rule.txt')
-    status = command_executor(
+    status = subprocess_run(
         command=f'echo "system-view" >> {DATA_PATH}/h3c_acl_rule.txt')
     for iface, prefix_set in acl_sav_rule.items():
-        status = command_executor(
+        status = subprocess_run(
             command=f'echo "acl name sav_{iface}" >> {DATA_PATH}/h3c_acl_rule.txt')
         for prefix in prefix_set:
-            status = command_executor(
+            status = subprocess_run(
                 command=f'echo "rule deny {prefix} 0.0.0.255" >> {DATA_PATH}/h3c_acl_rule.txt')
-        status = command_executor(
+        status = subprocess_run(
             command=f'echo "quit" >> {DATA_PATH}/h3c_acl_rule.txt')
-        status = command_executor(
+        status = subprocess_run(
             command=f'echo "interface Ethernet {iface}" >> {DATA_PATH}/h3c_acl_rule.txt')
-        status = command_executor(
+        status = subprocess_run(
             command=f'echo acl sav_{iface} inbound >> {DATA_PATH}/h3c_acl_rule.txt')
-        status = command_executor(
+        status = subprocess_run(
             command=f'echo "quit" >> {DATA_PATH}/h3c_acl_rule.txt')
-    status = command_executor(
+    status = subprocess_run(
         command=f'echo "save" >> {DATA_PATH}/h3c_acl_rule.txt')
 
 
@@ -407,93 +403,33 @@ class BirdCMDManager():
         self.is_running = False
         self.bird_fib = {"check_time": None, "update_time": None, "local_route": {},
                          "remote_route": {}, "default_route": {}}
-        self.protos = {"check_time": None, "update_time": None, "links": {}}
-    
+
     def is_bird_ready(self):
         """
         return True if bird is ready
         """
         try:
-            result = self.bird_cmd("show status",log_err=False)
+            result = self.bird_cmd("show status", log_err=False)
             if result:
                 return True
             else:
                 return False
         except:
             return False
-    
+
     def bird_cmd(self, cmd, log_err=True):
-        # if self.is_running:
-        # self.logger.debug(f"pausing {cmd}")
         while self.is_running:
             time.sleep(0.01)
-        # self.logger.debug(f"start {cmd}")
         self.is_running = True
         ret = birdc_cmd(self.logger, cmd, log_err)
         self.is_running = False
         return ret
 
-    def update_protocols(self, my_asn):
-        """
-        read link meta from birdc config, call if needed
-        """
-        f = open("/usr/local/etc/bird.conf", "r")
-        data = f.readlines()
-        f.close()
-        for i in range(len(data)):
-            if data[i].startswith("protocol bgp savbgp"):
-                data = data[i:]
-                break
-        temp = {}
-        proto_name = None
-        for l in data:
-            l = l.strip()
-            if l.startswith("protocol"):
-                l = l.split(" ")
-                proto_name = l[2]
-                meta = {
-                    "initial_broadcast": False,
-                    "as4_session": True,
-                    "protocol_name": proto_name,
-                    "state": True  # faster
-                }
-                if "sav_inter" in l:
-                    meta["link_type"] = "dsav"
-                elif "basic" in l:
-                    meta["link_type"] = "native_bgp"
-                else:
-                    self.logger.error(f"unknown link type: {l}")
-                temp[proto_name] = {"meta": meta}
-            elif l.startswith("local role"):
-                l = l.split(" ")
-                local_role = l[-1][:-1]
-                temp[proto_name]["meta"]["local_role"] = local_role
-                match local_role:
-                    case "peer":
-                        temp[proto_name]["meta"]["remote_role"] = local_role
-                    case "provider":
-                        temp[proto_name]["meta"]["remote_role"] = "customer"
-                    case "customer":
-                        temp[proto_name]["meta"]["remote_role"] = "provider"
-            elif l.startswith("neighbor"):
-                l = l.split(" ")
-                temp[proto_name]["meta"]["remote_ip"] = l[1]
-                temp[proto_name]["meta"]["remote_as"] = int(l[-1][:-1])
-                is_inter = temp[proto_name]["meta"]["remote_as"] != my_asn
-                temp[proto_name]["meta"]["is_interior"] = is_inter
-            elif l.startswith("source address"):
-                l = l.split(" ")
-                temp[proto_name]["meta"]["local_ip"] = l[-1][:-1]
-            elif l.startswith("interface"):
-                temp[proto_name]["meta"]["interface_name"] = l.split("\"")[1]
-        self.protos["check_time"] = time.time()
-        self.protos["links"] = temp
-        self.protos["update_time"] = self.protos["check_time"]
-
     def update_protocols2(self):
         """
-        update bird protocols, including native bgp and d-sav data ,too slow
+        using birdc show protocols all to get bird protocols info, very slow
         """
+        check_time = time.time()
         while True:
             raw_result = self.bird_cmd("show protocols all", False)
             if raw_result:
@@ -507,11 +443,7 @@ class BirdCMDManager():
                 if all_good:
                     break
             time.sleep(0.1)
-        self.protos["check_time"] = time.time()
-        old_ = self.protos["links"]
-        if new_ != old_:
-            self.protos["links"] = new_
-            self.protos["update_time"] = self.protos["check_time"]
+        return new_,check_time
 
     def get_link_by_name(self, name):
         """all links must startswith savbgp"""
@@ -521,8 +453,7 @@ class BirdCMDManager():
             raise ValueError(f"link {name} not found")
         return self.protos["links"].get(name)
 
-    def update_link_meta(self, link_name, k, v):
-        self.protos["links"][link_name]["meta"][k] = v
+
 
     def parse_link_meta(self, proto_data):
         """
@@ -555,28 +486,6 @@ class BirdCMDManager():
             # self.logger.exception(e)
             return None
 
-    def get_all_rpdp_meta(self, link_map):
-        data = self.get_all_link_meta()
-        # result = {}
-        # for link_name, meta in data.items():
-        #     if link_name in link_map:
-        #         result[link_name] = meta
-        #     else:
-        #         self.logger.debug(meta)
-        #         result[link_name]
-        return data
-
-    def get_all_link_meta(self):
-        result = {}
-        for proto, data in self.protos["links"].items():
-            if proto.startswith("savbgp"):
-                if data["meta"]:
-                    result[proto] = data["meta"]
-        return result
-
-    def get_link_meta_by_name(self, name):
-        raw = self.get_link_by_name(name)
-        return raw["meta"]
 
     def get_by_remote_as_is_inter(self, remote_as, is_interior):
         result = []
@@ -591,32 +500,7 @@ class BirdCMDManager():
                 result.append(meta)
         return result
 
-    def get_up_links(self):
-        """
-        return list of up links
-        """
-        # self.logger.debug(json.dumps(self.protos, indent=2))
-        result = {}
-        for proto, data in self.protos["links"].items():
-            if "meta" not in data:
-                continue
-            data = data["meta"]
-            if not proto.startswith("savbgp"):
-                continue
-            if data["state"]:
-                result[proto] = data
-        return result
 
-    def get_up_intra_links(self):
-        result = {}
-        for proto, data in self.protos["links"].items():
-            try:
-                if data["meta"]["is_interior"]:
-                    continue
-                result[proto] = data
-            except:
-                pass
-        return result
 
     def get_up_inter_links(self):
         result = {}
@@ -681,15 +565,6 @@ class BirdCMDManager():
             # self.logger.debug(json.dumps({key1: raw_input[key1]}, indent=2))
         return raw_input
 
-    def get_bgp_by_interface(self, interface_name):
-        """
-        return a list of bgp(modified or native) link_dict that has the same interface_name
-        """
-        result = []
-        for _, link in self.protos["links"].items():
-            if link["meta"]["interface_name"] == interface_name:
-                result.append(link["meta"])
-        return result
 
     def _parse_protocols(self, raw_input):
         lines = raw_input.split("\n")
@@ -717,13 +592,13 @@ class BirdCMDManager():
                 result[p] = d
         return result
 
-    def update_fib(self, log_err=True, insert_db=False, sib_man=None):
+    def update_fib(self, ip_version, log_err=True, insert_db=False, sib_man=None):
         """
         return adds, dels of bird fib
         """
         self.logger.debug("updating fib")
         self.bird_fib["check_time"] = time.time()
-        default, local, remote = self._parse_bird_fib(log_err)
+        default, local, remote = self._parse_bird_fib(log_err, ip_version)
         self.logger.debug(default)
         self.logger.debug(local)
         self.logger.debug(remote)
@@ -746,17 +621,6 @@ class BirdCMDManager():
             # self.logger.debug(f"default_route updated")
         if something_updated:
             self.bird_fib["update_time"] = self.bird_fib["check_time"]
-            # self.logger.debug(self.bird_fib)
-            # if insert_db:
-            #     temp = copy.deepcopy(self.bird_fib)
-            #     for k, d in temp.items():
-            #         if type(d) == dict:
-            #             temp2 = {}
-            #             for k2, d2 in d.items():
-            #                 if type(k2) == netaddr.IPNetwork:
-            #                     temp2[str(k2)] = d2
-            #             temp[k] = temp2
-            #     sib_man.upsert("bird_fib", json.dumps(temp))
 
     def _diff_fib(self, old_fib, new_fib):
         """
@@ -789,17 +653,18 @@ class BirdCMDManager():
         for prefix, data in self.bird_fib["remote_route"].items():
             temp[prefix] = data
         return temp
+
     def pre_process_table(self, table):
         """
         format the out put for latter use
         only tested in iBGP with IPv6
         """
         temp = {}
-        for table_name,table_value in table.items():
+        for table_name, table_value in table.items():
             temp[table_name] = {}
-            for prefix,data in table_value.items():
+            for prefix, data in table_value.items():
                 temp[table_name][prefix] = {}
-                for k,v in data.items():
+                for k, v in data.items():
                     new_k = k
                     if new_k.startswith("BGP."):
                         new_k = new_k[4:]
@@ -808,14 +673,14 @@ class BirdCMDManager():
                     temp[table_name][prefix][new_k] = v
         del table
         return temp
-    def _parse_bird_fib(self, log_err):
+
+    def _parse_bird_fib(self, log_err, ip_version):
         """
         using birdc show all to get bird fib,
         return prefix-as_path dict
         """
         t0 = time.time()
         data = self.bird_cmd("show route all", log_err)
-        # self.logger.debug(data)
         if data is None:
             return {}
         data = data.split("Table")
@@ -823,7 +688,7 @@ class BirdCMDManager():
             data.remove("")
         result = {}
         for table in data:
-            table_name, table_data = self._parse_bird_table(table)
+            table_name, table_data = self._parse_bird_table(table, ip_version)
             result[table_name] = table_data
         temp_ret = {}
         if "master4" in result:
@@ -839,16 +704,23 @@ class BirdCMDManager():
         local = {}
         remote = {}
         # self.logger.debug(f"{temp_ret}")
-        for table_name,table_value in temp_ret.items():
+        for table_name, table_value in temp_ret.items():
             for prefix, data in table_value.items():
                 # self.logger.debug(f"{prefix}:{data}")
-                is_remote =  ("as_path" in data)
-                if prefix.prefixlen ==0:
+                is_remote = ("as_path" in data)
+                if prefix.prefixlen == 0:
                     default[prefix] = data
                 elif not is_remote:
                     local[prefix] = data
                 elif is_remote:
+                    if not "interface" in data:
+                        interface = None
+                        for k in data:
+                            if k.startswith("via "):
+                                if interface is None:
+                                    interface= k.split()[-1]
                     remote[prefix] = data
+                    remote[prefix]["interface"] = interface
                 else:
                     self.logger.error(prefix)
                     self.logger.error(json.dumps(data, indent=2))
@@ -862,7 +734,7 @@ class BirdCMDManager():
         # self.logger.debug(default)
         return default, local, remote
 
-    def _parse_bird_table(self, table):
+    def _parse_bird_table(self, table, ip_version):
         """
         return table_name (string) and parsed_rows (dict)
         """
@@ -899,6 +771,8 @@ class BirdCMDManager():
             if "-" in prefix:
                 prefix = prefix.split("-")[0]
             prefix = netaddr.IPNetwork(prefix)
+            if prefix.version != ip_version:
+                continue
             # if prefix.is_private():
             #     # self.logger.debug(f"private prefix {prefix} ignored")
             #     continue
@@ -1038,12 +912,13 @@ class InfoManager():
 class LinkManager(InfoManager):
     """
     LinkManager manage the link status and preprocessing the msg from the link
-    link_name is key MUST not be same
-    the link_name should be link_type_src_ip_dst_ip
+    link_name is key MUST be unique
+    the link_name should be generated using get_link_name() function
+    the bird command function is also here
     """
     # TODO: we have three types of link: native bgp, modified bgp and grpc
 
-    def __init__(self, data, agent,logger=None):
+    def __init__(self, data, agent, logger=None):
         super(LinkManager, self).__init__(data, logger)
         self._send_buff = queue.Queue()
         self.bird_cmd_buff = queue.Queue()
@@ -1052,7 +927,14 @@ class LinkManager(InfoManager):
         self._job_id = 0
         self._add_lock = False
         self.agent = agent
-        
+        self.read_brd_cfg(agent.config['local_as'])
+        self.bird_man = BirdCMDManager(logger)
+
+    def get_by_name(self, name):
+        if not name in self.data["links"]:
+            self.logger.debug(self.data)
+            raise ValueError(f"link {name} not found")
+        return self.data["links"][name]
 
     def update_config(self, config):
         self.config = config
@@ -1069,7 +951,7 @@ class LinkManager(InfoManager):
         keys_types_check(msg, key_types)
 
         supported_type = ["http-post", "dsav"]
-        
+
         if not msg["msg_type"] in supported_type:
             raise ValueError(
                 f"unknown msg type {msg['msg_type']} / {supported_type}")
@@ -1081,15 +963,77 @@ class LinkManager(InfoManager):
         msg["created_dt"] = time.time()
         self._send_buff.put(msg)
         self._job_id += 1
-
-
+        # do not remove this line, will trigger the shoot
+        self.logger.debug(f"send_trigger{self._send_buff.qsize()}")
 
     def put_send_sync(self, msg):
         """
         will return response
         """
         raise NotImplementedError
-    def _update_metric(self,d,msg):
+
+    def read_brd_cfg(self, my_asn):
+        """
+        read link meta from birdc config, call if needed
+        """
+        f = open("/usr/local/etc/bird.conf", "r")
+        data = f.readlines()
+        f.close()
+        for i in range(len(data)):
+            if data[i].startswith("protocol bgp savbgp"):
+                data = data[i:]
+                break
+        temp = {}
+        proto_name = None
+        for l in data:
+            l = l.strip()
+            if l.startswith("protocol"):
+                l = l.split(" ")
+                proto_name = l[2]
+                meta = {
+                    "initial_broadcast": False,
+                    "as4_session": True,
+                    "protocol_name": proto_name,
+                    "status": True  # faster
+                }
+                if "sav_inter" in l:
+                    meta["link_type"] = "dsav"
+                elif "basic" in l:
+                    meta["link_type"] = "native_bgp"
+                else:
+                    self.logger.error(f"unknown link type: {l}")
+                temp[proto_name] = meta
+            elif l.startswith("local role"):
+                l = l.split(" ")
+                local_role = l[-1][:-1]
+                temp[proto_name]["local_role"] = local_role
+                match local_role:
+                    case "peer":
+                        temp[proto_name]["remote_role"] = local_role
+                    case "provider":
+                        temp[proto_name]["remote_role"] = "customer"
+                    case "customer":
+                        temp[proto_name]["remote_role"] = "provider"
+            elif l.startswith("neighbor"):
+                l = l.split(" ")
+                temp[proto_name]["remote_ip"] = l[1]
+                temp[proto_name]["remote_as"] = int(l[-1][:-1])
+                is_inter = temp[proto_name]["remote_as"] != my_asn
+                temp[proto_name]["is_interior"] = is_inter
+            elif l.startswith("source address"):
+                l = l.split(" ")
+                temp[proto_name]["local_ip"] = l[-1][:-1]
+            elif l.startswith("interface"):
+                temp[proto_name]["interface_name"] = l.split("\"")[1]
+        self.data["check_time"] = time.time()
+        self.data["links"] = temp
+        self.data["update_time"] = self.data["check_time"]
+
+    def get_all_link_meta(self):
+        result = copy.deepcopy(self.data["links"])
+        return result
+
+    def _update_metric(self, d, msg):
         send = d["send"]
         send["count"] += 1
         send["size"] += len(str(msg["data"]))
@@ -1099,6 +1043,7 @@ class LinkManager(InfoManager):
             d["start"] = msg["created_dt"]
         d["end"] = msg["finished_dt"]
         return d
+
     def send_msg(self, msg):
         # self.logger.debug(msg)
         msg["schedule_dt"] = time.time()
@@ -1107,8 +1052,11 @@ class LinkManager(InfoManager):
                 sent = self._send_http_post(msg)
             case "dsav":
                 self.bird_cmd_buff.put(msg["data"])
-                self.agent.bird_man.bird_cmd("call_agent")
-                sent = True
+                try:
+                    self.agent.bird_man.bird_cmd("call_agent")
+                    sent = True
+                except:
+                    sent = False
             case "grpc":
                 raise NotImplementedError
             case _:
@@ -1119,7 +1067,8 @@ class LinkManager(InfoManager):
             case "rpdp_app":
                 match msg["msg_type"]:
                     case "dsav":
-                        temp = self._update_metric(self.agent.rpdp_app.metric["dsav"], msg)
+                        temp = self._update_metric(
+                            self.agent.rpdp_app.metric["dsav"], msg)
                         self.agent.rpdp_app.metric["dsav"] = temp
                     case _:
                         raise ValueError(f"unknown msg type {msg['type']}")
@@ -1196,8 +1145,8 @@ class LinkManager(InfoManager):
         return a list of all up link_names ,use get(link_name) to get link object
         """
         temp = []
-        for link_name, link in self.data.items():
-            # self.logger.debug(link["protocol_name"])
+        for link_name, link in self.data["links"].items():
+            self.logger.debug(link)
             if link["status"]:
                 if link["link_type"] == "native_bgp":
                     # self.logger.debug(link["protocol_name"])
@@ -1214,7 +1163,7 @@ class LinkManager(InfoManager):
         """
         result = []
         for link_name in self.get_all_up(include_native_bgp):
-            if self.data[link_name]["is_interior"] == is_interior:
+            if self.data["links"][link_name]["is_interior"] == is_interior:
                 result.append(link_name)
         return result
 
@@ -1247,29 +1196,14 @@ class LinkManager(InfoManager):
             raise ValueError(f'unknown link_type: {meta["link_type"]}')
         return True
 
-    # def send_msg(self, msg,link_name):
-    #     """
-    #     send msg to using the given link_name
-    #     """
-    #     for link_name, link in self.data.items():
-    #         link["send_msg"](msg)
-def get_new_link_meta(app_name, link_type, initial_status=False):
-    """
-    generate a new link meta dict for adding,dummy data provided, remember to change it
-    """
-    meta = {"remote_as": 0,
-            "remote_ip": "",
-            "local_role": "",
-            "remote_role": "",
-            "local_ip": "",
-            "local_as": 0,
-            "interface_name": "",
-            "protocol_name": "",
-            "as4_session": True,
-            "is_interior": True,
-            "link_type": link_type,
-            "status": initial_status,
-            "initial_broadcast": False,
-            "app": app_name
-            }
-    return meta
+    def _run(self):
+        self.logger.debug("link manager started")
+        """
+        run in a separate thread, send msg in the send_buff
+        """
+        while True:
+            msg = self._send_buff.get()
+            # self.logger.debug(msg)
+            self.send_msg(msg)
+    def update_link_kv(self, link_name, k, v):
+        self.data["links"][link_name][k] = v

@@ -63,7 +63,7 @@ class EfpUrpfApp(SavApp):
         result = []
         for interface, data in RPF_dict.items():
             for prefix, as_number in data:
-                rule = sav_rule_tuple(prefix, interface, self.name, as_number)
+                rule = get_sav_rule(prefix, interface, self.name, as_number)
                 result.append(rule)
         return result
 
@@ -157,7 +157,7 @@ class EfpUrpfApp(SavApp):
                         break
                 if is_prefix_included:
                     for prefix in prefixes:
-                        rule = sav_rule_tuple(
+                        rule = get_sav_rule(
                             prefix, data["meta"]["interface_name"], self.name, origin_asn)
                         new_rules.add(rule)
         # self.logger.debug(f"EFP-A new_rules:{new_rules}")
@@ -205,7 +205,7 @@ class EfpUrpfApp(SavApp):
         new_rules = set()
         for interface in I:
             for prefix, origin_as in Z:
-                new_rules.add(sav_rule_tuple(
+                new_rules.add(get_sav_rule(
                     prefix, interface, self.name, origin_as))
         # self.logger.debug(f"EFP-B new_rules:{new_rules}")
         # new_rules = self._set_to_rules(I, Z)

@@ -7,9 +7,44 @@
 @Desc    :   The data_structure.py is responsible  project defined data structure and related conversions
 """
 import netaddr
+
+
+def int2hex(input_int, zfill_length=4):
+    temp = hex(input_int)[2:]
+    ret = []
+    if len(temp) % 2 == 1:
+        ret.append(int(temp[:1], 16))
+        temp = temp[1:]
+    while len(temp):
+        ret.append(int(temp[:2], 16))
+        temp = temp[2:]
+    while len(ret) < zfill_length:
+        ret.insert(0, 0)
+    return ret
+
+
+def hex2int(l):
+    """
+    convert hex list to int
+    """
+    ret = 0
+    for i in l:
+        ret = ret * 256 + i
+    return ret
+
+
+def prefix_len2len(prefix_len):
+    """
+    convert prefix len to prefix len field length
+    """
+    return int((prefix_len + 7) / 8)
+
 # AS
 
+
 BGP_UPDATE_DATA_MAX_LEN = 65516
+
+
 def is_asn(in_put):
     if isinstance(in_put, int):
         if in_put > 0 and in_put < 65535:
@@ -29,28 +64,37 @@ def keys_types_check(d, key_types):
             raise TypeError(f"{k} should be {t} but {type(d[k])} found")
 
 
-def asn2hex(asn, as_session=False):
-    """
-        convert asn to hex
-        :param asn: asn (str)
-        :return: hex value list (u8)
-    """
-    temp = hex(int(asn))[2:]
-    result = []
-    if len(temp) % 2 == 1:
-        result.append(str(int(temp[:1], 16)))
-        temp = temp[1:]
-    while len(temp):
-        result.append(str(int(temp[:2], 16)))
-        temp = temp[2:]
-    length = 2
-    if as_session:
-        length = 4
-    while len(result) < length:
-        result = ["0"] + result
-    return result
 # IP
+def hex2ip(data, ip_version):
+    if not ip_version in [4, 6]:
+        raise ValueError(
+            "ip_version should be 4 or 6,but get {}".format(ip_version))
+    if ip_version == 4:
+        full_len = 4
+    elif ip_version == 6:
+        full_len = 16
+    while len(data) < full_len:
+        data.append(0)
+    ip_value = hex2int(data)
+    return netaddr.IPAddress(ip_value)
 
+
+def ip2hex(ip):
+    if not isinstance(ip, netaddr.IPAddress):
+        raise TypeError(
+            "ip should be netaddr.IPAddress,but get {}".format(type(ip)))
+    match ip.version:
+        case 4:
+            base = ip.packed.hex()
+            base = [int(base[i:i+2], 16) for i in range(0, len(base), 2)]
+            return base
+        case 6:
+            base = ip.network.packed.hex()
+            base = [int(base[i:i+2], 16) for i in range(0, len(base), 2)]
+            return base
+        case _:
+            raise ValueError(
+                "ip_version should be 4 or 6,but get {}".format(ip.version))
 # prefix
 
 
@@ -76,20 +120,36 @@ def str2prefix(prefix):
         raise TypeError("prefix should be str,but get {}".format(type(prefix)))
     return netaddr.IPNetwork(prefix)
 
-def prefix_to_nlri(prefix,ip_type="ipv4"):
+
+def prefix2hex(prefix):
     """
-    convert prefix to nlri (csv str)
+    convert prefix to nlri (csv int)
     """
-    if ip_type == "ipv4":
-        prefix = str(prefix)
-        ip_address, prefix = prefix.split("/")
-        ip_address = ip_address.split(".")
-        items = [prefix]
-        items += ip_address[:int((int(prefix) + 7) / 8)]
-        return items
-    else:
-        raise NotImplementedError
-    
+    match prefix.version:
+        case 4:
+            ip_address = list(prefix.ip.words)
+            items = [prefix.prefixlen]
+            items += ip_address[:int((int(prefix.prefixlen) + 7) / 8)]
+            return items
+        case 6:
+            p_len = prefix.prefixlen
+            items = [p_len]
+            l = int((p_len+7)/8)
+            items.extend(prefix.ip.packed[:l])
+            return items
+        case _:
+            raise NotImplementedError
+
+
+def hex2prefix(nlri, ip_version):
+    if not ip_version in [4, 6]:
+        raise ValueError(
+            "ip_version should be 4 or 6,but get {}".format(ip_version))
+    prefix_len = nlri[0]
+    ip = hex2ip(nlri[1:], ip_version)
+    return netaddr.IPNetwork(ip.format()+"/"+str(prefix_len))
+
+
 def prefixes_to_hex_str(prefix_list, ip_type="ipv4"):
     """
         constructs NLRI prefix list
@@ -98,7 +158,7 @@ def prefixes_to_hex_str(prefix_list, ip_type="ipv4"):
     if ip_type == "ipv4":
         items = []
         for prefix in prefix_list:
-            items.extend(prefix_to_nlri(prefix,ip_type))
+            items.extend(prefix2hex(prefix))
         return ",".join(items)
     else:
         raise NotImplementedError
@@ -106,39 +166,21 @@ def prefixes_to_hex_str(prefix_list, ip_type="ipv4"):
 # Path
 
 
-def path2hex(asn_path, as4_session=False):
+def path2hex(asn_path, as4_session=True):
     """
         convert asn_path to hex
         :param asn_path: list of asn
         :return: hex value list (u8)
     """
     result = []
-    for path in list(map(lambda x: asn2hex(x, as4_session), asn_path)):
-        result += path
+    if as4_session:
+
+        for path in list(map(lambda x: int2hex(x, 4), asn_path)):
+            result += path
+    else:
+        for path in list(map(lambda x: int2hex(x, 2), asn_path)):
+            result += path
     return result
-
-
-# SPA
-def inter_spa2nlri_hex(msg):
-    """
-        convert inter-spa to nlri
-        :param msg: inter-spa message
-        :return: nlri in json
-    """
-    msg = {
-
-        "length": 0,  # length to the en
-    }
-
-
-def get_inter_spa(origin_as, prefixes):
-    msg = {
-        "type": 2,
-        "origin_as": origin_as,
-        "prefixes": prefixes,
-        "flag": 1
-    }
-    return msg
 
 
 def get_intra_spd_dict():
@@ -169,50 +211,62 @@ def get_intra_spd_nlri_dict():
     return nlri
 
 
-def get_intra_spa_dict():
-    """get a human readable intra-spa message"""
-    msg = {
-        "afi": 0,
-        "safi": 0,
-        "next_hoop_len": 0,
-        "reserved": 0,
-        "nlri_data": [],
-    }
-    return msg
-
-
-def get_intra_spa_nlri_hex(origin_router_id,prefix,flag,miig_type=0,miig_tag=0):
+# SPA
+def get_intra_spa_nlri_hex(origin_router_id, prefix, flag, miig_type=0, miig_tag=0):
     """
     get a intra-spa-nlri message in hex,
     length is calculated when converting to nlri
     flag: 0:source flag,1:destination flag
     """
-    
+
     nlri = [
-        1, # route type
-        origin_router_id # origin router id
+        1  # route type
     ]
-    nlri.extend(prefix_to_nlri(prefix)) # prefix
+    nlri.extend(int2hex(origin_router_id, 4))  # origin router id
+    nlri.extend(prefix2hex(prefix))  # prefix
     nlri.append(miig_type)
     nlri.append(flag)
-    nlri.append(miig_tag)
-    nlri.insert(1,1+1+4+len(nlri[2])+1+1+4)
+    nlri.extend(int2hex(miig_tag, 4))
+    nlri.insert(1, len(nlri)-1)
     return nlri
 
-def intra_spa2nlri_hex(nlri_dict):
-    """
-        convert intra-spa to nlri
-        :param msg: intra-spa message
-        :return: nlri in json
-    """
-    ret = [
-        nlri_dict["route_type"],
-        (nlri_dict["prefix"]),
-        nlri_dict
-        ]
-    ret.append
 
-# description of all msg used between functions,each key must have a description
+def read_spa_sav_nlri(data, ip_version=6):
+    result = []
+    cur_pos = 0
+    while cur_pos < len(data):
+
+        route_type = data[cur_pos]
+        cur_pos += 1
+        length = data[cur_pos]
+        cur_pos += 1
+        # router id is ipv4,len is 4
+        origin_router_id = hex2int(data[cur_pos:cur_pos+4])
+        cur_pos += 4
+        mask_len = prefix_len2len(data[cur_pos])
+        prefix_hex = data[cur_pos:cur_pos+mask_len+1]
+        cur_pos += mask_len+1
+        prefix = hex2prefix(prefix_hex, ip_version)
+        miig_type = data[cur_pos]
+        cur_pos += 1
+        flag = data[cur_pos]
+        cur_pos += 1
+        miig_tag = data[cur_pos:cur_pos+4]
+        cur_pos += 4
+        miig_tag = hex2int(miig_tag)
+        nlri = {
+            "route_type": route_type,
+            "origin_router_id": origin_router_id,
+            "prefix": prefix,
+            "miig_type": miig_type,
+            "flag": flag,
+            "miig_tag": miig_tag
+        }
+        result.append(nlri)
+    return result
+# SPD
+
+
 SAV_META = {
     "example": {
         "description": "bgp update message",
@@ -255,7 +309,7 @@ def check_send_buff_msg(msg):
 
 
 def init_direction_metric():
-    return {"count": 0, "time": 0.0, "size": 0,"wait_time": 0.0}
+    return {"count": 0, "time": 0.0, "size": 0, "wait_time": 0.0}
 
 
 def init_protocol_metric():
@@ -263,14 +317,8 @@ def init_protocol_metric():
             "send": init_direction_metric(),
             "start": None,
             "end": None}
-    
-def get_agent_to_bird_msg():
-    msg = {
-        "type":"",
-        "pkt_data":""
-        
-    }
-    
+
+
 def decode_csv(input_str):
     """
     return a list of strings
@@ -281,7 +329,8 @@ def decode_csv(input_str):
         return input_str.split(",")
 
     return [input_str]
-    
+
+
 def hex_str_to_prefixes(input_bytes, t="ipv4"):
     """
     reverse of prefixes_to_hex_str
@@ -303,3 +352,75 @@ def hex_str_to_prefixes(input_bytes, t="ipv4"):
         return result
     else:
         raise NotImplementedError
+
+# SAV Rule
+
+
+def get_sav_rule(prefix, interface_name, source_app, origin=-1, is_interior=True):
+    """
+    return a tuple of sav rule elements
+    if origin is not given, it will be set to -1
+    by default, the origin is the origin as number(is_interior=True)
+    otherwise, the origin is the origin router id(is_interior=False)
+    """
+    if not isinstance(prefix, netaddr.IPNetwork):
+        raise TypeError(
+            "prefix should be netaddr.IPNetwork,but get {}".format(type(prefix)))
+    result = {
+        "prefix": prefix,
+        "interface_name": interface_name,
+        "source_app": source_app,
+        "origin": origin,
+        "is_interior": is_interior
+    }
+    return result
+
+
+def get_key_from_sav_rule(r):
+    return f"{r['prefix']}_{r['origin']}_{r['interface_name']}"
+
+
+def get_agent_bird_msg(data, msg_type, source_app, timeout, store_rep):
+    "message from agent to bird"
+    msg = {
+        "data": data,
+        "msg_type": msg_type,
+        "source_app": source_app,
+        "timeout": timeout,
+        "store_rep": store_rep
+    }
+    return msg
+
+
+def get_bird_spa_data(adds, dels, protocol_name,channel, rpdp_version, next_hop, as_path, is_as4):
+    ret = {
+        "add": adds,
+        "add_len": len(adds),
+        "del": dels,
+        "del_len": len(dels),
+        "type": "spa",
+        "protocol_name": protocol_name,
+        "is_native_bgp": False,
+        "channel": channel,
+        "rpdp_version": rpdp_version,
+        "next_hop": next_hop,
+        "as_path": [2, len(as_path)] + path2hex(as_path, is_as4)
+        
+    }
+    ret["as_path_len"] = len(ret["as_path"])
+    return ret
+
+
+def get_bird_spd_data(protocol_name, channel, rpdp_version, sn, origin_id, opt_data, addresses):
+    return {
+        "type": "spd",
+        "protocol_name": protocol_name,
+        "is_native_bgp": False,
+        "channel": channel,
+        "rpdp_version": rpdp_version,
+        "SN": sn,
+        "origin_id": ip2hex(netaddr.IPAddress(origin_id)),
+        "opt_data_len": len(opt_data),
+        "opt_data": opt_data,
+        "addresses": addresses
+    }

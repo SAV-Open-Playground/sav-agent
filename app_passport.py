@@ -109,7 +109,7 @@ class PassportApp(SavApp):
         # for peer_asn,peer_data in self.initialized_peers.items():
         #     # result[peer_asn] = peer_data["ip"]
         #     result.append((peer_asn,peer_data["ip"]))
-        for _, data in self.agent.bird_man.get_all_link_meta().items():
+        for _, data in self.agent.link_man.get_all_link_meta().items():
             peer_as = data["remote_as"]
             peer_ip = data["remote_ip"]
             # if peer_as in result:

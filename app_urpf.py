@@ -47,10 +47,10 @@ class UrpfApp(SavApp):
         # self.logger.debug(adds)
         # self.logger.debug(dels)
         for prefix, row in adds.items():
-            add_rules.append(sav_rule_tuple(
+            add_rules.append(get_sav_rule(
                 prefix, row.get("Iface"), self.name))
         for prefix, row in adds.items():
-            del_rules.append(sav_rule_tuple(
+            del_rules.append(get_sav_rule(
                 prefix, row.get("Iface"), self.name))
         return add_rules, del_rules
 
@@ -61,7 +61,7 @@ class UrpfApp(SavApp):
         add_rules = []
         del_rules = []
         for prefix, row in adds.items():
-            add_rules.append(sav_rule_tuple(prefix, "*", self.name))
+            add_rules.append(get_sav_rule(prefix, "*", self.name))
         for prefix, row in adds.items():
-            del_rules.append(sav_rule_tuple(prefix, "*", self.name))
+            del_rules.append(get_sav_rule(prefix, "*", self.name))
         return add_rules, del_rules

@@ -432,7 +432,7 @@ class RPDPApp(SavApp):
         return json.dumps(msg)
 
     def _quic_msg_unbox(self, msg):
-        link_meta = self.agent.bird_man.get_link_meta_by_name(
+        link_meta = self.agent.link_man.get_link_by_name(
             msg["source_link"])
         msg["msg"]["interface_name"] = link_meta["interface_name"]
         msg["msg"]["as_path"] = msg["msg"]["sav_path"]
@@ -587,7 +587,7 @@ class RPDPApp(SavApp):
                     self.agent.put_out_msg(msg)
                     self.agent.bird_man.bird_cmd("call_agent")
                 case "grpc":
-                    link = self.agent.bird_man.get_link_by_name(using_link)
+                    link = self.agent.link_man.get_link_by_name(using_link)
                     self._send_grpc(msg["msg"],
                                     self.agent.config["router_id"],
                                     {"remote_addr": "10.0.0.1:5000",
@@ -595,7 +595,7 @@ class RPDPApp(SavApp):
                 case "quic":
                     msg["msg"]["sav_nlri"] = list(
                         map(netaddr.IPNetwork, msg["msg"]["sav_nlri"]))
-                    link = self.agent.bird_man.get_link_meta_by_name(
+                    link = self.agent.link_man.get_link_meta_by_name(
                         using_link)
                     self.send_msg(msg["msg"], self.agent.config, link)
                 case _:
@@ -669,7 +669,7 @@ class RPDPApp(SavApp):
         if msg["is_interior"]:
             as_path_code = "2"
             hex_str_msg["withdraws"] = "0,0"
-            hex_str_msg["sav_origin"] = ",".join(asn2hex(
+            hex_str_msg["sav_origin"] = ",".join(int2hex(
                 msg["sav_origin"], is_as4))
             if m_t == "origin":
                 # insert origin for sav
@@ -757,39 +757,39 @@ class RPDPApp(SavApp):
             self.logger.error(e)
             self.logger.error("construct msg error")
 
-    def recv_http_msg(self, msg):
-        adds = []
-        try:
-            m_t = msg["msg_type"]
-            if not m_t in ["bird_bgp_config", "bgp_update"]:
-                raise ValueError(f"unknown msg_type: {m_t} received via http")
-            if "rpdp" in msg["msg"]["channels"]:
-                link_type = "dsav"
-            else:
-                link_type = "native_bgp"
-            msg["source_app"] = self.name
-            msg["source_link"] = msg["msg"]["protocol_name"]
+    # def recv_http_msg(self, msg):
+    #     adds = []
+    #     try:
+    #         m_t = msg["msg_type"]
+    #         if not m_t in ["bird_bgp_config", "bgp_update"]:
+    #             raise ValueError(f"unknown msg_type: {m_t} received via http")
+    #         if "rpdp" in msg["msg"]["channels"]:
+    #             link_type = "dsav"
+    #         else:
+    #             link_type = "native_bgp"
+    #         msg["source_app"] = self.name
+    #         msg["source_link"] = msg["msg"]["protocol_name"]
 
-            if m_t == "bgp_update":
-                self.put_link_up(msg["source_link"], link_type)
-                msg["msg"] = self.preprocess_msg(msg["msg"])
-                # self.logger.debug("receive_http_msg")
-                adds = self.process_rpdp_msg(msg)
-            else:
-                self.logger.error(msg)
-                self.agent.put_msg(msg)
-        except Exception as e:
-            self.logger.exception(e)
-            self.logger.error(e)
-        return adds
+    #         if m_t == "bgp_update":
+    #             self.put_link_up(msg["source_link"], link_type)
+    #             msg["msg"] = self.preprocess_msg(msg["msg"])
+    #             # self.logger.debug("receive_http_msg")
+    #             adds = self.process_rpdp_msg(msg)
+    #         else:
+    #             self.logger.error(msg)
+    #             self.agent.put_msg(msg)
+    #     except Exception as e:
+    #         self.logger.exception(e)
+    #         self.logger.error(e)
+    #     return adds
 
     def process_grpc_msg(self, msg):
         # self.logger.debug(msg)
-        link_meta = self.agent.bird_man.get_link_meta_by_name(
+        link_meta = self.agent.link_man.get_link_by_name(
             msg["source_link"])
         while link_meta is None:
             self.logger.debug(f"link_meta is None, updating protos")
-            link_meta = self.agent.bird_man.get_link_meta_by_name(
+            link_meta = self.agent.link_man.get_link_by_name(
                 msg["source_link"])
 
         msg["msg"]["interface_name"] = link_meta["interface_name"]
@@ -839,7 +839,7 @@ class RPDPApp(SavApp):
             self.agent.add_sav_link(new_path[i], new_path[i+1])
         # self.agent._log_info_for_front(msg=None, log_type="sav_graph")
         relay_scope = {}
-        intra_links = self.agent.bird_man.get_up_intra_links()
+        intra_links = self.agent.link_man.get_up_intra_links()
         # if we receive a inter-domain msg via inter-domain link
         # self.logger.debug(msg["sav_scope"])
         if link_meta["is_interior"]:
@@ -856,7 +856,7 @@ class RPDPApp(SavApp):
                     # self.agent._log_info_for_front(msg, "terminate")
                     # AS_PATH:{msg['sav_path']} at AS {m['local_as']}")
                     for link_name in intra_links:
-                        link = self.agent.bird_man.get_link_by_name(link_name)
+                        link = self.agent.link_man.get_link_by_name(link_name)
                         relay_msg["sav_path"] = msg["sav_path"]
                         relay_msg["sav_scope"] = scope_data
                         # self.logger.debug(scope_data)
@@ -924,60 +924,54 @@ class RPDPApp(SavApp):
                     self.logger.debug(
                         f"unable to find interior link for as: {next_as}, no SAV ?")
 
-    def process_rpdp_msg(self, input_msg):
+    def process_rpdp_msg(self, msg):
         """
         process rpdp message, only inter-domain is supported
-        regarding the nlri part, the processing is the same
+        regarding the nlri part, the processing procedure is the same
         """
-        t0 = time.time()
-        key_types = [("msg", dict), ("source_link", str),
-                     ("source_app", str), ("link_type", str)]
-        keys_types_check(input_msg, key_types)
-        link_name = input_msg["source_link"]
-        link_meta = self.agent.bird_man.get_link_meta_by_name(link_name)
-        msg = input_msg["msg"]
-        # self.logger.debug(list(msg.keys()))
-        # 'neighbor_as', 'interface_name', 'interface_index', 'protocol_name', 'as_path', 'sav_origin', 'sav_scope', 'sav_nlri', 'channels', 'is_native_bgp', 'add_routes', 'del_routes'
-        # key_types = [("src", str), ("dst", str),
-        #              ("msg_type", str), ("is_interior", bool),
-        #              ("as4_session", bool), ("protocol_name",str),
-        #              ("is_native_bgp", bool), ("sav_origin", str),
-        #              ("sav_scope", list), ("sav_path", list),
-        #              ("sav_nlri", list), ("dummy_link", str),
-        #              ("interface_name", str), ("as_path", list)]
-        # keys_types_check(msg, key_types)
-        msg["is_interior"] = tell_str_is_interior(msg["sav_origin"])
-        prefixes = msg["sav_nlri"]
-        adds = []
-        for prefix in prefixes:
-            if isinstance(prefix, str):
-                prefix = netaddr.IPNetwork(prefix)
-            if prefix.is_private():
-                continue
-            adds.append({"prefix": str(prefix),
-                         "neighbor_as": link_meta["remote_as"],
-                         "interface": msg["interface_name"],
-                         "source_app": self.name,
-                         "source_link": link_name,
-                         "local_role": link_meta["local_role"]
-                         })
-        # self.agent.ip_man.add(adds)
-        # TODO delete is not supported for now
-        self.agent.update_sav_table(adds,[])
+        # t0 = time.time()
+        # self.logger.debug(msg["msg"])
+        result = []
+        temp = msg["msg"]
+        for i in [temp["spa_add"], temp["spa_del"]
+                #   ,temp["spd_add"],temp["spd_del"]
+                  ]:
+            result.append(list(map(lambda x: 
+            get_sav_rule(x["prefix"], 
+                           msg["source_link"], 
+                           self.name, 
+                           x["origin_router_id"],
+                           False), 
+            read_spa_sav_nlri(i))))
+        rule_adds,rule_dels = result            
         
-        if msg["is_interior"]:
-            # in inter-domain, sav_path is as_path
-            if not input_msg["msg_type"] == "grpc_msg":
-                msg["sav_path"] = msg["as_path"]
-                del msg["as_path"]
-                temp = []
-                for path in msg["sav_scope"]:
-                    temp.append(list(map(int, path)))
-                msg["sav_scope"] = temp
-            self.process_rpdp_inter(msg, link_meta)
+        self.agent.update_sav_table(rule_adds,rule_dels)
+        return rule_adds
+    def _spd_sn_check(self,sn,link_name):
+        """
+        return True if we need to process this message
+        """
+        link_meta = self.agent.link_man.get_by_name(link_name)
+        if not "spd_sn" in link_meta:
+            self.agent.link_man.update_link_kv(link_name,"spd_sn",sn)
+            return True
+        if sn==0:
+            self.agent.link_man.update_link_kv(link_name,"spd_sn",sn)
+            return True
+        if link_meta["spd_sn"] <= sn:
+            self.agent.link_man.update_link_kv(link_name,"spd_sn",sn)
+            return True
         else:
-            self.logger.error("INTRA MSG RECEIVED")
-            self._process_sav_intra(msg, link_meta)
-        t = time.time()-t0
-        self._add_metric(input_msg, t0, t, input_msg["link_type"], "recv")
-        return adds
+            self.logger.info(f"spd sn check failed, processed sn {link_meta['spd_sn']}, received sn {sn},ignore")
+            return False
+        
+    def process_rpdp_route_refresh(self,msg):
+        """
+        process rpdp route refresh message, only inter-domain is supported
+        SPD
+        """
+        if not self._spd_sn_check(msg["msg"]["SN"],msg["source_link"]):
+            return
+        temp = msg["msg"]
+        
+        self.logger.debug(temp)

@@ -22,7 +22,8 @@ import timeit
 
 from sav_data_structure import *
 
-
+def subprocess_run(command):
+    return subprocess.run(command, shell=True, capture_output=True, encoding='utf-8')
 class RPDPPeer():
     def __init__(self, asn, port, ip, is_as4) -> None:
         self.asn = asn
@@ -123,18 +124,6 @@ def rule_list_diff(old_rules, new_rules):
         if item not in new_rules:
             dels_.append(item)
     return adds_, dels_
-
-
-
-
-
-def sav_rule_tuple(prefix, interface_name, rule_source, as_number=-1):
-    """
-    return a tuple of sav rule elements
-    """
-    if not isinstance(prefix, str):
-        prefix = str(prefix)
-    return (prefix, interface_name, rule_source, as_number)
 
 def subproc_run(cmd, shell=True, capture_output=True, encoding='utf-8'):
     return subprocess.run(cmd, shell=shell, capture_output=capture_output, encoding=encoding)
@@ -417,25 +406,27 @@ def birdc_get_protos_by(logger, key, value):
     return result
 
 
-def parse_kernel_fib():
+def parse_kernel_fib(ip_version):
     """
     parsing the output of "route -n -F" command
     """
-    v4_table = run_cmd("route -n -F")
-    v6_table = run_cmd("route -6 -n -F")
-    v4_v6 = []
-    for table in [v4_table, v6_table]:
-        while "  " in table:
-            table = table.replace("  ", " ")
+    match ip_version:
+        case 4:
+            table = run_cmd("route -n -F")
+        case 6:
+            table = run_cmd("route -6 -n -F")
+        case _:
+            raise ValueError("invalid ip version")
+    while "  " in table:
+        table = table.replace("  ", " ")
         table = table.split("\n")
         table.pop()  # removing tailing empty line
         _ = table.pop(0)
         table = list(map(lambda x: x.split(" "), table))
         headings = table.pop(0)
         table = list(map(lambda x: dict(zip(headings, x)), table))
-        v4_v6.extend(table)
     ret = {}
-    for row in v4_v6:
+    for row in table:
         if 'Genmask' in row:
             prefix = netaddr.IPNetwork(row["Destination"]+"/"+row["Genmask"])
         else:
