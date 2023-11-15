@@ -19,11 +19,15 @@ import subprocess
 import copy
 import requests
 import timeit
+import netifaces
 
 from sav_data_structure import *
 
+
 def subprocess_run(command):
     return subprocess.run(command, shell=True, capture_output=True, encoding='utf-8')
+
+
 class RPDPPeer():
     def __init__(self, asn, port, ip, is_as4) -> None:
         self.asn = asn
@@ -125,13 +129,38 @@ def rule_list_diff(old_rules, new_rules):
             dels_.append(item)
     return adds_, dels_
 
+
+def rule_dict_diff(old_rules, new_rules):
+    """
+    return adds and dels for the given dicts
+    remember to del first and then add (updates)
+    """
+    adds = {}
+    dels = set()
+    for key in new_rules:
+        if key not in old_rules:
+            adds[key] = new_rules[key]
+        else:
+            if new_rules[key] != old_rules[key]:
+                adds[key] = new_rules[key]
+                dels.add(key)
+    for key in old_rules:
+        if key not in new_rules:
+            dels.add(key)
+    return adds, dels
+
+
 def subproc_run(cmd, shell=True, capture_output=True, encoding='utf-8'):
     return subprocess.run(cmd, shell=shell, capture_output=capture_output, encoding=encoding)
+
+
 def run_cmd(command):
-    ret = subproc_run(command, shell=True, capture_output=True, encoding='utf-8')
+    ret = subproc_run(command, shell=True,
+                      capture_output=True, encoding='utf-8')
     if ret.returncode != 0:
         print(ret)
     return ret.stdout
+
 
 def get_host_interface_list():
     """
@@ -142,6 +171,16 @@ def get_host_interface_list():
     result = std_out.split("\n")[:-1]
     result = list(map(lambda x: x.split('@')[0], result))
     return [i for i in result if len(i) != 0]
+
+
+def get_next_hop(target_ip):
+    """
+    find next hop for the given ip using ip route get
+    """
+    hex_hop = run_cmd(f"ip route get {target_ip}").split(" ")
+    for i in range(len(hex_hop)):
+        if hex_hop[i] == "via":
+            return netaddr.IPAddress(hex_hop[i+1])
 
 
 def get_logger(file_name):
@@ -235,6 +274,24 @@ def scope_to_hex_str(scope, is_inter, is_as4=True):
     return ",".join(temp)
 
 
+def get_ifa_by_ip(ip):
+    """
+    return interface name by ip,
+    using cmds
+    """
+    for ifa in get_host_interface_list():
+        if ip.version == 6:
+            temp = netifaces.ifaddresses(ifa).get(netifaces.AF_INET6, [])
+        elif ip.version == 4:
+            temp = netifaces.ifaddresses(ifa).get(netifaces.AF_INET, [])
+        else:
+            raise ValueError(ip)
+        for link in temp:
+            if link["addr"] == str(ip):
+                return ifa
+    raise ValueError(f"unable to get interface for {ip}")
+
+
 def read_json(path_to_json):
     with open(path_to_json, "r", encoding="utf-8") as json_file:
         return json.loads(json_file.read())
@@ -315,12 +372,6 @@ class SavApp():
 
     def _parse_roa_table(self, t_name='r4'):
         return get_roa(self.logger, t_name)
-
-
-
-
-
-
 
 
 def birdc_cmd(logger, cmd, log_err=True):
@@ -574,8 +625,6 @@ def get_agent_app_msg(link_meta, msg_meta, logger):
                 "interior msg should have interior scope")
 
 
-
-
 def str_to_scope(input_str):
     temp = decode_csv(input_str)
     result = []
@@ -630,33 +679,7 @@ def aspa_check(meta, aspa_info):
             return adj_provider_as in data["providers"]
     return False
 
-# def check_agent_agent_msg(msg):
-#     """
-#     message structure between agent and agent,
-#     there are two types :'origin' and 'relay'
-#     """
-#     # self.as4_session = link_meta["as4_session"]
-#     # self.protocol_name = link_meta["protocol_name"]
-#     # check src dst
-#     # raise an error if the given msg is not a valid agent to agent message
-#     origin_key = "sav_origin"
-#     path_key = "sav_path"
-#     key_types = [("src",str),("dst",str),("msg_type",str),("sav_scope",list),
-#                  ("sav_nlri",list),(origin_key,str),(path_key,list),("is_interior",bool)]
-#     keys_types_check(msg,key_types)
-#     if not msg["msg_type"] in ['origin','relay']:
-#         raise ValueError(f"mst_type should be ether 'origin' or 'relay'")
 
-#     for path in msg[path_key]:
-#         if not tell_str_is_interior(path):
-#             raise ValueError(f"{path_key} should contain path value")
-
-
-#     if msg["is_interior"]:
-#         if not tell_str_is_interior(msg[origin_key]):
-#             raise ValueError(
-#                 "interior msg should have interior path and origin")
-#     return True
 TIMEIT_THRESHOLD = 0.5
 
 

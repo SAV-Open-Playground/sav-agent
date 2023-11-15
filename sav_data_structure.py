@@ -89,7 +89,7 @@ def ip2hex(ip):
             base = [int(base[i:i+2], 16) for i in range(0, len(base), 2)]
             return base
         case 6:
-            base = ip.network.packed.hex()
+            base = ip.packed.hex()
             base = [int(base[i:i+2], 16) for i in range(0, len(base), 2)]
             return base
         case _:
@@ -163,6 +163,59 @@ def prefixes_to_hex_str(prefix_list, ip_type="ipv4"):
     else:
         raise NotImplementedError
 
+
+def prefixes2addresses(prefix_list):
+    """
+    for spd msg
+    """
+    ret = []
+    for p in prefix_list:
+        ret.extend(prefix2hex(p))
+    return ret
+
+
+def addresses2prefixes(addresses, ip_version):
+    """
+    for spd msg
+    """
+    ret = []
+    while len(addresses) > 0:
+        prefix_len = addresses.pop(0)
+        prefix_len2 = int((prefix_len+7)/8)
+        prefix_hex = addresses[:prefix_len2]
+        addresses = addresses[prefix_len2:]
+        prefix_hex.insert(0, prefix_len)
+        ret.append(hex2prefix(prefix_hex, ip_version))
+    return ret
+
+
+def ips2addresses(ip_list):
+    """
+    for spd msg
+    """
+    ret = []
+    for ip in ip_list:
+        ret.extend(ip2hex(ip))
+    return ret
+
+
+def addresses2ips(addresses, ip_version):
+    """
+    for spd msg
+    """
+    ret = []
+    if ip_version == 4:
+        while len(addresses) > 0:
+            ret.append(hex2ip(addresses[:4], ip_version))
+            addresses = addresses[4:]
+    elif ip_version == 6:
+        while len(addresses) > 0:
+            ret.append(hex2ip(addresses[:16], ip_version))
+            addresses = addresses[16:]
+    else:
+        raise ValueError(
+            "ip_version should be 4 or 6,but get {}".format(ip_version))
+    return ret
 # Path
 
 
@@ -241,7 +294,7 @@ def read_spa_sav_nlri(data, ip_version=6):
         length = data[cur_pos]
         cur_pos += 1
         # router id is ipv4,len is 4
-        origin_router_id = hex2int(data[cur_pos:cur_pos+4])
+        origin_router_id = netaddr.IPAddress(hex2int(data[cur_pos:cur_pos+4]))
         cur_pos += 4
         mask_len = prefix_len2len(data[cur_pos])
         prefix_hex = data[cur_pos:cur_pos+mask_len+1]
@@ -392,7 +445,7 @@ def get_agent_bird_msg(data, msg_type, source_app, timeout, store_rep):
     return msg
 
 
-def get_bird_spa_data(adds, dels, protocol_name,channel, rpdp_version, next_hop, as_path, is_as4):
+def get_bird_spa_data(adds, dels, protocol_name, channel, rpdp_version, next_hop, as_path, is_as4):
     ret = {
         "add": adds,
         "add_len": len(adds),
@@ -405,13 +458,14 @@ def get_bird_spa_data(adds, dels, protocol_name,channel, rpdp_version, next_hop,
         "rpdp_version": rpdp_version,
         "next_hop": next_hop,
         "as_path": [2, len(as_path)] + path2hex(as_path, is_as4)
-        
+
     }
     ret["as_path_len"] = len(ret["as_path"])
     return ret
 
 
 def get_bird_spd_data(protocol_name, channel, rpdp_version, sn, origin_id, opt_data, addresses):
+    addresses = ips2addresses(addresses)
     return {
         "type": "spd",
         "protocol_name": protocol_name,
@@ -424,3 +478,17 @@ def get_bird_spd_data(protocol_name, channel, rpdp_version, sn, origin_id, opt_d
         "opt_data": opt_data,
         "addresses": addresses
     }
+
+
+test_ips_v6 = ["2001:db8::1", "2001:db8::2", "2001:db8::3"]
+test_ips_v6 = [netaddr.IPAddress(i) for i in test_ips_v6]
+print(test_ips_v6)
+print(ips2addresses(test_ips_v6))
+print(addresses2ips(ips2addresses(test_ips_v6), 6))
+# test_prefix_v6 = netaddr.IPNetwork("2001:db8::/32")
+# test_prefix_v4 = netaddr.IPNetwork("10.0.1/16")
+# test_prefix_v6_hex = prefix2hex(test_prefix_v6)
+# print(prefix2hex(test_prefix_v6))
+# test = addresses2prefixes(test_prefix_v6_hex, 6)[0]
+# print(test)
+# print(test_prefix_v6)

@@ -443,17 +443,7 @@ class BirdCMDManager():
                 if all_good:
                     break
             time.sleep(0.1)
-        return new_,check_time
-
-    def get_link_by_name(self, name):
-        """all links must startswith savbgp"""
-        if not name.startswith("savbgp"):
-            raise ValueError(f"invalid name: {name}")
-        if not name in self.protos["links"]:
-            raise ValueError(f"link {name} not found")
-        return self.protos["links"].get(name)
-
-
+        return new_, check_time
 
     def parse_link_meta(self, proto_data):
         """
@@ -467,8 +457,8 @@ class BirdCMDManager():
                 "remote_as": int(t["Neighbor AS"]),
                 "local_role": t["Local capabilities"]["Role"],
                 "local_as": int(t["Local AS"]),
-                "local_ip": t["Source address"],
-                "remote_ip": t["Neighbor address"].split("%")[0],
+                "local_ip": netaddr.IPAddress(t["Source address"]),
+                "remote_ip": netaddr.IPAddress(t["Neighbor address"].split("%")[0]),
                 "status": proto_data["State"] == "up",
                 "initial_broadcast": False,
                 "as4_session": "4-octet AS numbers" in t["Local capabilities"],
@@ -486,7 +476,6 @@ class BirdCMDManager():
             # self.logger.exception(e)
             return None
 
-
     def get_by_remote_as_is_inter(self, remote_as, is_interior):
         result = []
         for link_name, data in self.protos["links"].items():
@@ -499,8 +488,6 @@ class BirdCMDManager():
                     meta["is_interior"] == is_interior):
                 result.append(meta)
         return result
-
-
 
     def get_up_inter_links(self):
         result = {}
@@ -565,7 +552,6 @@ class BirdCMDManager():
             # self.logger.debug(json.dumps({key1: raw_input[key1]}, indent=2))
         return raw_input
 
-
     def _parse_protocols(self, raw_input):
         lines = raw_input.split("\n")
         headings = lines.pop(0).split()
@@ -599,9 +585,6 @@ class BirdCMDManager():
         self.logger.debug("updating fib")
         self.bird_fib["check_time"] = time.time()
         default, local, remote = self._parse_bird_fib(log_err, ip_version)
-        self.logger.debug(default)
-        self.logger.debug(local)
-        self.logger.debug(remote)
         something_updated = False
         local_adds, local_dels = self._diff_fib(
             self.bird_fib["local_route"], local)
@@ -674,6 +657,19 @@ class BirdCMDManager():
         del table
         return temp
 
+    def _pars_remote_prefix_data(self, prefix_data):
+        interface = None
+        remote_ip = None
+        for k in prefix_data:
+            if k.startswith("via "):
+                temp = k.split()
+                interface = temp[-1]
+                remote_ip = temp[1]
+                break
+        prefix_data["interface"] = interface
+        prefix_data["remote_ip"] = netaddr.IPAddress(remote_ip)
+        return prefix_data
+
     def _parse_bird_fib(self, log_err, ip_version):
         """
         using birdc show all to get bird fib,
@@ -687,6 +683,7 @@ class BirdCMDManager():
         while "" in data:
             data.remove("")
         result = {}
+        # self.logger.debug(data)
         for table in data:
             table_name, table_data = self._parse_bird_table(table, ip_version)
             result[table_name] = table_data
@@ -699,6 +696,7 @@ class BirdCMDManager():
             self.logger.warning(
                 "no master4 table. Is BIRD ready?")
             return {}
+        # self.logger.debug(temp_ret)
         temp_ret = self.pre_process_table(temp_ret)
         default = {}
         local = {}
@@ -713,14 +711,7 @@ class BirdCMDManager():
                 elif not is_remote:
                     local[prefix] = data
                 elif is_remote:
-                    if not "interface" in data:
-                        interface = None
-                        for k in data:
-                            if k.startswith("via "):
-                                if interface is None:
-                                    interface= k.split()[-1]
-                    remote[prefix] = data
-                    remote[prefix]["interface"] = interface
+                    remote[prefix] = self._pars_remote_prefix_data(data)
                 else:
                     self.logger.error(prefix)
                     self.logger.error(json.dumps(data, indent=2))
@@ -729,9 +720,9 @@ class BirdCMDManager():
         t = time.time() - t0
         if t > TIMEIT_THRESHOLD:
             self.logger.warning(f"TIMEIT {time.time()-t0:.4f} seconds")
-        # self.logger.debug(remote)
-        # self.logger.debug(local)
-        # self.logger.debug(default)
+        self.logger.debug(remote)
+        self.logger.debug(local)
+        self.logger.debug(default)
         return default, local, remote
 
     def _parse_bird_table(self, table, ip_version):
@@ -763,7 +754,11 @@ class BirdCMDManager():
             prefix = row.pop(0)
             # if "blackhole" in prefix:
             #     continue
-            prefix = prefix.split(" ")[0]
+            while "  " in prefix:
+                prefix = prefix.replace("  ", " ")
+
+            prefix_temp = prefix.split(" ")
+            prefix = prefix_temp[0]
             if len(prefix) < 9:
                 self.logger.error(f"incorrect prefix len: {row}")
             # self.logger.debug(prefix)
@@ -777,7 +772,7 @@ class BirdCMDManager():
             #     # self.logger.debug(f"private prefix {prefix} ignored")
             #     continue
             #
-            temp = {}
+            temp = {"meta": " ".join(prefix_temp[1:])}
             for line in row:
                 if line.startswith("\t") and (":" in line):
                     line = line.strip()
@@ -785,7 +780,12 @@ class BirdCMDManager():
                     k = line[0]
                     v = ":".join(line[1:])
                     # self.logger.debug(f"[{k}]:[{v}]")
-                    temp[k] = v
+                    if k in temp:
+                        if not isinstance(temp[k], list):
+                            temp[k] = [temp[k]]
+                        temp[k].append(v)
+                    else:
+                        temp[k] = v
                     if k == "BGP.as_path":
                         # self.logger.debug(f"v:{v}")
                         if not "as_path" in temp:
@@ -936,6 +936,27 @@ class LinkManager(InfoManager):
             raise ValueError(f"link {name} not found")
         return self.data["links"][name]
 
+    def get_by_interface(self, interface):
+        for name, data in self.data["links"].items():
+            self.logger.debug(data)
+            if data["interface_name"] == interface:
+                return data
+        raise ValueError(f"interface {interface} not found")
+
+    def get_by_remote_ip(self, remote_ip):
+        for name, data in self.data["links"].items():
+            if data["remote_ip"] == remote_ip:
+                return data
+        self.logger.debug(self.data["links"])
+        raise ValueError(f"remote_ip {remote_ip} not found")
+
+    def get_by_local_ip(self, local_ip):
+        for name, data in self.data["links"].items():
+            if data["local_ip"] == local_ip:
+                return data
+        self.logger.debug(self.data["links"])
+        raise ValueError(f"local_ip {local_ip} not found")
+
     def update_config(self, config):
         self.config = config
 
@@ -964,7 +985,8 @@ class LinkManager(InfoManager):
         self._send_buff.put(msg)
         self._job_id += 1
         # do not remove this line, will trigger the shoot
-        self.logger.debug(f"send_trigger{self._send_buff.qsize()}")
+        self.logger.info(
+            f"send_trigger PLEASE IGNORE: {self._send_buff.qsize()}")
 
     def put_send_sync(self, msg):
         """
@@ -1016,13 +1038,13 @@ class LinkManager(InfoManager):
                         temp[proto_name]["remote_role"] = "provider"
             elif l.startswith("neighbor"):
                 l = l.split(" ")
-                temp[proto_name]["remote_ip"] = l[1]
+                temp[proto_name]["remote_ip"] = netaddr.IPAddress(l[1])
                 temp[proto_name]["remote_as"] = int(l[-1][:-1])
                 is_inter = temp[proto_name]["remote_as"] != my_asn
                 temp[proto_name]["is_interior"] = is_inter
             elif l.startswith("source address"):
                 l = l.split(" ")
-                temp[proto_name]["local_ip"] = l[-1][:-1]
+                temp[proto_name]["local_ip"] = netaddr.IPAddress(l[-1][:-1])
             elif l.startswith("interface"):
                 temp[proto_name]["interface_name"] = l.split("\"")[1]
         self.data["check_time"] = time.time()
@@ -1205,5 +1227,6 @@ class LinkManager(InfoManager):
             msg = self._send_buff.get()
             # self.logger.debug(msg)
             self.send_msg(msg)
+
     def update_link_kv(self, link_name, k, v):
         self.data["links"][link_name][k] = v

@@ -90,7 +90,7 @@ class SavAgent():
                 config = read_json(path_to_config)
                 required_keys = [
                     ("apps", list), ("grpc_config", dict), ("location", str),
-                    ("quic_config", dict), ("link_map", dict), ("router_id", str), ("local_as", int)]
+                    ("quic_config", dict), ("link_map", dict), ("local_as", int)]
                 keys_types_check(config, required_keys)
 
                 grpc_config = config["grpc_config"]
@@ -151,6 +151,7 @@ class SavAgent():
                                    "check_time": time.time()}
         self.data["fib_for_apps"] = {}
         self.data["initial_bgp_stable"] = False
+        self.data["spd_sn"] = {}
 
     def add_sav_nodes(self, nodes):
         data = self.data["sav_graph"]["nodes"]
@@ -369,12 +370,13 @@ class SavAgent():
         decide whether to send initial broadcast of each link
         """
         rpdp_links = self.link_man.get_all_link_meta()
+
         for link_name, link in rpdp_links.items():
             if link["initial_broadcast"]:
                 continue
             if self._send_init_broadcast_on_link(link_name):
                 self.logger.info(
-                    f"initial broadcast sent on {link_name} ")
+                    f"initial spa sent on {link_name} ")
                 self.link_man.update_link_kv(
                     link_name, "initial_broadcast", True)
 
@@ -422,7 +424,7 @@ class SavAgent():
         if self.rpdp_app is None:
             self.logger.warning("rpdp_app missing,unable to send origin")
             return False
-                    
+
         local_prefixes = self.bird_man.get_local_fib()
         for p in local_prefixes:
             if p in self.config["prefixes"]:
@@ -430,13 +432,8 @@ class SavAgent():
             else:
                 local_prefixes[p]["miig_type"] = 1
                 local_prefixes[p]["miig_tag"] = 1
-        spa_sent = self._send_spa_origin(local_prefixes,link_name)
-        remote_prefixes= self.bird_man.get_remote_fib()
-        self.logger.debug(f"remote_prefixes:{remote_prefixes}")
-        spd_sent = self._send_spd_origin(remote_prefixes,link_name)
-        self.logger.debug(spa_sent)
-        self.logger.debug(spd_sent)
-        return spa_sent and spd_sent
+        spa_sent = self._send_spa_origin(local_prefixes, link_name)
+        return spa_sent
 
     def _process_link_state_change(self, msg):
         """
@@ -507,8 +504,7 @@ class SavAgent():
             self.config["ip_version"], sib_man=self.sib_man)
         self._notify_apps(adds, dels, reset)
         self.logger.debug(f"_notify_apps finished")
-        
-        
+
     def reset(self):
         self._process_native_bgp_update(True)
 
@@ -552,7 +548,7 @@ class SavAgent():
                     up_link_names = self.link_man.get_all_up_type(True).keys()
                     # TODO currently we only apply to bgp interfaces
                     for link_name in up_link_names:
-                        link_dict = self.link_man.get_link_by_name(
+                        link_dict = self.link_man.get_by_name(
                             link_name)
                         row["local_role"] = link_dict["local_role"]
                         add_rules.append(row)
@@ -576,11 +572,12 @@ class SavAgent():
         self.update_sav_table(add_rules, del_rules)
         # self.ip_man.add(add_rules)
 
-        return 
+        return
 
     def update_sav_table(self, adds, dels):
         """
         update sav table, and notify apps
+        adds and dels are list of sav rules
         """
         cur_t = time.time()
         new_table = copy.deepcopy(self.data["sav_table"])
@@ -618,6 +615,58 @@ class SavAgent():
                 self.logger.info(f"SAV RULE REFRESHED:{r}")
         self.data["sav_table"] = new_table
 
+    def update_sav_table2(self,add_dict,del_set,source_app):
+        cur_t = time.time()
+        new_table = copy.deepcopy(self.data["sav_table"][source_app])
+        for str_key in del_set:
+            if not str_key in new_table:
+                self.logger.error(
+                    f"key missing in sav_table (old):{str_key} in {new_table.keys()}")
+            else:
+                del new_table[r["source_app"]][str_key]
+                self.logger.info(f"SAV RULE DELETED:{r}")
+        for r in adds:
+            # self.logger.debug(r)
+            if not r["source_app"] in new_table:
+                new_table[r["source_app"]] = {}
+            str_key = get_key_from_sav_rule(r)
+            # self.logger.debug(str_key)
+            if not str_key in new_table[r["source_app"]]:
+                r["create_time"] = cur_t
+                r["update_time"] = cur_t
+                new_table[r["source_app"]][str_key] = r
+                self.logger.info(f"SAV RULE ADDED:{r}")
+            else:
+                old_value = new_table[r["source_app"]][str_key]
+                r["create_time"] = old_value['create_time']
+                r["update_time"] = old_value['update_time']
+                if not r == old_value:
+                    self.logger.error(
+                        f"conflict in sav_table (old):{old_value}")
+                    self.logger.error(f"conflict in sav_table (new):{r}")
+                r["update_time"] = cur_t
+                new_table[r["source_app"]][str_key] = r
+                self.logger.info(f"SAV RULE REFRESHED:{r}")
+        self.data["sav_table"] = new_table
+        
+    def get_sav_rules_by_app(self, app_name,is_interior=None):
+        """
+        return all sav rules for given app
+        if is_interior is None, return all rules
+        if is_interior is True, return all interior rules
+        if is_interior is False, return all exterior rules
+        """
+
+        if not app_name in self.data["sav_table"]:
+            raise KeyError(f"app_name {app_name} not in sav_table")
+        all_rules = self.data["sav_table"][app_name]
+        if is_interior is None:
+            return all_rules
+        if is_interior:
+            return filter(lambda x: x["is_interior"] == True, all_rules)
+        else:
+            return filter(lambda x: x["is_interior"] == False, all_rules)
+    
     def _find_links_for_origin(self, input_link_name):
         inter_links = []
         intra_links = []
@@ -634,7 +683,7 @@ class SavAgent():
                 else:
                     intra_links.append((link_name, meta))
         else:
-            meta = self.link_man.get_link_by_name(input_link_name)
+            meta = self.link_man.get_by_name(input_link_name)
             if meta["is_interior"]:
                 inter_links.append((input_link_name, meta))
             else:
@@ -656,9 +705,14 @@ class SavAgent():
             for path in input_paths:
                 for prefix in path:
                     path_data = list(map(str, path[prefix]))
-                    # transfrom the data first
+                    # transform the data first
+                    # self.logger.debug(",".join(path_data))
+                    path_str = ",".join(path_data)
+                    if len(path_str) == 0:
+                        self.logger.warning(
+                            f"empty path for prefix [{prefix}], not sending")
+                        continue
                     if tell_str_is_interior(",".join(path_data)):
-                        # self.logger.debug(f"{path}")
                         inter_paths.append(path)
                     else:
                         intra_paths.append(path)
@@ -679,7 +733,7 @@ class SavAgent():
 
         return inter_paths, intra_paths
 
-    def _send_spa_origin(self, prefixes,input_link_name=None):
+    def _send_spa_origin(self, prefixes, input_link_name=None):
         """
         send spa origin msg
         """
@@ -692,52 +746,44 @@ class SavAgent():
                 0,  # flag
                 data["miig_type"],
                 data["miig_tag"],))
-        spa_del = [] # when broadcasting, we don't delete any prefix
+        spa_del = []  # when broadcasting, we don't delete any prefix
         if input_link_name is None:
             links_to_send = self.link_man.get_all_link_meta().keys()
         else:
             links_to_send = [input_link_name]
         for link_name in links_to_send:
             next_hop = self.link_man.get_by_name(
-                link_name)["remote_ip"].split(" ")[0]
-            next_hop = netaddr.IPAddress(next_hop)
-            next_hop = [6] + list(next_hop.packed)
+                link_name)["remote_ip"]
+            ip_verson = next_hop.version
+            next_hop = [ip_verson] + list(next_hop.packed)
             next_hop = [len(next_hop)] + next_hop
             link = self.link_man.get_by_name(link_name)
             as_path = [self.config["local_as"]]
-            data = get_bird_spa_data(spa_add,spa_del
-                                     ,link_name,
+            data = get_bird_spa_data(spa_add, spa_del, link_name,
                                      f"rpdp{self.config['ip_version']}",
-                                     6,next_hop,as_path,
+                                     ip_verson, next_hop, as_path,
                                      link["as4_session"])
-            msg = get_agent_bird_msg(data,"dsav",self.rpdp_app.name,0,False)
+            msg = get_agent_bird_msg(
+                data, "dsav", self.rpdp_app.name, 0, False)
             self.link_man.put_send_async(msg)
-            self.link_man.update_link_kv(link_name, "initial_broadcast",True)
+            self.link_man.update_link_kv(link_name, "initial_broadcast", True)
         return True
 
-    def _send_spd_origin(self,remote_prefixes,input_link_name=None):
-        if len(remote_prefixes) == 0:
-            self.logger.debug("no remote prefixes, not sending")
-            return True
-        if input_link_name is None:
-            links_to_send = self.link_man.get_all_link_meta().keys()
-        else:
-            links_to_send = [input_link_name]
-        # self.logger.debug(links_to_send)
-        addresses = []
-        for p in remote_prefixes:
-            addresses.extend(prefix2hex(p))
-        self.logger.debug(addresses)
-        for link_name in links_to_send:
-            data = get_bird_spd_data(link_name,False,
-                                     6,0,self.config["router_id"],
-                                     [],addresses)
-            self.logger.debug(data)
-            msg = get_agent_bird_msg(data,"dsav",self.rpdp_app.name,0,False)
-            self.link_man.put_send_async(msg)
-            self.link_man.update_link_kv(link_name, "initial_broadcast",True)
-        return True
-            
+    def _build_addresses_for_spd(self, remote_prefixes, links):
+        ret = {}
+        for link_name in links:
+            ret[links[link_name]['remote_ip']] = []
+        for prefix, prefix_data in remote_prefixes.items():
+            if not prefix_data["remote_ip"] in ret:
+                self.logger.error(
+                    f"remote_ip {prefix_data['remote_ip']} not in links")
+                continue
+            self.logger.debug(f"{prefix}:{prefix_data}")
+            ret[prefix_data["remote_ip"]].append(prefix)
+        for k in ret:
+            ret[k] = prefixes2addresses(ret[k])
+        return ret
+
     def _send_origin(self, input_link_name=None, input_paths=None):
         """
         send origin messages,
@@ -790,7 +836,7 @@ class SavAgent():
                         # self.logger.debug(msg)
                         self.send_msg_to_agent(msg, link)
                         self.logger.debug(f"sent origin via intra{msg}")
-        #             # TODO intra origin
+                        # TODO intra origin
             t = time.time()-func_start
             if t > TIMEIT_THRESHOLD:
                 self.logger.debug(f"TIMEIT {t:.4f} seconds")
@@ -819,7 +865,7 @@ class SavAgent():
             case "bgp_update":
                 self._process_native_bgp_update()
             case "rpdp_update":
-                self.rpdp_app.process_rpdp_msg(input_msg)
+                self.rpdp_app.process_rpdp_spa_msg(input_msg)
             case "rpdp_route_refresh":
                 self.rpdp_app.process_rpdp_route_refresh(input_msg)
             case "grpc_msg":
@@ -895,10 +941,76 @@ class SavAgent():
                     metric["total"] += v
             self.logger.debug(f"latest SAV RULE NUMS: {metric['total']}")
 
+    def _send_spd(self):
+        if self.rpdp_app is None:
+            self.logger.debug("rpdp_app missing,unable to send spd")
+            return False
+        all_metas = self.link_man.get_all_link_meta()
+        for proto_name, link_meta in all_metas.items():
+            if link_meta["initial_broadcast"] == False:
+                self.logger.debug(f"{proto_name} not ready for spd, skipping")
+                return False
+        remote_prefixes = self.bird_man.get_remote_fib()
+        if len(remote_prefixes) == 0:
+            self.logger.debug("no remote prefixes, not sending")
+            return True
+        # find target ips for spd by each link
+        remote_ips = []
+        for _, data in self.config["as_scope"].items():
+            if data["router_id"] == self.config["router_id"]:
+                continue
+            remote_ips.append(netaddr.IPAddress(data["ips"][-1]))
+        # self.logger.debug("remote_ips:{}".format(remote_ips))
+        temp = {}
+        for target_ip in remote_ips:
+            next_hop = get_next_hop(target_ip)
+            if next_hop is None:
+                # directly connected
+                next_hop = target_ip
+            if not next_hop in temp:
+                temp[next_hop] = []
+            temp[next_hop].append(target_ip)
+        # self.logger.debug("temp:{}".format(temp))
+        for next_hop_ip, addresses in temp.items():
+            # self.logger.debug(
+            # f"next_hop_ip:{next_hop_ip},addresses:{addresses}")
+            link_meta = self.link_man.get_by_remote_ip(next_hop_ip)
+    #         self.logger.debug(f"link_meta:{link_meta}")
+            proto_name = link_meta["protocol_name"]
+            ip_version = link_meta["remote_ip"].version
+            if not proto_name in self.data["spd_sn"]:
+                self.data["spd_sn"][proto_name] = 0
+            sn = self.data["spd_sn"][proto_name]
+            data = get_bird_spd_data(proto_name, False,
+                                     ip_version, sn, self.config["router_id"],
+                                     [], addresses)
+            timeout = 0
+            msg = get_agent_bird_msg(
+                data, "dsav", self.rpdp_app.name, timeout, False)
+            # self.logger.debug(msg)
+            self.link_man.put_send_async(msg)
+            self.data["spd_sn"][proto_name] += 1
+            if self.data["spd_sn"][proto_name] > 4294967295:  # max int for IPV4
+                self.data["spd_sn"][proto_name] = 0
+        return True
+
+    def _send_spd_loop(self, default_interval=5):
+
+        while True:
+            # we check if spa init is sent on all links
+            try:
+                time_span = self.config["spd_send_interval"]
+            except:
+                time_span = default_interval
+            self._send_spd()
+            time.sleep(time_span)
+
     def _start(self):
         self._thread_pool = []
         self._thread_pool.append(threading.Thread(target=self._run))
         self._thread_pool.append(threading.Thread(target=self.link_man._run))
+        self._thread_pool.append(threading.Thread(
+            target=self._send_spd_loop))
         for t in self._thread_pool:
             t.daemon = True
             t.start()

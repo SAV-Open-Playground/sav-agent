@@ -16,6 +16,7 @@ import hmac
 
 from sav_common import *
 
+
 class PassportApp(SavApp):
     """
     SAV-APP Passport Implementation
@@ -38,11 +39,13 @@ class PassportApp(SavApp):
         self.test_pkt_id = 0
         self._init_metric()
         self.relay_history = {}
+
     def _init_metric(self):
         self.metric = {
             "key_exchange": init_protocol_metric(),
             "pkt": init_protocol_metric(),
         }
+
     def get_public_key_dict(self, source_ip=""):
         return {"asn": self.asn, "router_id": self.router_id,
                 "public_key": self.public_key}
@@ -111,7 +114,7 @@ class PassportApp(SavApp):
         #     result.append((peer_asn,peer_data["ip"]))
         for _, data in self.agent.link_man.get_all_link_meta().items():
             peer_as = data["remote_as"]
-            peer_ip = data["remote_ip"]
+            peer_ip = str(data["remote_ip"])
             # if peer_as in result:
             #     if not peer_ip == result[peer_as]:
             #         pass
@@ -171,7 +174,7 @@ class PassportApp(SavApp):
             if [peer_asn, peer_ip] in msg["path"]:
                 continue
             relay_scope[peer_asn] = peer_ip
-        
+
         msg["path"].append([self.asn, self.router_id])
         for peer_asn, peer_ip in relay_scope.items():
             if not peer_asn in self.relay_history:
@@ -258,8 +261,10 @@ class PassportApp(SavApp):
         mac = self.calculate_mac(
             data_for_mac, self.initialized_peers[pkt["src_asn"]]["shared_key"])
         return mac == pkt["mac"]
+
     def reset_metric(self):
         self._init_metric()
+
     def rec_pkt(self, msg):
         pkt = msg["msg"]
         if not self.check_mac(pkt):
