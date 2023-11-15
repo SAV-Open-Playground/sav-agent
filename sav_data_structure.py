@@ -7,7 +7,7 @@
 @Desc    :   The data_structure.py is responsible  project defined data structure and related conversions
 """
 import netaddr
-
+import time
 
 def int2hex(input_int, zfill_length=4):
     temp = hex(input_int)[2:]
@@ -317,8 +317,6 @@ def read_spa_sav_nlri(data, ip_version=6):
         }
         result.append(nlri)
     return result
-# SPD
-
 
 SAV_META = {
     "example": {
@@ -344,21 +342,6 @@ def check_send_buff_msg(msg):
                  ("argv", dict), ("msg", _)]
     keys_types_check(msg, key_types)
     keys_types_check(msg["argv"], ("retry_forever", bool), ("response", bool))
-
-    # def is_in_buff_msg(msg):
-    # pass
-    # # if not isinstance(msg, dict):
-    #     return False
-    # if "type" not in msg:
-    #     return False
-    # if msg["type"] not in SAV_META:
-    #     return False
-    # if "key_types" not in SAV_META[msg["type"]]:
-    #     return False
-    # for key in SAV_META[msg["type"]]["key_types"]:
-    #     if key not in msg:
-    #         return False
-    # return True
 
 
 def init_direction_metric():
@@ -406,7 +389,7 @@ def hex_str_to_prefixes(input_bytes, t="ipv4"):
     else:
         raise NotImplementedError
 
-# SAV Rule
+# SAV Rule & Table
 
 
 def get_sav_rule(prefix, interface_name, source_app, origin=-1, is_interior=True):
@@ -431,6 +414,29 @@ def get_sav_rule(prefix, interface_name, source_app, origin=-1, is_interior=True
 
 def get_key_from_sav_rule(r):
     return f"{r['prefix']}_{r['origin']}_{r['interface_name']}"
+
+
+def rule_dict_diff(old_rules, new_rules):
+    """
+    return adds and dels for the given dicts
+    remember to del first and then add (updates)
+    """
+    adds = {}
+    dels = set()
+    for key in new_rules:
+        if key not in old_rules:
+            adds[key] = new_rules[key]
+        else:
+            new_rules[key]["create_time"] = old_rules[key]["create_time"]
+            new_rules[key]["update_time"] = old_rules[key]["update_time"]
+            if new_rules[key] != old_rules[key]:
+                adds[key] = new_rules[key]
+                new_rules[key]["update_time"] = time.time()
+                dels.add(key)
+    for key in old_rules:
+        if key not in new_rules:
+            dels.add(key)
+    return adds, dels
 
 
 def get_agent_bird_msg(data, msg_type, source_app, timeout, store_rep):
@@ -478,17 +484,3 @@ def get_bird_spd_data(protocol_name, channel, rpdp_version, sn, origin_id, opt_d
         "opt_data": opt_data,
         "addresses": addresses
     }
-
-
-test_ips_v6 = ["2001:db8::1", "2001:db8::2", "2001:db8::3"]
-test_ips_v6 = [netaddr.IPAddress(i) for i in test_ips_v6]
-print(test_ips_v6)
-print(ips2addresses(test_ips_v6))
-print(addresses2ips(ips2addresses(test_ips_v6), 6))
-# test_prefix_v6 = netaddr.IPNetwork("2001:db8::/32")
-# test_prefix_v4 = netaddr.IPNetwork("10.0.1/16")
-# test_prefix_v6_hex = prefix2hex(test_prefix_v6)
-# print(prefix2hex(test_prefix_v6))
-# test = addresses2prefixes(test_prefix_v6_hex, 6)[0]
-# print(test)
-# print(test_prefix_v6)

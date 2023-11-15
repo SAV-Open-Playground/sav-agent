@@ -10,7 +10,7 @@
 
 import json
 import os
-import time
+
 import logging
 import logging.handlers
 import netaddr
@@ -130,24 +130,7 @@ def rule_list_diff(old_rules, new_rules):
     return adds_, dels_
 
 
-def rule_dict_diff(old_rules, new_rules):
-    """
-    return adds and dels for the given dicts
-    remember to del first and then add (updates)
-    """
-    adds = {}
-    dels = set()
-    for key in new_rules:
-        if key not in old_rules:
-            adds[key] = new_rules[key]
-        else:
-            if new_rules[key] != old_rules[key]:
-                adds[key] = new_rules[key]
-                dels.add(key)
-    for key in old_rules:
-        if key not in new_rules:
-            dels.add(key)
-    return adds, dels
+
 
 
 def subproc_run(cmd, shell=True, capture_output=True, encoding='utf-8'):

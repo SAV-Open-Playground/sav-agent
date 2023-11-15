@@ -615,58 +615,61 @@ class SavAgent():
                 self.logger.info(f"SAV RULE REFRESHED:{r}")
         self.data["sav_table"] = new_table
 
-    def update_sav_table2(self,add_dict,del_set,source_app):
+    def update_sav_table_by_app_name(self, add_dict, del_set, source_app):
+        """
+
+        """
         cur_t = time.time()
+        if not source_app in self.data["sav_table"]:
+            new_table = {}
         new_table = copy.deepcopy(self.data["sav_table"][source_app])
         for str_key in del_set:
             if not str_key in new_table:
                 self.logger.error(
                     f"key missing in sav_table (old):{str_key} in {new_table.keys()}")
             else:
-                del new_table[r["source_app"]][str_key]
+                r = new_table[str_key]
+                del new_table[str_key]
                 self.logger.info(f"SAV RULE DELETED:{r}")
-        for r in adds:
-            # self.logger.debug(r)
-            if not r["source_app"] in new_table:
-                new_table[r["source_app"]] = {}
-            str_key = get_key_from_sav_rule(r)
-            # self.logger.debug(str_key)
-            if not str_key in new_table[r["source_app"]]:
+        for str_key, r in add_dict.items():
+            if not str_key in new_table:
                 r["create_time"] = cur_t
                 r["update_time"] = cur_t
-                new_table[r["source_app"]][str_key] = r
+                new_table[str_key] = r
                 self.logger.info(f"SAV RULE ADDED:{r}")
             else:
-                old_value = new_table[r["source_app"]][str_key]
-                r["create_time"] = old_value['create_time']
-                r["update_time"] = old_value['update_time']
-                if not r == old_value:
+                old_r = new_table[str_key]
+                r["create_time"] = old_r['create_time']
+                r["update_time"] = old_r['update_time']
+                if r == old_r:
                     self.logger.error(
-                        f"conflict in sav_table (old):{old_value}")
+                        f"conflict in sav_table (old):{old_r}")
                     self.logger.error(f"conflict in sav_table (new):{r}")
-                r["update_time"] = cur_t
-                new_table[r["source_app"]][str_key] = r
+                else:
+                    r["update_time"] = cur_t
+                new_table[str_key] = r
                 self.logger.info(f"SAV RULE REFRESHED:{r}")
-        self.data["sav_table"] = new_table
-        
-    def get_sav_rules_by_app(self, app_name,is_interior=None):
+        self.data["sav_table"][source_app] = new_table
+
+    def get_sav_rules_by_app(self, app_name, is_interior=None):
         """
         return all sav rules for given app
         if is_interior is None, return all rules
         if is_interior is True, return all interior rules
         if is_interior is False, return all exterior rules
         """
-
         if not app_name in self.data["sav_table"]:
-            raise KeyError(f"app_name {app_name} not in sav_table")
+            self.data["sav_table"][app_name] = {}
+            return {}
         all_rules = self.data["sav_table"][app_name]
         if is_interior is None:
             return all_rules
-        if is_interior:
-            return filter(lambda x: x["is_interior"] == True, all_rules)
-        else:
-            return filter(lambda x: x["is_interior"] == False, all_rules)
-    
+        temp = {}
+        for k, v in all_rules.items():
+            if v["is_interior"] == is_interior:
+                temp[k] = v
+        return temp
+
     def _find_links_for_origin(self, input_link_name):
         inter_links = []
         intra_links = []
@@ -994,23 +997,40 @@ class SavAgent():
                 self.data["spd_sn"][proto_name] = 0
         return True
 
-    def _send_spd_loop(self, default_interval=5):
-
+    def _interval_trigger(self):
+        """
+        run forever,
+        trigger event here
+        """
+        check_interval = 1
+        t0 = time.time()
+        data = {
+            "last_trigger": t0,
+            "events": {
+                "spd": {"last_trigger": t0, "interval": 5}
+                }
+        }
         while True:
             # we check if spa init is sent on all links
-            try:
-                time_span = self.config["spd_send_interval"]
-            except:
-                time_span = default_interval
-            self._send_spd()
-            time.sleep(time_span)
+            cur_t = time.time()
+            if cur_t - data["last_trigger"] > check_interval:
+                try:
+                    for event in data["events"]:
+                        cur_t = time.time()
+                        if cur_t - data["events"][event]["last_trigger"] > data["events"][event]["interval"]:
+                            data["events"][event]["last_trigger"] = cur_t
+                            if event == "spd":
+                                self._send_spd()
+                except Exception as e:
+                    self.logger.debug(e)
+            time.sleep(check_interval)
 
     def _start(self):
         self._thread_pool = []
         self._thread_pool.append(threading.Thread(target=self._run))
         self._thread_pool.append(threading.Thread(target=self.link_man._run))
         self._thread_pool.append(threading.Thread(
-            target=self._send_spd_loop))
+            target=self._interval_trigger))
         for t in self._thread_pool:
             t.daemon = True
             t.start()

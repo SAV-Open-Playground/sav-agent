@@ -947,14 +947,14 @@ class LinkManager(InfoManager):
         for name, data in self.data["links"].items():
             if data["remote_ip"] == remote_ip:
                 return data
-        self.logger.debug(self.data["links"])
+        # self.logger.debug(self.data["links"])
         raise ValueError(f"remote_ip {remote_ip} not found")
 
     def get_by_local_ip(self, local_ip):
         for name, data in self.data["links"].items():
             if data["local_ip"] == local_ip:
                 return data
-        self.logger.debug(self.data["links"])
+        # self.logger.debug(self.data["links"])
         raise ValueError(f"local_ip {local_ip} not found")
 
     def update_config(self, config):

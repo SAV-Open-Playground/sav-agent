@@ -973,8 +973,6 @@ class RPDPApp(SavApp):
                 self.logger.warning("key error")
 
         self._refresh_sav_rules()
-        # self.agent.update_sav_table(rule_adds, rule_dels)
-        # return rule_adds
 
     def _spd_sn_check(self, sn, link_name):
         """
@@ -1027,6 +1025,10 @@ class RPDPApp(SavApp):
         self._refresh_sav_rules()
 
     def _refresh_sav_rules(self):
+        """
+        based on current spd and spa data, generate new sav rules
+        and update the sav table in agent
+        """
         # TODO INTER
 
         is_inter = False
@@ -1047,19 +1049,9 @@ class RPDPApp(SavApp):
                 for prefix, prefix_data in prefixes_data.items():
                     rule = get_sav_rule(
                         prefix, get_ifa_by_ip(local_ip), self.name, router_id, is_inter)
-                    self.logger.debug(rule)
                     rule_key = get_key_from_sav_rule(rule)
                     if rule_key in new_intra_rules:
                         raise KeyError("sav rule key conflict")
                     new_intra_rules[rule_key] = rule
         add_dict, del_set = rule_dict_diff(old_intra_rules, new_intra_rules)
-        self.logger.debug(add_dict)
-        self.logger.debug(del_set)
-
-        #     result.append(list(map(lambda x:
-        #                            get_sav_rule(x["prefix"],
-        #                                         msg["source_link"],
-        #                                         self.name,
-        #                                         x["origin_router_id"],
-        #                                         False),
-        #                            read_spa_sav_nlri(i))))
+        self.agent.update_sav_table_by_app_name(add_dict, del_set, self.name)
