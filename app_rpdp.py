@@ -1024,6 +1024,69 @@ class RPDPApp(SavApp):
         data[origin_router_id].add(proto_name)
         self._refresh_sav_rules()
 
+    def _send_spa_init_on_link(self, link_name):
+        # self.logger.debug(f"sending initial broadcast on link {link_name}")
+
+        local_prefixes = self.agent.bird_man.get_local_fib()
+        for p in local_prefixes:
+            if p in self.config["prefixes"]:
+                local_prefixes[p] = self.config["prefixes"][p]
+            else:
+                local_prefixes[p]["miig_type"] = 1
+                local_prefixes[p]["miig_tag"] = 1
+        spa_sent = self._send_spa_origin(local_prefixes, link_name)
+        return spa_sent
+
+    def _send_spa_origin(self, prefixes, input_link_name=None):
+        """
+        send spa origin msg
+        """
+        # send to all neighbors
+        spa_add = []
+        for p, data in prefixes.items():
+            spa_add.extend(get_intra_spa_nlri_hex(
+                netaddr.IPAddress(self.agent.config["router_id"]).value,
+                p,
+                0,  # flag
+                data["miig_type"],
+                data["miig_tag"],))
+        spa_del = []  # when broadcasting, we don't delete any prefix
+        if input_link_name is None:
+            links_to_send = self.link_man.get_all_link_meta().keys()
+        else:
+            links_to_send = [input_link_name]
+        for link_name in links_to_send:
+            next_hop = self.link_man.get_by_name(
+                link_name)["remote_ip"]
+            ip_verson = next_hop.version
+            next_hop = [ip_verson] + list(next_hop.packed)
+            next_hop = [len(next_hop)] + next_hop
+            link = self.link_man.get_by_name(link_name)
+            as_path = [self.config["local_as"]]
+            data = get_bird_spa_data(spa_add, spa_del, link_name,
+                                     f"rpdp{self.config['ip_version']}",
+                                     ip_verson, next_hop, as_path,
+                                     link["as4_session"])
+            msg = get_agent_bird_msg(
+                data, "dsav", self.rpdp_app.name, 0, False)
+            self.link_man.put_send_async(msg)
+            self.link_man.update_link_kv(link_name, "initial_broadcast", True)
+        return True
+
+    def send_spa_init(self):
+        """
+        decide whether to send initial broadcast of each link
+        """
+        rpdp_links = self.agent.link_man.get_all_link_meta()
+        for link_name, link in rpdp_links.items():
+            if link["initial_broadcast"]:
+                continue
+            if self._send_spa_init_on_link(link_name):
+                self.logger.info(
+                    f"initial spa sent on {link_name} ")
+                self.agent.link_man.update_link_kv(
+                    link_name, "initial_broadcast", True)
+
     def _refresh_sav_rules(self):
         """
         based on current spd and spa data, generate new sav rules
@@ -1034,7 +1097,7 @@ class RPDPApp(SavApp):
         is_inter = False
         spa_data = self.spa_data["intra"]
         spd_data = self.spd_data["intra"]
-        old_intra_rules = self.agent.get_sav_rules_by_app(self.name,False)
+        old_intra_rules = self.agent.get_sav_rules_by_app(self.name, False)
         new_intra_rules = {}
         # TODO add logic for different policy, here we use the simplest one
         for router_id, prefixes_data in spa_data.items():

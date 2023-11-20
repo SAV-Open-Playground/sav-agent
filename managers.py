@@ -10,8 +10,8 @@ import subprocess
 import json
 import queue
 
-from model import db
-from model import SavInformationBase, SavTable
+# from model import db
+# from model import SavInformationBase, SavTable
 from sav_common import *
 
 KEY_WORD = "SAVAGENT"
@@ -578,7 +578,7 @@ class BirdCMDManager():
                 result[p] = d
         return result
 
-    def update_fib(self, ip_version, log_err=True, insert_db=False, sib_man=None):
+    def update_fib(self, ip_version, log_err=True):
         """
         return adds, dels of bird fib
         """
@@ -711,7 +711,7 @@ class BirdCMDManager():
                 elif not is_remote:
                     local[prefix] = data
                 elif is_remote:
-                    remote[prefix] = self._pars_remote_prefix_data(data)
+                    remote[prefix] = self._parse_remote_prefix_data(data)
                 else:
                     self.logger.error(prefix)
                     self.logger.error(json.dumps(data, indent=2))
@@ -812,64 +812,64 @@ class BirdCMDManager():
         return table_name, parsed_rows
 
 
-class SIBManager():
-    """
-    manage the STB with SQLite and Flask-SQLAlchemy
-    generate iptables rules and apply them
-    this table stores the key and value of a dictionary object, both key and value must be string
-    """
+# class SIBManager():
+#     """
+#     manage the STB with SQLite and Flask-SQLAlchemy
+#     generate iptables rules and apply them
+#     this table stores the key and value of a dictionary object, both key and value must be string
+#     """
 
-    def __init__(self, logger):
+#     def __init__(self, logger):
 
-        self.logger = logger
+#         self.logger = logger
 
-    def upsert(self, key, value):
-        """
-        add or update a key-value pair in db, both key and value must in string format.
-        """
-        if not (isinstance(key, str) and isinstance(value, str)):
-            raise TypeError("key and value must be string")
-        if len(key) > 255 or len(key) < 1:
-            raise ValueError(
-                "key length must be less than 255 and value length must be greater than 0")
-        session = db.session
-        row = session.query(SavInformationBase).filter(
-            SavInformationBase.key == key).first()
-        if row:
-            session.delete(row)
-        new_row = SavInformationBase(key=key, value=value)
-        session.add(new_row)
-        session.commit()
-        session.close()
-        v = json.loads(value)
-        msg = f"SIB UPDATED: {key}:"
-        if isinstance(v, list):
-            for i in v:
-                msg += f"\n{i}"
-        elif isinstance(v, dict):
-            msg += f"\n{json.dumps(v, indent=4)}"
-        else:
-            msg += f"{v}"
-            # self.logger.debug(type(v))
-        # self.logger.debug(f"SIB UPDATED: {msg}")
+#     def upsert(self, key, value):
+#         """
+#         add or update a key-value pair in db, both key and value must in string format.
+#         """
+#         if not (isinstance(key, str) and isinstance(value, str)):
+#             raise TypeError("key and value must be string")
+#         if len(key) > 255 or len(key) < 1:
+#             raise ValueError(
+#                 "key length must be less than 255 and value length must be greater than 0")
+#         session = db.session
+#         row = session.query(SavInformationBase).filter(
+#             SavInformationBase.key == key).first()
+#         if row:
+#             session.delete(row)
+#         new_row = SavInformationBase(key=key, value=value)
+#         session.add(new_row)
+#         session.commit()
+#         session.close()
+#         v = json.loads(value)
+#         msg = f"SIB UPDATED: {key}:"
+#         if isinstance(v, list):
+#             for i in v:
+#                 msg += f"\n{i}"
+#         elif isinstance(v, dict):
+#             msg += f"\n{json.dumps(v, indent=4)}"
+#         else:
+#             msg += f"{v}"
+#             # self.logger.debug(type(v))
+#         # self.logger.debug(f"SIB UPDATED: {msg}")
 
-    def delete(self, key):
-        session = db.session
-        row = session.query(SavInformationBase).filter(
-            SavInformationBase.key == key).first()
-        session.delete(row)
-        session.commit()
-        session.close()
-        return {"code": "0000", "message": "success"}
+#     def delete(self, key):
+#         session = db.session
+#         row = session.query(SavInformationBase).filter(
+#             SavInformationBase.key == key).first()
+#         session.delete(row)
+#         session.commit()
+#         session.close()
+#         return {"code": "0000", "message": "success"}
 
-    def read_all(self):
-        session = db.session
-        sib_tables = session.query(SavInformationBase).all()
-        data = []
-        for row in sib_tables:
-            data.append({row.key: row.value})
-        session.close()
-        return data
+#     def read_all(self):
+#         session = db.session
+#         sib_tables = session.query(SavInformationBase).all()
+#         data = []
+#         for row in sib_tables:
+#             data.append({row.key: row.value})
+#         session.close()
+#         return data
 
 
 class InfoManager():
@@ -913,7 +913,7 @@ class LinkManager(InfoManager):
     """
     LinkManager manage the link status and preprocessing the msg from the link
     link_name is key MUST be unique
-    the link_name should be generated using get_link_name() function
+    the link_name should be generated using _get_link_name() function
     the bird command function is also here
     """
     # TODO: we have three types of link: native bgp, modified bgp and grpc
@@ -1136,6 +1136,7 @@ class LinkManager(InfoManager):
         self.logger.debug(f"link added: {link_name}")
 
     def _get_link_name(self, meta_dict):
+        self.logger.debug(meta_dict)
         return meta_dict["protocol_name"]
 
     def update_link(self, meta_dict):

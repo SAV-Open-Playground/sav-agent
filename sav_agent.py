@@ -67,10 +67,10 @@ class SavAgent():
         self._init_data()
         self._in_msgs = queue.Queue()
         self._init_apps()
-        self.sib_man = SIBManager(logger=self.logger)
+        # self.sib_man = SIBManager(logger=self.logger)
         self.ip_man = IPTableManager(self.logger, self.data["active_app"])
         # self.sib_man.upsert("config", json.dumps(self.config))
-        self.sib_man.upsert("active_app", json.dumps(self.data["active_app"]))
+        # self.sib_man.upsert("active_app", json.dumps(self.data["active_app"]))
         self.bird_man = BirdCMDManager(logger=self.logger)
         self._start()
         # self.grpc_server = None
@@ -242,6 +242,8 @@ class SavAgent():
         return new_fib, adds, dels
         """
         new_ = parse_kernel_fib(self.config["ip_version"])
+        if len(new_) == 0:
+            self.logger.error("kernel fib empty")
         t0 = time.time()
         old_ = self.data["kernel_fib"]["data"]
         self.data["kernel_fib"]["check_time"] = t0
@@ -253,7 +255,7 @@ class SavAgent():
         for prefix in old_:
             if new_.get(prefix, None) != old_[prefix]:
                 dels[prefix] = old_[prefix]
-        if len(adds) + len(dels) > 0:
+        if len(adds) + len(dels) > 0 or len(new_) == 0:
             self.data["kernel_fib"]["update_time"] = t0
             self.data["kernel_fib"]["data"] = new_
         return self.data["kernel_fib"]["data"], adds, dels
@@ -264,7 +266,6 @@ class SavAgent():
         """
         if self.data["initial_bgp_stable"]:
             return
-        # self.logger.debug(self.bird_man.bird_fib)
         self._refresh_kernel_fib()
         if time.time() - self.data["kernel_fib"]["update_time"] > stable_span:
             self.logger.debug(
@@ -355,7 +356,6 @@ class SavAgent():
                     self.logger.exception(err)
                     self.logger.error(
                         f"error when processing: [{err}]:{msg}")
-                self._send_init()
                 while self.link_man._send_buff.qsize() > 0:
                     msg = self.link_man._send_buff.get()
                     self.link_man.send_msg(msg)
@@ -500,8 +500,7 @@ class SavAgent():
 
         if len(adds) == 0 and len(dels) == 0:
             return
-        self.bird_man.update_fib(
-            self.config["ip_version"], sib_man=self.sib_man)
+        self.bird_man.update_fib(self.config["ip_version"])
         self._notify_apps(adds, dels, reset)
         self.logger.debug(f"_notify_apps finished")
 
@@ -1007,23 +1006,37 @@ class SavAgent():
         data = {
             "last_trigger": t0,
             "events": {
-                "spd": {"last_trigger": t0, "interval": 5}
-                }
+                "spd": {"last_trigger": t0, "interval": 5},
+                "spa_init": {"last_trigger": t0, "interval": 5}
+            }
         }
         while True:
             # we check if spa init is sent on all links
             cur_t = time.time()
             if cur_t - data["last_trigger"] > check_interval:
-                try:
-                    for event in data["events"]:
-                        cur_t = time.time()
-                        if cur_t - data["events"][event]["last_trigger"] > data["events"][event]["interval"]:
-                            data["events"][event]["last_trigger"] = cur_t
-                            if event == "spd":
-                                self._send_spd()
-                except Exception as e:
-                    self.logger.debug(e)
-            time.sleep(check_interval)
+                for event in data["events"]:
+                    cur_t = time.time()
+                    if cur_t - data["events"][event]["last_trigger"] > data["events"][event]["interval"]:
+                        data["events"][event]["last_trigger"] = cur_t
+                        if event == "spd":
+                            if self.rpdp_app is None:
+                                self.logger.debug(
+                                    "rpdp_app missing,unable to send spd")
+                                continue
+                            self._send_spd()
+                        elif event == "spa_init":
+                            if self.rpdp_app is None:
+                                self.logger.debug(
+                                    "rpdp_app missing,unable to send spa_init")
+                                continue
+                            self.rpdp_app.send_spa_init()
+                        else:
+                            self.logger.warning(
+                                f"unknown event:{event}, skipping")
+
+            # else:
+
+            time.sleep(0.5)
 
     def _start(self):
         self._thread_pool = []
