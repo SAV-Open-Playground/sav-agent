@@ -284,37 +284,41 @@ def get_intra_spa_nlri_hex(origin_router_id, prefix, flag, miig_type=0, miig_tag
     return nlri
 
 
-def read_spa_sav_nlri(data, ip_version=6):
+def read_spa_sav_nlri(data, ip_version):
     result = []
     cur_pos = 0
     while cur_pos < len(data):
-
+        print(data)
+        print(data[:cur_pos])
+        nlri = {}
         route_type = data[cur_pos]
+        nlri["route_type"] = route_type
         cur_pos += 1
         length = data[cur_pos]
         cur_pos += 1
         # router id is ipv4,len is 4
         origin_router_id = netaddr.IPAddress(hex2int(data[cur_pos:cur_pos+4]))
+        nlri["origin_router_id"] = origin_router_id
+        # print(nlri)
         cur_pos += 4
+        # input(data[cur_pos])
         mask_len = prefix_len2len(data[cur_pos])
+        # input(mask_len)
         prefix_hex = data[cur_pos:cur_pos+mask_len+1]
         cur_pos += mask_len+1
+        # input(prefix_hex)
         prefix = hex2prefix(prefix_hex, ip_version)
+        nlri["prefix"] = prefix
         miig_type = data[cur_pos]
+        nlri["miig_type"] = miig_type
         cur_pos += 1
         flag = data[cur_pos]
+        nlri["flag"] = flag
         cur_pos += 1
         miig_tag = data[cur_pos:cur_pos+4]
         cur_pos += 4
         miig_tag = hex2int(miig_tag)
-        nlri = {
-            "route_type": route_type,
-            "origin_router_id": origin_router_id,
-            "prefix": prefix,
-            "miig_type": miig_type,
-            "flag": flag,
-            "miig_tag": miig_tag
-        }
+        nlri["miig_tag"] = miig_tag
         result.append(nlri)
     return result
 
@@ -484,3 +488,13 @@ def get_bird_spd_data(protocol_name, channel, rpdp_version, sn, origin_id, opt_d
         "opt_data": opt_data,
         "addresses": addresses
     }
+
+
+def test_prefix2hex():
+    test_p = netaddr.IPNetwork("1.1.1.0/24")
+    a = prefix2hex(test_p)
+    assert test_p == hex2prefix(a, 4)
+
+
+# print(read_spa_sav_nlri([1, 14, 192, 168, 3, 1, 24, 192, 168, 2, 1, 0, 0, 0,
+#       0, 1, 1, 14, 192, 168, 3, 1, 24, 192, 168, 3, 1, 0, 0, 0, 0, 1], 4))

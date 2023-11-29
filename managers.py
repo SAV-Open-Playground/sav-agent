@@ -9,9 +9,8 @@
 import subprocess
 import json
 import queue
+import copy
 
-# from model import db
-# from model import SavInformationBase, SavTable
 from sav_common import *
 
 KEY_WORD = "SAVAGENT"
@@ -65,44 +64,46 @@ def h3c_acl_generator(acl_sav_rule):
 
 
 def router_acl_refresh(active_app, logger):
-    if active_app is None:
-        return
-    # TODO dynamic changing
-    with open('/root/savop/SavAgent_config.json', 'r') as file:
-        config = json.load(file)
-        enabled_sav_app = config.get("enabled_sav_app")
-    if enabled_sav_app is None:
-        return
-    session = db.session
-    rules = session.query(SavTable).filter(SavTable.source == active_app).all()
-    session.close()
-    if len(rules) == 0:
-        return f"there is no {active_app} sav rules, so don't need to refresh ACL"
-    interface_set = set(get_host_interface_list())
-    sav_rule = {}
-    for rule in rules:
-        prefix, interface = rule.prefix.split("/")[0], rule.interface
-        if interface == "*":
-            continue
-        if prefix not in sav_rule.keys():
-            sav_rule[prefix] = {interface}
-        else:
-            sav_rule[prefix].add(interface)
-    for key, value in sav_rule.items():
-        sav_rule[key] = interface_set - value
-    acl_sav_rule = {}
-    for prefix, iface_set in sav_rule.items():
-        for iface in iface_set:
-            if iface not in acl_sav_rule:
-                acl_sav_rule[iface] = {prefix}
-            else:
-                acl_sav_rule[iface].add(prefix)
-    # acl rule generator
-    huawei_acl_generator(acl_sav_rule=acl_sav_rule)
-    h3c_acl_generator(acl_sav_rule=acl_sav_rule)
-    log_info = f"refresh sav_{active_app} acl successfully"
-    logger.info(log_info)
-    return log_info
+    raise NotImplementedError
+    # TODO: match new DB
+    # if active_app is None:
+    #     return
+    # # TODO dynamic changing
+    # with open('/root/savop/SavAgent_config.json', 'r') as file:
+    #     config = json.load(file)
+    #     enabled_sav_app = config.get("enabled_sav_app")
+    # if enabled_sav_app is None:
+    #     return
+    # session = db.session
+    # rules = session.query(SavTable).filter(SavTable.source == active_app).all()
+    # session.close()
+    # if len(rules) == 0:
+    #     return f"there is no {active_app} sav rules, so don't need to refresh ACL"
+    # interface_set = set(get_host_interface_list())
+    # sav_rule = {}
+    # for rule in rules:
+    #     prefix, interface = rule.prefix.split("/")[0], rule.interface
+    #     if interface == "*":
+    #         continue
+    #     if prefix not in sav_rule.keys():
+    #         sav_rule[prefix] = {interface}
+    #     else:
+    #         sav_rule[prefix].add(interface)
+    # for key, value in sav_rule.items():
+    #     sav_rule[key] = interface_set - value
+    # acl_sav_rule = {}
+    # for prefix, iface_set in sav_rule.items():
+    #     for iface in iface_set:
+    #         if iface not in acl_sav_rule:
+    #             acl_sav_rule[iface] = {prefix}
+    #         else:
+    #             acl_sav_rule[iface].add(prefix)
+    # # acl rule generator
+    # huawei_acl_generator(acl_sav_rule=acl_sav_rule)
+    # h3c_acl_generator(acl_sav_rule=acl_sav_rule)
+    # log_info = f"refresh sav_{active_app} acl successfully"
+    # logger.info(log_info)
+    # return log_info
 
 
 def iptable_static_refresh(active_app, logger, rules):
@@ -578,13 +579,14 @@ class BirdCMDManager():
                 result[p] = d
         return result
 
-    def update_fib(self, ip_version, log_err=True):
+    def update_fib(self, log_err=True):
         """
         return adds, dels of bird fib
         """
         self.logger.debug("updating fib")
         self.bird_fib["check_time"] = time.time()
-        default, local, remote = self._parse_bird_fib(log_err, ip_version)
+        default, local, remote = self._parse_bird_fib(log_err)
+        # self.logger.debug(f"_parse_bird_fib finished")
         something_updated = False
         local_adds, local_dels = self._diff_fib(
             self.bird_fib["local_route"], local)
@@ -604,6 +606,7 @@ class BirdCMDManager():
             # self.logger.debug(f"default_route updated")
         if something_updated:
             self.bird_fib["update_time"] = self.bird_fib["check_time"]
+
 
     def _diff_fib(self, old_fib, new_fib):
         """
@@ -657,7 +660,8 @@ class BirdCMDManager():
         del table
         return temp
 
-    def _pars_remote_prefix_data(self, prefix_data):
+    def _parse_remote_prefix_data(self, prefix_data):
+        # self.logger.debug(prefix_data)
         interface = None
         remote_ip = None
         for k in prefix_data:
@@ -666,16 +670,25 @@ class BirdCMDManager():
                 interface = temp[-1]
                 remote_ip = temp[1]
                 break
+            if k == "via":
+                if ' on ' in prefix_data[k]:
+                    temp = prefix_data[k].split()
+                    interface = temp[-1]
+                    remote_ip = temp[0]
+                    break
         prefix_data["interface"] = interface
+        # self.logger.debug(remote_ip)
         prefix_data["remote_ip"] = netaddr.IPAddress(remote_ip)
+        # self.logger.debug(prefix_data)
         return prefix_data
 
-    def _parse_bird_fib(self, log_err, ip_version):
+    def _parse_bird_fib(self, log_err):
         """
         using birdc show all to get bird fib,
         return prefix-as_path dict
         """
         t0 = time.time()
+        # self.logger.debug("show route all")
         data = self.bird_cmd("show route all", log_err)
         if data is None:
             return {}
@@ -685,16 +698,20 @@ class BirdCMDManager():
         result = {}
         # self.logger.debug(data)
         for table in data:
-            table_name, table_data = self._parse_bird_table(table, ip_version)
+            table_name, table_data = self._parse_bird_table(table)
             result[table_name] = table_data
+        # self.logger.debug(result)
         temp_ret = {}
+        have_master = False
         if "master4" in result:
             temp_ret["master4"] = result["master4"]
-        elif "master6" in result:
+            have_master = True
+        if "master6" in result:
             temp_ret["master6"] = result["master6"]
-        else:
+            have_master = True
+        if not have_master:
             self.logger.warning(
-                "no master4 table. Is BIRD ready?")
+                "no master table. Is BIRD ready?")
             return {}
         # self.logger.debug(temp_ret)
         temp_ret = self.pre_process_table(temp_ret)
@@ -705,18 +722,17 @@ class BirdCMDManager():
         for table_name, table_value in temp_ret.items():
             for prefix, data in table_value.items():
                 # self.logger.debug(f"{prefix}:{data}")
-                is_remote = ("as_path" in data)
                 if prefix.prefixlen == 0:
                     default[prefix] = data
-                elif not is_remote:
+                if not 'meta' in data:
+                    raise ValueError(f"meta not found in {data}")
+                elif data['meta'].startswith("blackhole"):
                     local[prefix] = data
-                elif is_remote:
-                    remote[prefix] = self._parse_remote_prefix_data(data)
                 else:
-                    self.logger.error(prefix)
-                    self.logger.error(json.dumps(data, indent=2))
-                    self.logger.error("unknown prefix type")
-            # del result[prefix]
+                    if 'direct' in data['meta']:
+                        local[prefix] = data
+                    else:
+                        remote[prefix] = self._parse_remote_prefix_data(data)
         t = time.time() - t0
         if t > TIMEIT_THRESHOLD:
             self.logger.warning(f"TIMEIT {time.time()-t0:.4f} seconds")
@@ -725,7 +741,7 @@ class BirdCMDManager():
         self.logger.debug(default)
         return default, local, remote
 
-    def _parse_bird_table(self, table, ip_version):
+    def _parse_bird_table(self, table):
         """
         return table_name (string) and parsed_rows (dict)
         """
@@ -766,8 +782,8 @@ class BirdCMDManager():
             if "-" in prefix:
                 prefix = prefix.split("-")[0]
             prefix = netaddr.IPNetwork(prefix)
-            if prefix.version != ip_version:
-                continue
+            # if prefix.version != ip_version:
+            # continue
             # if prefix.is_private():
             #     # self.logger.debug(f"private prefix {prefix} ignored")
             #     continue
@@ -810,66 +826,6 @@ class BirdCMDManager():
         if t > TIMEIT_THRESHOLD:
             self.logger.debug(f"TIMEIT {time.time()-t0:.4f} seconds")
         return table_name, parsed_rows
-
-
-# class SIBManager():
-#     """
-#     manage the STB with SQLite and Flask-SQLAlchemy
-#     generate iptables rules and apply them
-#     this table stores the key and value of a dictionary object, both key and value must be string
-#     """
-
-#     def __init__(self, logger):
-
-#         self.logger = logger
-
-#     def upsert(self, key, value):
-#         """
-#         add or update a key-value pair in db, both key and value must in string format.
-#         """
-#         if not (isinstance(key, str) and isinstance(value, str)):
-#             raise TypeError("key and value must be string")
-#         if len(key) > 255 or len(key) < 1:
-#             raise ValueError(
-#                 "key length must be less than 255 and value length must be greater than 0")
-#         session = db.session
-#         row = session.query(SavInformationBase).filter(
-#             SavInformationBase.key == key).first()
-#         if row:
-#             session.delete(row)
-#         new_row = SavInformationBase(key=key, value=value)
-#         session.add(new_row)
-#         session.commit()
-#         session.close()
-#         v = json.loads(value)
-#         msg = f"SIB UPDATED: {key}:"
-#         if isinstance(v, list):
-#             for i in v:
-#                 msg += f"\n{i}"
-#         elif isinstance(v, dict):
-#             msg += f"\n{json.dumps(v, indent=4)}"
-#         else:
-#             msg += f"{v}"
-#             # self.logger.debug(type(v))
-#         # self.logger.debug(f"SIB UPDATED: {msg}")
-
-#     def delete(self, key):
-#         session = db.session
-#         row = session.query(SavInformationBase).filter(
-#             SavInformationBase.key == key).first()
-#         session.delete(row)
-#         session.commit()
-#         session.close()
-#         return {"code": "0000", "message": "success"}
-
-#     def read_all(self):
-#         session = db.session
-#         sib_tables = session.query(SavInformationBase).all()
-#         data = []
-#         for row in sib_tables:
-#             data.append({row.key: row.value})
-#         session.close()
-#         return data
 
 
 class InfoManager():
@@ -931,10 +887,18 @@ class LinkManager(InfoManager):
         self.bird_man = BirdCMDManager(logger)
 
     def get_by_name(self, name):
+        """
+        if found, return the deepcopy of the link meta 
+        """
         if not name in self.data["links"]:
             self.logger.debug(self.data)
             raise ValueError(f"link {name} not found")
-        return self.data["links"][name]
+        try:
+            return copy.deepcopy(self.data["links"][name])
+        except Exception as e:
+            self.logger.error(e)
+            self.logger.exception(e)
+            raise e
 
     def get_by_interface(self, interface):
         for name, data in self.data["links"].items():

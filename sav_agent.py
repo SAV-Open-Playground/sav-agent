@@ -146,7 +146,7 @@ class SavAgent():
         self.link_man = LinkManager(
             self.data["links"], self, logger=self.logger)
         self.data["apps"] = {}
-        self.data["kernel_fib"] = {"data": parse_kernel_fib(self.config["ip_version"]),
+        self.data["kernel_fib"] = {"data": parse_kernel_fib(),
                                    "update_time": time.time(),
                                    "check_time": time.time()}
         self.data["fib_for_apps"] = {}
@@ -241,7 +241,8 @@ class SavAgent():
         update kernel fib
         return new_fib, adds, dels
         """
-        new_ = parse_kernel_fib(self.config["ip_version"])
+        new_ = parse_kernel_fib()
+        # self.logger.debug(new_)
         if len(new_) == 0:
             self.logger.error("kernel fib empty")
         t0 = time.time()
@@ -260,42 +261,42 @@ class SavAgent():
             self.data["kernel_fib"]["data"] = new_
         return self.data["kernel_fib"]["data"], adds, dels
 
-    def _if_fib_stable(self, stable_span=5):
+    def _is_fib_stable(self, stable_span=5):
         """
-        check if the fib table is stabilized and if bird sent link meta to us
+        check if the fib table is stabilize
+        if fib is stable, self.data["initial_bgp_stable"] will be set to True and return True
         """
         if self.data["initial_bgp_stable"]:
-            return
+            return True
         self._refresh_kernel_fib()
+
         if time.time() - self.data["kernel_fib"]["update_time"] > stable_span:
+            # self.logger.debug(self.data["kernel_fib"])
             self.logger.debug(
                 f"FIB STABILIZED at {self.data['kernel_fib']['update_time']}")
             self.data["initial_bgp_stable"] = True
-            self.bird_man.update_fib(
-                self.config["ip_version"], sib_man=self.sib_man)
-            if self.rpdp_app:
-                self._notify_apps({}, {}, ["rpdp_app"])
-            if self.passport_app:
-                self._notify_apps({}, {}, ["passport_app"])
-            # self.logger.info(
-            # f"INITIAL PREFIX-AS_PATH TABLE {self.rpdp_app.get_pp_v4_dict()}")
-            return
+            self.bird_man.update_fib()
+            return True
+        return False
         # self.logger.debug("FIB NOT STABILIZED")
 
     def _initial_wait(self, check_span=0.1):
         """
         1. wait for bird to be ready
         2. wait for fib to be stable
-        3. perform initial events
+        3. perform initial events(send spa)
         """
         while not self.bird_man.is_bird_ready():
             time.sleep(check_span)
             # self.logger.debug("waiting for bird to be ready")
         while not self.data.get("initial_bgp_stable", False):
-            self._if_fib_stable(
+            # self.logger.debug("waiting for fib")
+            self._is_fib_stable(
                 stable_span=self.config.get("fib_stable_threshold"))
             time.sleep(check_span)
-            # self.logger.debug("waiting for fib")
+
+        if self.rpdp_app:
+            self.rpdp_app.send_spa_init()
         return
 
     def is_all_msgs_finished(self):
@@ -332,7 +333,9 @@ class SavAgent():
         start a thread to check the cmd queue and process each cmd
         """
         self._initial_wait()
+        self.logger.debug("starting main loop")
         while True:
+
             try:
                 try:
                     msgs = []
@@ -364,21 +367,6 @@ class SavAgent():
                 self.logger.exception(e)
                 self.logger.error(e)
                 self.logger.error(type(e))
-
-    def _send_init(self):
-        """
-        decide whether to send initial broadcast of each link
-        """
-        rpdp_links = self.link_man.get_all_link_meta()
-
-        for link_name, link in rpdp_links.items():
-            if link["initial_broadcast"]:
-                continue
-            if self._send_init_broadcast_on_link(link_name):
-                self.logger.info(
-                    f"initial spa sent on {link_name} ")
-                self.link_man.update_link_kv(
-                    link_name, "initial_broadcast", True)
 
     def add_app(self, app):
         self.data["apps"][app.name] = app
@@ -418,22 +406,6 @@ class SavAgent():
         keys_types_check(msg, key_types)
         msg["created_dt"] = time.time()
         self._in_msgs.put(msg)
-
-    def _send_init_broadcast_on_link(self, link_name):
-        # self.logger.debug(f"sending initial broadcast on link {link_name}")
-        if self.rpdp_app is None:
-            self.logger.warning("rpdp_app missing,unable to send origin")
-            return False
-
-        local_prefixes = self.bird_man.get_local_fib()
-        for p in local_prefixes:
-            if p in self.config["prefixes"]:
-                local_prefixes[p] = self.config["prefixes"][p]
-            else:
-                local_prefixes[p]["miig_type"] = 1
-                local_prefixes[p]["miig_tag"] = 1
-        spa_sent = self._send_spa_origin(local_prefixes, link_name)
-        return spa_sent
 
     def _process_link_state_change(self, msg):
         """
@@ -500,7 +472,7 @@ class SavAgent():
 
         if len(adds) == 0 and len(dels) == 0:
             return
-        self.bird_man.update_fib(self.config["ip_version"])
+        self.bird_man.update_fib()
         self._notify_apps(adds, dels, reset)
         self.logger.debug(f"_notify_apps finished")
 
@@ -735,42 +707,6 @@ class SavAgent():
 
         return inter_paths, intra_paths
 
-    def _send_spa_origin(self, prefixes, input_link_name=None):
-        """
-        send spa origin msg
-        """
-        # send to all neighbors
-        spa_add = []
-        for p, data in prefixes.items():
-            spa_add.extend(get_intra_spa_nlri_hex(
-                netaddr.IPAddress(self.config["router_id"]).value,
-                p,
-                0,  # flag
-                data["miig_type"],
-                data["miig_tag"],))
-        spa_del = []  # when broadcasting, we don't delete any prefix
-        if input_link_name is None:
-            links_to_send = self.link_man.get_all_link_meta().keys()
-        else:
-            links_to_send = [input_link_name]
-        for link_name in links_to_send:
-            next_hop = self.link_man.get_by_name(
-                link_name)["remote_ip"]
-            ip_verson = next_hop.version
-            next_hop = [ip_verson] + list(next_hop.packed)
-            next_hop = [len(next_hop)] + next_hop
-            link = self.link_man.get_by_name(link_name)
-            as_path = [self.config["local_as"]]
-            data = get_bird_spa_data(spa_add, spa_del, link_name,
-                                     f"rpdp{self.config['ip_version']}",
-                                     ip_verson, next_hop, as_path,
-                                     link["as4_session"])
-            msg = get_agent_bird_msg(
-                data, "dsav", self.rpdp_app.name, 0, False)
-            self.link_man.put_send_async(msg)
-            self.link_man.update_link_kv(link_name, "initial_broadcast", True)
-        return True
-
     def _build_addresses_for_spd(self, remote_prefixes, links):
         ret = {}
         for link_name in links:
@@ -923,6 +859,7 @@ class SavAgent():
         metric["size"] += len(str(input_msg))
         if not m_t.startswith("passport"):
             self._update_sav_rule_nums()
+        self.logger.debug(f"finished")
 
     def _update_sav_rule_nums(self):
         metric = self.data["metric"].get("sav_rule_nums", {})
@@ -941,22 +878,25 @@ class SavAgent():
             for k, v in metric.items():
                 if k.endswith("_rule_num"):
                     metric["total"] += v
-            self.logger.debug(f"latest SAV RULE NUMS: {metric['total']}")
+            self.logger.debug(f"SAV RULE NUMS: {metric['total']}")
 
     def _send_spd(self):
+        # self.logger.debug("sending spd")
         if self.rpdp_app is None:
             self.logger.debug("rpdp_app missing,unable to send spd")
             return False
         all_metas = self.link_man.get_all_link_meta()
         for proto_name, link_meta in all_metas.items():
             if link_meta["initial_broadcast"] == False:
-                self.logger.debug(f"{proto_name} not ready for spd, skipping")
+                self.logger.debug(f"{proto_name} not spa init, skipping")
                 return False
         remote_prefixes = self.bird_man.get_remote_fib()
+        # self.logger.debug(remote_prefixes)
         if len(remote_prefixes) == 0:
             self.logger.debug("no remote prefixes, not sending")
             return True
         # find target ips for spd by each link
+        # self.logger.debug(self.config['as_scope'])
         remote_ips = []
         for _, data in self.config["as_scope"].items():
             if data["router_id"] == self.config["router_id"]:
@@ -977,7 +917,7 @@ class SavAgent():
             # self.logger.debug(
             # f"next_hop_ip:{next_hop_ip},addresses:{addresses}")
             link_meta = self.link_man.get_by_remote_ip(next_hop_ip)
-    #         self.logger.debug(f"link_meta:{link_meta}")
+            # self.logger.debug(f"link_meta:{link_meta}")
             proto_name = link_meta["protocol_name"]
             ip_version = link_meta["remote_ip"].version
             if not proto_name in self.data["spd_sn"]:
@@ -986,10 +926,11 @@ class SavAgent():
             data = get_bird_spd_data(proto_name, False,
                                      ip_version, sn, self.config["router_id"],
                                      [], addresses)
+            self.logger.debug(data)
             timeout = 0
             msg = get_agent_bird_msg(
                 data, "dsav", self.rpdp_app.name, timeout, False)
-            # self.logger.debug(msg)
+            self.logger.debug(msg)
             self.link_man.put_send_async(msg)
             self.data["spd_sn"][proto_name] += 1
             if self.data["spd_sn"][proto_name] > 4294967295:  # max int for IPV4
@@ -1006,8 +947,8 @@ class SavAgent():
         data = {
             "last_trigger": t0,
             "events": {
-                "spd": {"last_trigger": t0, "interval": 5},
-                "spa_init": {"last_trigger": t0, "interval": 5}
+                "spd": {"last_trigger": t0, "interval": 5}
+                # "spa_init": {"last_trigger": t0, "interval": 5}
             }
         }
         while True:
@@ -1019,23 +960,19 @@ class SavAgent():
                     if cur_t - data["events"][event]["last_trigger"] > data["events"][event]["interval"]:
                         data["events"][event]["last_trigger"] = cur_t
                         if event == "spd":
+                            # self.logger.debug("triggering spd")
                             if self.rpdp_app is None:
                                 self.logger.debug(
                                     "rpdp_app missing,unable to send spd")
                                 continue
-                            self._send_spd()
-                        elif event == "spa_init":
-                            if self.rpdp_app is None:
+                            if not self.data["initial_bgp_stable"]:
                                 self.logger.debug(
-                                    "rpdp_app missing,unable to send spa_init")
+                                    "fib not stable, not sending spd")
                                 continue
-                            self.rpdp_app.send_spa_init()
+                            self._send_spd()
                         else:
                             self.logger.warning(
                                 f"unknown event:{event}, skipping")
-
-            # else:
-
             time.sleep(0.5)
 
     def _start(self):

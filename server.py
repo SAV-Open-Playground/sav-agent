@@ -7,8 +7,6 @@ import json
 import time
 from flask import Flask
 from flask import request
-from model import db
-from model import SavInformationBase
 from sav_agent import get_logger
 from sav_agent import SavAgent
 from sav_common import TIMEIT_THRESHOLD
@@ -185,6 +183,7 @@ def index():
         LOGGER.warning(f"TIMEIT {time.time()-t0:.4f} seconds")
     return rep
 
+
 @app.route("/put_bgp_update/", methods=["POST", "GET"])
 def put_bgp_update():
     """
@@ -192,9 +191,9 @@ def put_bgp_update():
     """
     t0 = time.time()
     try:
-        msg = {"msg":{"protocol_name":"eth_r3"},
-               "msg_type":"bgp_update",
-               "source_link":"eth_r3"}
+        msg = {"msg": {"protocol_name": "eth_r3"},
+               "msg_type": "bgp_update",
+               "source_link": "eth_r3"}
         msg["source_app"] = "rpdp_app"
         msg["pkt_rec_dt"] = t0
         sa.put_msg(msg)
@@ -209,16 +208,6 @@ def put_bgp_update():
     if t > TIMEIT_THRESHOLD:
         LOGGER.warning(f"TIMEIT {time.time()-t0:.4f} seconds")
     return rep
-@app.route("/sib_table/", methods=["POST", "GET"])
-def search_sib():
-    """
-    return the SIB table
-    """
-    sib_tables = db.session.query(SavInformationBase).all()
-    data = {}
-    for row in sib_tables:
-        data[row.key] = json.loads(row.value)
-    return json.dumps(data, indent=2)
 
 
 @app.route('/refresh_proto/<string:active_app>/', methods=["POST", "GET"])
@@ -253,10 +242,12 @@ def metric():
         rep[sa.passport_app.name] = sa.passport_app.metric
     return json.dumps(rep, indent=2)
 
+
 @app.route('/sav_table/', methods=["POST", "GET"])
 def sav_table():
     rep = sa.data["sav_table"]
     return json.dumps(rep, indent=2)
+
 
 @app.route('/savop_quic/', methods=["POST"])
 def savop_quic():
@@ -381,4 +372,3 @@ def perf_test():
 
 if __name__ == '__main__':
     app.run("0.0.0.0:8888", debug=True)
-    

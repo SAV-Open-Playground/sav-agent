@@ -49,7 +49,6 @@ def parse_bird_table(table, logger=None):
     """
     return table_name(string) and parsed_rows(dict)
     """
-    # logger.debug(table)
     temp = table.split("\n")
     while "" in temp:
         temp.remove("")
@@ -66,7 +65,6 @@ def parse_bird_table(table, logger=None):
             this_row = [line]
     while [] in rows:
         rows.remove([])
-    # logger.debug(rows)
     for row in rows:
         heading = row.pop(0)
         # skip blackhole
@@ -440,32 +438,32 @@ def birdc_get_protos_by(logger, key, value):
     return result
 
 
-def parse_kernel_fib(ip_version):
+def parse_kernel_fib():
     """
     parsing the output of "route -n -F" command
     """
-    match ip_version:
-        case 4:
-            table = run_cmd("route -n -F")
-        case 6:
-            table = run_cmd("route -6 -n -F")
-        case _:
-            raise ValueError("invalid ip version")
-    while "  " in table:
-        table = table.replace("  ", " ")
+    v4table = run_cmd("route -n -F")
+    v6table = run_cmd("route -6 -n -F")
+    ret = {}
+    for table in [v4table, v6table]:
+        while "\t" in table:
+            table = table.replace("\t", " ")
+        while "  " in table:
+            table = table.replace("  ", " ")
         table = table.split("\n")
         table.pop()  # removing tailing empty line
         _ = table.pop(0)
         table = list(map(lambda x: x.split(" "), table))
         headings = table.pop(0)
         table = list(map(lambda x: dict(zip(headings, x)), table))
-    ret = {}
-    for row in table:
-        if 'Genmask' in row:
-            prefix = netaddr.IPNetwork(row["Destination"]+"/"+row["Genmask"])
-        else:
-            prefix = netaddr.IPNetwork(row["Destination"])
-            ret[prefix] = row
+        for row in table:
+            print(row)
+            if 'Genmask' in row:
+                prefix = netaddr.IPNetwork(
+                    row["Destination"]+"/"+row["Genmask"])
+            else:
+                prefix = netaddr.IPNetwork(row["Destination"])
+                ret[prefix] = row
     return ret
 
 
