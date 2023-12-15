@@ -579,13 +579,13 @@ class BirdCMDManager():
                 result[p] = d
         return result
 
-    def update_fib(self, log_err=True):
+    def update_fib(self, my_asn,log_err=True):
         """
         return adds, dels of bird fib
         """
         self.logger.debug("updating fib")
         self.bird_fib["check_time"] = time.time()
-        default, local, remote = self._parse_bird_fib(log_err)
+        default, local, remote = self._parse_bird_fib(log_err,my_asn)
         # self.logger.debug(f"_parse_bird_fib finished")
         something_updated = False
         local_adds, local_dels = self._diff_fib(
@@ -625,11 +625,11 @@ class BirdCMDManager():
 
     def get_local_fib(self):
         """"filter out local routes from fib"""
-        return self.bird_fib["local_route"]
+        return copy.deepcopy(self.bird_fib["local_route"])
 
     def get_remote_fib(self):
         """"filter out remote routes from fib"""
-        return self.bird_fib["remote_route"]
+        return copy.deepcopy(self.bird_fib["remote_route"])
 
     def get_remote_local_fib(self):
         """"filter out remote and local routes from fib"""
@@ -661,7 +661,7 @@ class BirdCMDManager():
         return temp
 
     def _parse_remote_prefix_data(self, prefix_data):
-        # self.logger.debug(prefix_data)
+        self.logger.debug(prefix_data)
         interface = None
         remote_ip = None
         for k in prefix_data:
@@ -681,58 +681,77 @@ class BirdCMDManager():
         prefix_data["remote_ip"] = netaddr.IPAddress(remote_ip)
         # self.logger.debug(prefix_data)
         return prefix_data
-
-    def _parse_bird_fib(self, log_err):
+    def _tell_prefix(self,prefix,prefix_srcs,my_asn):
+        """
+        tell if prefix is a local remote or default
+        local: the prefixes that I will broadcast
+        remote: the prefixes that I learned from other device
+        default: the default route
+        """
+        device_flag = False
+        bgp_flag = False
+        static_flag = False
+        if prefix.prefixlen == 0:
+            return "default"
+        for src in prefix_srcs:
+            if not "type" in src:
+                self.logger.error(src)
+                self.logger.error(prefix)
+                continue
+            if src["type"] == "device univ":
+                device_flag = True
+            if src["type"] == "BGP univ":
+                bgp_flag = True
+            if src["type"] == "static univ":
+                static_flag = True
+        if static_flag:
+            return "local"
+        if device_flag:
+            return "local"
+        if bgp_flag:
+            return "remote"
+        self.logger.error("unable to tell")
+        self.logger.error(src)
+        self.logger.error(prefix)
+        
+    def _parse_bird_fib(self, log_err,my_asn):
         """
         using birdc show all to get bird fib,
-        return prefix-as_path dict
         """
         t0 = time.time()
         # self.logger.debug("show route all")
         data = self.bird_cmd("show route all", log_err)
+        # self.logger.debug([data])
         if data is None:
             return {}
-        data = data.split("Table")
-        while "" in data:
-            data.remove("")
-        result = {}
-        # self.logger.debug(data)
-        for table in data:
-            table_name, table_data = self._parse_bird_table(table)
-            result[table_name] = table_data
-        # self.logger.debug(result)
-        temp_ret = {}
+        try:
+            data = parse_table(data,my_asn)
+        except Exception as e:
+            self.logger.error(e)
+            self.logger.exception(e)
+            raise e
+        # self.logger.debug([data])
         have_master = False
-        if "master4" in result:
-            temp_ret["master4"] = result["master4"]
+        if "master4" in data:
             have_master = True
-        if "master6" in result:
-            temp_ret["master6"] = result["master6"]
+        if "master6" in data:
             have_master = True
         if not have_master:
-            self.logger.warning(
+            self.logger.error(
                 "no master table. Is BIRD ready?")
-            return {}
-        # self.logger.debug(temp_ret)
-        temp_ret = self.pre_process_table(temp_ret)
+            raise ValueError("no master table. Is BIRD ready?")
         default = {}
         local = {}
         remote = {}
-        # self.logger.debug(f"{temp_ret}")
-        for table_name, table_value in temp_ret.items():
+        for table_name, table_value in data.items():
             for prefix, data in table_value.items():
-                # self.logger.debug(f"{prefix}:{data}")
-                if prefix.prefixlen == 0:
+                t = self._tell_prefix(prefix,data,my_asn)
+                if t == "default":
                     default[prefix] = data
-                if not 'meta' in data:
-                    raise ValueError(f"meta not found in {data}")
-                elif data['meta'].startswith("blackhole"):
+                elif t == "local":
                     local[prefix] = data
-                else:
-                    if 'direct' in data['meta']:
-                        local[prefix] = data
-                    else:
-                        remote[prefix] = self._parse_remote_prefix_data(data)
+                elif t == "remote":
+                    remote[prefix] = data
         t = time.time() - t0
         if t > TIMEIT_THRESHOLD:
             self.logger.warning(f"TIMEIT {time.time()-t0:.4f} seconds")
@@ -745,11 +764,9 @@ class BirdCMDManager():
         """
         return table_name (string) and parsed_rows (dict)
         """
-        # self.logger.debug(table)
+        # self.logger.debug([table])
         t0 = time.time()
         temp = table.split("\n")
-        while '' in temp:
-            temp.remove('')
 
         table_name = temp[0][1:-1]
         parsed_rows = {}
@@ -806,7 +823,7 @@ class BirdCMDManager():
                         # self.logger.debug(f"v:{v}")
                         if not "as_path" in temp:
                             temp["as_path"] = []
-                        temp["as_path"].append(list(map(int, v.split(" "))))
+                        temp["as_path"].extend(list(map(int, v.split(" "))))
                         # self.logger.debug(f"as_path:{temp['as_path']}")
                         del temp["BGP.as_path"]
                 elif line.startswith("\tdev"):
@@ -931,10 +948,11 @@ class LinkManager(InfoManager):
         "retry" is optional, if set, then will retry for the given times (default is 10)  
         """
         # check if msg is valid
+        # self.logger.debug(f"put_send_async got {msg}")
         key_types = [("msg_type", str), ("data", dict), ("source_app", str),
                      ("timeout", int), ("store_rep", bool)]
         keys_types_check(msg, key_types)
-
+        # self.logger.debug(f"passed key_types_check")
         supported_type = ["http-post", "dsav"]
 
         if not msg["msg_type"] in supported_type:
@@ -1133,7 +1151,7 @@ class LinkManager(InfoManager):
         """
         temp = []
         for link_name, link in self.data["links"].items():
-            self.logger.debug(link)
+            # self.logger.debug(link)
             if link["status"]:
                 if link["link_type"] == "native_bgp":
                     # self.logger.debug(link["protocol_name"])
@@ -1184,10 +1202,10 @@ class LinkManager(InfoManager):
         return True
 
     def _run(self):
-        self.logger.debug("link manager started")
         """
         run in a separate thread, send msg in the send_buff
         """
+        self.logger.debug("link manager started")
         while True:
             msg = self._send_buff.get()
             # self.logger.debug(msg)

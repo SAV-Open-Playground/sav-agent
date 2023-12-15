@@ -5,6 +5,7 @@
 """
 import json
 import time
+import copy
 from flask import Flask
 from flask import request
 from sav_agent import get_logger
@@ -245,8 +246,12 @@ def metric():
 
 @app.route('/sav_table/', methods=["POST", "GET"])
 def sav_table():
-    rep = sa.data["sav_table"]
-    return json.dumps(rep, indent=2)
+    rep = copy.deepcopy(sa.data["sav_table"])
+    rep = str(rep)
+    # rep = json.loads(rep)
+    # rep = json.dumps(rep,indent=2)
+    # return json.dumps(rep, indent=2)
+    return rep
 
 
 @app.route('/savop_quic/', methods=["POST"])

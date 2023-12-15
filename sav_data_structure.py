@@ -4,10 +4,13 @@
 @File    :   data_structure.py
 @Time    :   2023/08/08
 @Version :   0.1
-@Desc    :   The data_structure.py is responsible  project defined data structure and related conversions
+@Desc    :   Defines data structure and related conversions
 """
 import netaddr
 import time
+import json
+DEFAULT_MIIG_TYPE = 0
+DEFAULT_MIIG_TAG = 0
 
 def int2hex(input_int, zfill_length=4):
     temp = hex(input_int)[2:]
@@ -95,6 +98,7 @@ def ip2hex(ip):
         case _:
             raise ValueError(
                 "ip_version should be 4 or 6,but get {}".format(ip.version))
+
 # prefix
 
 
@@ -150,7 +154,7 @@ def hex2prefix(nlri, ip_version):
     return netaddr.IPNetwork(ip.format()+"/"+str(prefix_len))
 
 
-def prefixes_to_hex_str(prefix_list, ip_type="ipv4"):
+def prefixes2hex_str(prefix_list, ip_type="ipv4"):
     """
         constructs NLRI prefix list
         :param prefix_list: prefix in str format list
@@ -236,19 +240,6 @@ def path2hex(asn_path, as4_session=True):
     return result
 
 
-def get_intra_spd_dict():
-    """get a human readable intra-spd message"""
-    msg = {
-        "type": 2,
-        "sub_type": 1,
-        "length": 0,
-        "sn": 0,
-        "origin_router_id": "",
-        "opt_data_len": 0,
-        "opt_data": "",
-        "addresses": []
-    }
-    return msg
 
 
 def get_intra_spd_nlri_dict():
@@ -284,12 +275,25 @@ def get_intra_spa_nlri_hex(origin_router_id, prefix, flag, miig_type=0, miig_tag
     return nlri
 
 
-def read_spa_sav_nlri(data, ip_version):
+def get_inter_spa_nlri_hex(origin_asn, prefix, flag):
+    """
+    get a inter-spa-nlri message in hex,
+    missing miig_type and miig_tag compared with intra-spa-nlri
+    """
+    nlri = [
+        2  # route type
+    ]
+    nlri.extend(int2hex(origin_asn, 4))  # origin router id
+    nlri.extend(prefix2hex(prefix))  # prefix
+    nlri.append(flag)
+    nlri.insert(1, len(nlri)-1)
+    return nlri
+
+
+def read_intra_spa_nlri_hex(data, ip_version):
     result = []
     cur_pos = 0
     while cur_pos < len(data):
-        print(data)
-        print(data[:cur_pos])
         nlri = {}
         route_type = data[cur_pos]
         nlri["route_type"] = route_type
@@ -321,6 +325,39 @@ def read_spa_sav_nlri(data, ip_version):
         nlri["miig_tag"] = miig_tag
         result.append(nlri)
     return result
+
+
+def read_inter_spa_nlri_hex(data, ip_version):
+    """
+    read inter spa data from hex
+    """
+    result = []
+    cur_pos = 0
+    while cur_pos < len(data):
+        nlri = {}
+        route_type = data[cur_pos]
+        nlri["route_type"] = route_type
+        cur_pos += 1
+        length = data[cur_pos]
+        cur_pos += 1
+        # router id is ipv4,len is 4
+        nlri["origin_asn"] = hex2int(data[cur_pos:cur_pos+4])
+        # print(nlri)
+        cur_pos += 4
+        # input(data[cur_pos])
+        mask_len = prefix_len2len(data[cur_pos])
+        # input(mask_len)
+        prefix_hex = data[cur_pos:cur_pos+mask_len+1]
+        cur_pos += mask_len+1
+        # input(prefix_hex)
+        prefix = hex2prefix(prefix_hex, ip_version)
+        nlri["prefix"] = prefix
+        flag = data[cur_pos]
+        nlri["flag"] = flag
+        cur_pos += 1
+        result.append(nlri)
+    return result
+
 
 SAV_META = {
     "example": {
@@ -373,7 +410,7 @@ def decode_csv(input_str):
 
 def hex_str_to_prefixes(input_bytes, t="ipv4"):
     """
-    reverse of prefixes_to_hex_str
+    reverse of prefixes2hex_str
     """
     if t == "ipv4":
         result = []
@@ -398,7 +435,7 @@ def hex_str_to_prefixes(input_bytes, t="ipv4"):
 
 def get_sav_rule(prefix, interface_name, source_app, origin=-1, is_interior=True):
     """
-    return a tuple of sav rule elements
+    return a dict of sav rule elements
     if origin is not given, it will be set to -1
     by default, the origin is the origin as number(is_interior=True)
     otherwise, the origin is the origin router id(is_interior=False)
@@ -417,6 +454,9 @@ def get_sav_rule(prefix, interface_name, source_app, origin=-1, is_interior=True
 
 
 def get_key_from_sav_rule(r):
+    """
+    return a string key for sav rule
+    """
     return f"{r['prefix']}_{r['origin']}_{r['interface_name']}"
 
 
@@ -455,7 +495,10 @@ def get_agent_bird_msg(data, msg_type, source_app, timeout, store_rep):
     return msg
 
 
-def get_bird_spa_data(adds, dels, protocol_name, channel, rpdp_version, next_hop, as_path, is_as4):
+def get_bird_spa_data(adds, dels, protocol_name, channel, rpdp_version, next_hop, as_path, is_as4, is_interior):
+    """
+    return a dict of spa data for bird
+    """
     ret = {
         "add": adds,
         "add_len": len(adds),
@@ -467,27 +510,57 @@ def get_bird_spa_data(adds, dels, protocol_name, channel, rpdp_version, next_hop
         "channel": channel,
         "rpdp_version": rpdp_version,
         "next_hop": next_hop,
-        "as_path": [2, len(as_path)] + path2hex(as_path, is_as4)
-
+        "origin": [1, 0],# intra value
+        "is_interior": 0
     }
-    ret["as_path_len"] = len(ret["as_path"])
+    if is_interior:
+        ret["origin"] = path2hex([as_path[0]], is_as4)
+        ret["as_path"] = [2, len(as_path)] + path2hex(as_path, is_as4)
+        ret["as_path_len"] = len(ret["as_path"])
+        ret["is_interior"] = 1
     return ret
 
 
-def get_bird_spd_data(protocol_name, channel, rpdp_version, sn, origin_id, opt_data, addresses):
+def get_bird_spd_data(protocol_name, channel, rpdp_version, sn, origin_router_id, opt_data,  is_interior,addresses=[], my_as=-1, peer_as=-1, peer_neighbor_as_list=None):
+    """
+    return a dict of spd data for bird
+    all optional parameters are for special for inter spd or intar spd.
+    @param protocol_name:  link_name
+    @param channel:  channel (rpdp)
+    @param rpdp_version:  rpdp version (4)
+    @param sn:  sequence number
+    @param origin_router_id:  origin router id
+    @param opt_data:  optional data
+    @param addresses:  addresses
+    """
+
     addresses = ips2addresses(addresses)
-    return {
+    ret = {
         "type": "spd",
         "protocol_name": protocol_name,
         "is_native_bgp": False,
-        "channel": channel,
+        "channel": f"{channel}{rpdp_version}",
         "rpdp_version": rpdp_version,
         "SN": sn,
-        "origin_id": ip2hex(netaddr.IPAddress(origin_id)),
+        "origin_router_id": ip2hex(netaddr.IPAddress(origin_router_id)),
         "opt_data_len": len(opt_data),
         "opt_data": opt_data,
         "addresses": addresses
+        ,"is_interior": 0
     }
+    if is_interior:
+        ret["is_interior"] = 1
+        if my_as == -1 or peer_as == -1:
+            raise ValueError("my_as or peer_as is not given")
+        if peer_neighbor_as_list == None:
+            raise ValueError("peer_neighbor_as_list not given")
+        ret["source_asn"] = my_as
+        ret["validate_asn"] = peer_as
+        ret["neighbor_ases"] = []
+        for asn in peer_neighbor_as_list:
+            ret["neighbor_ases"].append(int2hex(asn))
+    return ret
+# TestCase
 
 
 def test_prefix2hex():
@@ -496,5 +569,192 @@ def test_prefix2hex():
     assert test_p == hex2prefix(a, 4)
 
 
+def test_gisnh():
+    a = get_inter_spa_nlri_hex(65501, netaddr.IPNetwork("192.168.1.0/24"), 0)
 # print(read_spa_sav_nlri([1, 14, 192, 168, 3, 1, 24, 192, 168, 2, 1, 0, 0, 0,
 #       0, 1, 1, 14, 192, 168, 3, 1, 24, 192, 168, 3, 1, 0, 0, 0, 0, 1], 4))
+
+# print(hex2int([0, 0, 255, 222]))
+
+
+# BIRD CLI OUTPUT PARSING
+def my_split(str_data, split_char):
+    """
+    split string with split_char
+    """
+    ret = str_data.split(split_char)
+    while "" in ret:
+        ret.remove("")
+    return ret
+
+
+def process_src_kv(k, v,my_asn):
+    k_temp = k.split()
+    if '*' in k_temp:
+        k_temp.remove('*')
+    v["broadcast_type"] = k_temp[0]
+    if not k_temp[1].startswith("["):
+        print(k_temp)
+        raise ValueError("unknown key")
+    v["protocol_name"] = k_temp[1][1:]
+    if not k_temp[2].endswith("]"):
+        print(k_temp)
+        raise ValueError("unknown key")
+    v["time"] = k_temp[2][:-1]
+    k_l = len(k_temp)
+
+    if not (k_temp[3].startswith("(") and k_temp[3].endswith(")")):
+        print(k_temp)
+        raise ValueError("unknown metric")
+    m1 = int(k_temp[3][1:-1])
+    if "metric" in v:
+        if v["metric"] != m1:
+            print(k_temp)
+            print(v)
+            raise ValueError("metric not match")
+    v["metric"] = m1
+    if k_l == 4:
+        return v
+    elif k_l == 5:
+        if k_temp[4]=="[i]":
+            v["origin_asn"] = my_asn
+            return v
+        if not (k_temp[4].startswith("[AS") and k_temp[4].endswith("i]")):
+            
+            raise ValueError(f"unknown AS :{k_temp}")
+
+        v["origin_asn"] = int(k_temp[4][3:-2])
+        return v
+    else:
+        raise ValueError(f"unknown key:{k_temp}")
+    return 1
+    # if len(k_temp) == 4:
+
+    # #
+    # # m1 = int(k_temp[3][1:-1])
+    # # else:
+    # #     v["metric"] = m1
+    # # origin_asn = k_temp[4][1:-1]
+    # # if not (origin_asn.startswith("AS") and origin_asn.endswith("i")):
+    # #     print(origin_asn)
+    # #     raise ValueError("origin_asn not found")
+    # #
+
+    # if new_v is None:
+    #                 print(k)
+    #                 print(v)
+    #                 raise ValueError("new_v is None")
+
+
+def parse_prefix(data,my_asn):
+    """
+    special parsing for bird show route all cmd,
+    not fully tested
+    """
+    lines = my_split(data, "\n")
+    ret = {}
+    cur_prefix = None
+    for i in lines:
+        while "  " in i:
+            i = i.replace("  ", " ")
+        # print([i])
+        if i.startswith("\t"):
+            if cur_prefix == None:
+                raise ValueError("prefix not found")
+            ret[cur_prefix].append(i)
+        elif i.startswith(" "):
+            ret[cur_prefix].append(i)
+        else:
+            temp = my_split(i, " ")
+            prefix = temp[0]
+            prefix = netaddr.IPNetwork(prefix)
+            ret[prefix] = [" "+" ".join(temp[1:])]
+            cur_prefix = prefix
+    hardcoded_keys = {"\tdev ": "device",
+                      "\tType: ": "type",
+                      "\tBGP.origin: ": "origin",
+                      "\tBGP.as_path: ": "as_path",
+                      "\tvia ": "via",
+                      "\tBGP.next_hop: ": "next_hop",
+                      "\tBGP.local_pref: ": "metric",
+                      "\tBGP.otc: ": "only_to_customer"}
+    for prefix in ret:
+        srcs = {}
+        cur_key = None
+        cur_poto = None
+        for l in ret[prefix]:
+            if l.startswith(" "):
+                cur_key = l[1:]
+                srcs[cur_key] = {}
+            else:
+                if cur_key == None:
+                    raise ValueError("key not found")
+                found = False
+                for k in hardcoded_keys:
+                    if l.startswith(k):
+                        srcs[cur_key][hardcoded_keys[k]] = l[len(k):]
+                        if k == "\tBGP.as_path: ":
+                            srcs[cur_key][hardcoded_keys[k]] = list(
+                                map(int, srcs[cur_key][hardcoded_keys[k]].split()))
+                        elif k == "\tBGP.local_pref: ":
+                            srcs[cur_key][hardcoded_keys[k]] = int(
+                                srcs[cur_key][hardcoded_keys[k]])
+                        found = True
+                        break
+                if not found:
+                    raise ValueError(f"unknown key {[l]}")
+        new_srcs = []
+        for k, v in srcs.items():
+            new_v = process_src_kv(k, v,my_asn)
+            if new_v is None:
+                print(k)
+                print(v)
+                raise ValueError("new_v is None")
+            new_srcs.append(new_v)
+        ret[prefix] = new_srcs
+        #         if len(k_temp) == 4:
+        #             # print(k_temp)
+        #             v["broadcast_type"] = k_temp[0]
+        #             v["link_name"] = k_temp[1][1:]
+        #             v["time"] = k_temp[2][:-1]
+        #             m1 = int(k_temp[3][1:-1])
+        #             if "metric" in v:
+        #                 if v["metric"] != m1:
+        #                     print(k_temp)
+        #                     print(v)
+        #                     raise ValueError("metric not match")
+        #             else:
+        #                 v["metric"] = m1
+        #             new_srcs.append( v)
+        #         else:
+        #             print(k_temp)
+        #             raise ValueError("unknown key")
+        #     elif v["type"] == "static univ":
+        #         print(k,v)
+        #     else:
+        #         print(v["type"])
+        #         print(k)
+        #         print(v)
+        # ret[prefix] = temp
+    return ret
+
+
+def parse_table(data,my_asn):
+    """parse table data"""
+    tables = my_split(data, "Table")
+    ret = {}
+    for i in tables:
+        lines = my_split(i, "\n")
+        table_heading = lines.pop(0)
+        table_name = table_heading.strip().split(":")[0]
+        table_data = i.split(table_heading)[1][1:]
+        ret[table_name] = parse_prefix(table_data,my_asn)
+    return ret
+test_op = """'Table master4:\n1.1.7.0/24           blackhole [static1 09:20:53.065] * (200)\n\tType: static univ\n1.1.1.0/24           unicast [direct1 09:20:53.066] * (240)\n\tdev eth_r1\n\tType: device univ\n                     unicast [savbgp_3_1 09:20:56.966] (100) [i]\n\tvia 1.1.1.1 on eth_r1\n\tType: BGP univ\n\tBGP.origin: IGP\n\tBGP.as_path: \n\tBGP.next_hop: 1.1.1.1\n\tBGP.local_pref: 100\n1.1.2.0/24           unicast [savbgp_3_1 09:20:56.966] * (100) [i]\n\tvia 1.1.1.1 on eth_r1\n\tType: BGP univ\n\tBGP.origin: IGP\n\tBGP.as_path: \n\tBGP.next_hop: 1.1.1.1\n\tBGP.local_pref: 100\n                     unicast [savbgp_3_2 09:20:53.924] (100) [i]\n\tvia 1.1.3.1 on eth_r2\n\tType: BGP univ\n\tBGP.origin: IGP\n\tBGP.as_path: \n\tBGP.next_hop: 1.1.3.1\n\tBGP.local_pref: 100\n1.1.3.0/24           unicast [direct1 09:20:53.066] * (240)\n\tdev eth_r2\n\tType: device univ\n                     unicast [savbgp_3_2 09:20:53.924] (100) [i]\n\tvia 1.1.3.1 on eth_r2\n\tType: BGP univ\n\tBGP.origin: IGP\n\tBGP.as_path: \n\tBGP.next_hop: 1.1.3.1\n\tBGP.local_pref: 100\n1.1.4.0/24           blackhole [static1 09:20:53.065] * (200)\n\tType: static univ\n"""
+# test_output = """Table master4:\n1.1.1.0/24           unicast [direct1 17:17:00.183] * (240)\n\tdev eth_r3\n\tType: device univ\n                     unicast [savbgp_1_3 17:17:01.084] (100) [AS65503i]\n\tvia 1.1.1.2 on eth_r3\n\tType: BGP univ\n\tBGP.origin: IGP\n\tBGP.as_path: 65503\n\tBGP.next_hop: 1.1.1.2\n\tBGP.local_pref: 100\n1.1.2.0/24           unicast [direct1 17:17:00.183] * (240)\n\tdev eth_r2\n\tType: device univ\n                     unicast [savbgp_1_2 17:17:01.031] (100) [AS65502i]\n\tvia 1.1.2.2 on eth_r2\n\tType: BGP univ\n\tBGP.origin: IGP\n\tBGP.as_path: 65502\n\tBGP.next_hop: 1.1.2.2\n\tBGP.local_pref: 100\n\tBGP.otc: 65502\n1.1.3.0/24           unicast [savbgp_1_2 17:17:01.031] * (100) [AS65502i]\n\tvia 1.1.2.2 on eth_r2\n\tType: BGP univ\n\tBGP.origin: IGP\n\tBGP.as_path: 65502\n\tBGP.next_hop: 1.1.2.2\n\tBGP.local_pref: 100\n\tBGP.otc: 65502\n                     unicast [savbgp_1_3 17:17:01.084] (100) [AS65503i]\n\tvia 1.1.1.2 on eth_r3\n\tType: BGP univ\n\tBGP.origin: IGP\n\tBGP.as_path: 65503\n\tBGP.next_hop: 1.1.1.2\n\tBGP.local_pref: 100\n111.192.7.0/24       unicast [savbgp_1_3 17:17:01.084] * (100) [AS65503i]\n\tvia 1.1.1.2 on eth_r3\n\tType: BGP univ\n\tBGP.origin: IGP\n\tBGP.as_path: 65503\n\tBGP.next_hop: 1.1.1.2\n\tBGP.local_pref: 100\n111.192.1.0/24       blackhole [static1 17:17:00.181] * (200)\n\tType: static univ\n111.192.3.0/24       unicast [savbgp_1_2 17:17:01.031] * (100) [AS65502i]\n\tvia 1.1.2.2 on eth_r2\n\tType: BGP univ\n\tBGP.origin: IGP\n\tBGP.as_path: 65502\n\tBGP.next_hop: 1.1.2.2\n\tBGP.local_pref: 100\n\tBGP.otc: 65502\n111.192.4.0/24       unicast [savbgp_1_3 17:17:01.084] * (100) [AS65503i]\n\tvia 1.1.1.2 on eth_r3\n\tType: BGP univ\n\tBGP.origin: IGP\n\tBGP.as_path: 65503\n\tBGP.next_hop: 1.1.1.2\n\tBGP.local_pref: 100\n"""
+# ret = parse_table(test_output)
+# for t,d in ret.items():
+#     print(t)
+#     for p,v in d.items():
+#         print(p)
+#         print(v)

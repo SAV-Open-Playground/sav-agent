@@ -277,9 +277,3 @@ class PassportApp(SavApp):
             return
         # self.logger.debug(target_ip)
         self.send_pkt(target_ip, pkt["data"])
-
-    def _build_inter_sav_spa_nlri(self, origin_asn, prefix, route_type=2, flag=1):
-        return (route_type, origin_asn, prefix, flag)
-
-    def _build_inter_sav_spd(self, sn, origin_router_id, origin_asn, validation_asn, optional_data, type=2, sub_type=2):
-        return (type, sub_type, sn, origin_router_id, origin_asn, validation_asn, optional_data)
