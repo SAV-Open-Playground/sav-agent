@@ -457,10 +457,10 @@ def parse_kernel_fib():
         headings = table.pop(0)
         table = list(map(lambda x: dict(zip(headings, x)), table))
         for row in table:
-            print(row)
             if 'Genmask' in row:
                 prefix = netaddr.IPNetwork(
                     row["Destination"]+"/"+row["Genmask"])
+                ret[prefix] = row
             else:
                 prefix = netaddr.IPNetwork(row["Destination"])
                 ret[prefix] = row

@@ -59,6 +59,7 @@ class SendAgent():
 class SavAgent():
     def __init__(self, logger=None, path_to_config=os.path.join(
             os.path.dirname(os.path.abspath(__file__)), "SavAgent_config.json")):
+        FIRST_DT = time.time()
         if logger is None:
             logger = get_logger("SavAgent")
         self.logger = logger
@@ -74,6 +75,7 @@ class SavAgent():
         # self.sib_man.upsert("active_app", json.dumps(self.data["active_app"]))
         self.bird_man = BirdCMDManager(logger=self.logger)
         self._start()
+        self.data["metric"]["first_dt"] = FIRST_DT
         # self.grpc_server = None
 
     def put_out_msg(self, msg):
@@ -135,6 +137,7 @@ class SavAgent():
         """
         self.data = {}
         self.data["metric"] = init_protocol_metric()
+        self.data["metric"]["is_fib_stable"] = False
         self.data["metric"]["skipped_bgp_update"] = 0
         self.data["pkt_id"] = 0
         self.data["msg_count"] = 0
@@ -152,7 +155,7 @@ class SavAgent():
                                    "update_time": time.time(),
                                    "check_time": time.time()}
         self.data["fib_for_apps"] = {}
-        self.data["initial_bgp_stable"] = False
+        self.data["initial_fib_stable"] = False
         
 
     def add_sav_nodes(self, nodes):
@@ -241,14 +244,18 @@ class SavAgent():
     def _refresh_kernel_fib(self):
         """
         update kernel fib
+        tell if kernel fib stable
         return new_fib, adds, dels
         """
         new_ = parse_kernel_fib()
         # self.logger.debug(new_)
+        # for prefix in new_:
+        # self.logger.debug(f"{prefix}:{new_[prefix]}")
         if len(new_) == 0:
             self.logger.error("kernel fib empty")
         t0 = time.time()
         old_ = self.data["kernel_fib"]["data"]
+        # self.logger.debug(old_)
         self.data["kernel_fib"]["check_time"] = t0
         adds = {}
         dels = {}
@@ -261,22 +268,35 @@ class SavAgent():
         if len(adds) + len(dels) > 0 or len(new_) == 0:
             self.data["kernel_fib"]["update_time"] = t0
             self.data["kernel_fib"]["data"] = new_
+            
+        if time.time() - self.data["kernel_fib"]["update_time"] > self.config["fib_stable_threshold"]:
+            self.data["metric"]["is_fib_stable"] = True
+            self.data["metric"]["last_fib_stable_dt"] = t0
+            self.logger.debug(
+                f"FIB stable at {self.data['kernel_fib']['update_time']}")
+            if not self.data["initial_fib_stable"]:
+                self.data["initial_fib_stable"] = True
+                self.data["initial_fib_stable_dt"] = t0
+            self.bird_man.update_fib(self.config["local_as"])
+        self.data["metric"]["is_fib_stable"] = False
         return self.data["kernel_fib"]["data"], adds, dels
 
     def _is_fib_stable(self, stable_span=5):
         """
         check if the fib table is stabilize
-        if fib is stable, self.data["initial_bgp_stable"] will be set to True and return True
+        if fib is stable, self.data["initial_fib_stable"] will be set to True and return True
         """
-        if self.data["initial_bgp_stable"]:
+        if self.data["initial_fib_stable"]:
             return True
         self._refresh_kernel_fib()
 
         if time.time() - self.data["kernel_fib"]["update_time"] > stable_span:
-            # self.logger.debug(self.data["kernel_fib"])
+            self.logger.debug(self.data["kernel_fib"])
+            self.data["metric"]["is_fib_stable"] = True
+            self.data["metric"]["fib_stable_dt"] = self.data['kernel_fib']['update_time']
             self.logger.debug(
                 f"FIB STABILIZED at {self.data['kernel_fib']['update_time']}")
-            self.data["initial_bgp_stable"] = True
+            self.data["initial_fib_stable"] = True
             self.bird_man.update_fib(self.config["local_as"])
             return True
         return False
@@ -291,8 +311,8 @@ class SavAgent():
         while not self.bird_man.is_bird_ready():
             time.sleep(check_span)
             # self.logger.debug("waiting for bird to be ready")
-        while not self.data.get("initial_bgp_stable", False):
-            # self.logger.debug("waiting for fib")
+        while not self.data.get("initial_fib_stable", False):
+            # wait for fib to first fib stable
             self._is_fib_stable(
                 stable_span=self.config.get("fib_stable_threshold"))
             time.sleep(check_span)
@@ -1049,7 +1069,7 @@ class SavAgent():
                                 self.logger.debug(
                                     "rpdp_app missing,unable to send spd")
                                 continue
-                            if not self.data["initial_bgp_stable"]:
+                            if not self.data["initial_fib_stable"]:
                                 self.logger.debug(
                                     "fib not stable, not sending spd")
                                 continue
