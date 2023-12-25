@@ -1,7 +1,7 @@
 #!/usr/bin/python3
 # -*-coding:utf-8 -*-
 """
-@File    :   unisav_bot.py
+@File    :   sav_control_container.py
 @Time    :   2023/09/14
 @Version :   0.1
 @Desc    :   The unisav_bot.py is responsible for the container 
@@ -25,7 +25,7 @@ class Bot():
         self.sa_config_path = f"{self.data_path}/SavAgent_config.json"
         self.exec_results_path = f"{self.data_path}/logs/exec_results.json"
         self.last_signal = {}
-        self.logger = get_logger("unisav_bot")
+        self.logger = get_logger("sav_control_container")
         self.is_monitor = False
         self.monitor_results = {}
         self.exec_result = {}
@@ -117,13 +117,14 @@ class Bot():
         if t0-self.last_check_dt < 5:
             return  # reduce db read
         self.last_check_dt = t0
-        
+
         last_rule_num = exec_result.get("last_rule_num", 0)
         exec_result["rule_num_check_dt"] = t0
         exec_result.update(
-                    {"agent_metric": json.loads(self._http_request_executor("/metric/",False))})
+            {"agent_metric": json.loads(self._http_request_executor("/metric/", False))})
         # self.logger.debug(f"agent_metric:{exec_result['agent_metric']}")
-        temp = exec_result['agent_metric']["agent"].get("sav_rule_nums",{source:{"sav_rule_num":0,"update_dt":time.time()}})[source]
+        temp = exec_result['agent_metric']["agent"].get(
+            "sav_rule_nums", {source: {"sav_rule_num": 0, "update_dt": time.time()}})[source]
         new_rule_num = temp["sav_rule_num"]
         exec_result["last_rule_num"] = new_rule_num
         if new_rule_num != last_rule_num:
@@ -150,7 +151,7 @@ class Bot():
             if not fib_stable_dt:
                 self.logger.warning("fib not stabled")
             exec_result["fib_stable_time"] = fib_stable_dt - sav_start_time
-            
+
             # try:
             #     self._http_request_executor(
             #         url_str=f"/refresh_proto/{source}/")
@@ -161,7 +162,7 @@ class Bot():
             with open(f"{self.data_path}/logs/sav_table.json", "w") as f:
                 f.write(self._http_request_executor(url_str="/sav_table/"))
             self._write_json(self.exec_results_path, exec_result)
-            
+
         else:
             exec_result.update({"stable_down_count": 10})
             exec_result.update({"source": source})
@@ -222,6 +223,8 @@ class Bot():
             sav_agent_config["apps"] = ["passport"]
         elif source == "bar_app":
             sav_agent_config["apps"] = ["bar_app"]
+        elif source is None:
+            sav_agent_config["apps"] = []
         else:
             self.logger.error(f"unknown source {source}")
             raise ValueError("unknown source")
@@ -245,7 +248,6 @@ class Bot():
 
     def run(self):
         # 循环，监控配置文件与sav数据库的转态
-        # self.logger.debug("unisav_bot start")
         while True:
             time.sleep(0.1)
             try:
