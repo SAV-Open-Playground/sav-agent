@@ -755,9 +755,9 @@ class BirdCMDManager():
         t = time.time() - t0
         if t > TIMEIT_THRESHOLD:
             self.logger.warning(f"TIMEIT {time.time()-t0:.4f} seconds")
-        self.logger.debug(remote)
-        self.logger.debug(local)
-        self.logger.debug(default)
+        # self.logger.debug(remote)
+        # self.logger.debug(local)
+        # self.logger.debug(default)
         return default, local, remote
 
     def _parse_bird_table(self, table):
