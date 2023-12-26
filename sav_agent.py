@@ -59,14 +59,14 @@ class SendAgent():
 class SavAgent():
     def __init__(self, logger=None, path_to_config=os.path.join(
             os.path.dirname(os.path.abspath(__file__)), "SavAgent_config.json")):
-        FIRST_DT = time.time()
+        first_dt = time.time()
         if logger is None:
             logger = get_logger("SavAgent")
         self.logger = logger
         self.config = {}
         self.link_man = None
         self.update_config(path_to_config)
-        self._init_data()
+        self._init_data(first_dt)
         self._in_msgs = queue.Queue()
         self._init_apps()
         # self.sib_man = SIBManager(logger=self.logger)
@@ -75,7 +75,7 @@ class SavAgent():
         # self.sib_man.upsert("active_app", json.dumps(self.data["active_app"]))
         self.bird_man = BirdCMDManager(logger=self.logger)
         self._start()
-        self.data["metric"]["first_dt"] = FIRST_DT
+
         # self.grpc_server = None
 
     def put_out_msg(self, msg):
@@ -131,12 +131,14 @@ class SavAgent():
         self.logger.error(link)
         raise NotImplementedError
 
-    def _init_data(self):
+    def _init_data(self, first_dt):
         """
         all major data should be initialized here
         """
         self.data = {}
         self.data["metric"] = init_protocol_metric()
+        self.data["metric"]["first_dt"] = first_dt
+        self.data["metric"]["initial_fib_stable"] = False
         self.data["metric"]["is_fib_stable"] = False
         self.data["metric"]["skipped_bgp_update"] = 0
         self.data["pkt_id"] = 0
@@ -155,7 +157,6 @@ class SavAgent():
                                    "update_time": time.time(),
                                    "check_time": time.time()}
         self.data["fib_for_apps"] = {}
-        self.data["initial_fib_stable"] = False
         
 
     def add_sav_nodes(self, nodes):
@@ -199,8 +200,7 @@ class SavAgent():
         self.data["active_app"] = None
         # self.logger.debug(self.config)
         if len(self.config["apps"]) == 0:
-            self.logger.warning("no apps found, quiting")
-            sys.exit(0)
+            self.logger.warning("no sav app given")
         for name in self.config["apps"]:
             if name == "strict-uRPF":
                 app_instance = UrpfApp(
@@ -234,10 +234,6 @@ class SavAgent():
                 self.logger.error(msg=f"unknown app name: {name}")
             if self.config["enabled_sav_app"] == name:
                 self.data["active_app"] = app_instance.name
-        # if self.rpdp_app is None:
-        #     msg = 'rpdp_app missing in config'
-        #     self.logger.error(msg)
-        #     raise ValueError(msg)
         self.logger.debug(
             msg=f"initialized apps: {list(self.data['apps'].keys())},using {self.data['active_app']}")
 
@@ -268,39 +264,20 @@ class SavAgent():
         if len(adds) + len(dels) > 0 or len(new_) == 0:
             self.data["kernel_fib"]["update_time"] = t0
             self.data["kernel_fib"]["data"] = new_
-            
         if time.time() - self.data["kernel_fib"]["update_time"] > self.config["fib_stable_threshold"]:
             self.data["metric"]["is_fib_stable"] = True
             self.data["metric"]["last_fib_stable_dt"] = t0
             self.logger.debug(
                 f"FIB stable at {self.data['kernel_fib']['update_time']}")
-            if not self.data["initial_fib_stable"]:
-                self.data["initial_fib_stable"] = True
-                self.data["initial_fib_stable_dt"] = t0
+            self.data["metric"]["initial_fib_stable"] = True
+            self.data["metric"]["initial_fib_stable_dt"] = t0
             self.bird_man.update_fib(self.config["local_as"])
-        self.data["metric"]["is_fib_stable"] = False
+        else:
+            self.data["metric"]["is_fib_stable"] = False
+        # if len(adds) > 0 or len(dels) > 0:
+            # self.logger.debug(f"initial fib change, adds:{adds}, dels:{dels}")
         return self.data["kernel_fib"]["data"], adds, dels
 
-    def _is_fib_stable(self, stable_span=5):
-        """
-        check if the fib table is stabilize
-        if fib is stable, self.data["initial_fib_stable"] will be set to True and return True
-        """
-        if self.data["initial_fib_stable"]:
-            return True
-        self._refresh_kernel_fib()
-
-        if time.time() - self.data["kernel_fib"]["update_time"] > stable_span:
-            self.logger.debug(self.data["kernel_fib"])
-            self.data["metric"]["is_fib_stable"] = True
-            self.data["metric"]["fib_stable_dt"] = self.data['kernel_fib']['update_time']
-            self.logger.debug(
-                f"FIB STABILIZED at {self.data['kernel_fib']['update_time']}")
-            self.data["initial_fib_stable"] = True
-            self.bird_man.update_fib(self.config["local_as"])
-            return True
-        return False
-        # self.logger.debug("FIB NOT STABILIZED")
 
     def _initial_wait(self, check_span=0.1):
         """
@@ -311,10 +288,10 @@ class SavAgent():
         while not self.bird_man.is_bird_ready():
             time.sleep(check_span)
             # self.logger.debug("waiting for bird to be ready")
-        while not self.data.get("initial_fib_stable", False):
+        while not self.data["metric"]["initial_fib_stable"]:
             # wait for fib to first fib stable
-            self._is_fib_stable(
-                stable_span=self.config.get("fib_stable_threshold"))
+            self._refresh_kernel_fib()
+
             time.sleep(check_span)
         if self.rpdp_app:
             self.rpdp_app.send_spa_init()
@@ -1069,11 +1046,11 @@ class SavAgent():
                                 self.logger.debug(
                                     "rpdp_app missing,unable to send spd")
                                 continue
-                            if not self.data["initial_fib_stable"]:
+                            if not self.data["metric"]["initial_fib_stable"]:
                                 self.logger.debug(
                                     "fib not stable, not sending spd")
                                 continue
-                            self._send_spd()
+                            # self._send_spd()
                         else:
                             self.logger.warning(
                                 f"unknown event:{event}, skipping")
