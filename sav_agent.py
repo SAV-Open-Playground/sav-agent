@@ -256,26 +256,37 @@ class SavAgent():
         adds = {}
         dels = {}
         for prefix in new_:
+            if "Met" in new_[prefix]:
+                del new_[prefix]["Met"]
+            if "Metric" in new_[prefix]:
+                del new_[prefix]["Metric"]
             if old_.get(prefix, None) != new_[prefix]:
                 adds[prefix] = new_[prefix]
         for prefix in old_:
             if new_.get(prefix, None) != old_[prefix]:
                 dels[prefix] = old_[prefix]
+        fib_changed = False
         if len(adds) + len(dels) > 0 or len(new_) == 0:
             self.data["kernel_fib"]["update_time"] = t0
             self.data["kernel_fib"]["data"] = new_
-        if time.time() - self.data["kernel_fib"]["update_time"] > self.config["fib_stable_threshold"]:
-            self.data["metric"]["is_fib_stable"] = True
-            self.data["metric"]["last_fib_stable_dt"] = t0
-            self.logger.debug(
-                f"FIB stable at {self.data['kernel_fib']['update_time']}")
-            self.data["metric"]["initial_fib_stable"] = True
-            self.data["metric"]["initial_fib_stable_dt"] = t0
-            self.bird_man.update_fib(self.config["local_as"])
-        else:
+            self.logger.debug(f"kernel fib changed")
+            # self.logger.debug(f"adds:{adds}")
+            # self.logger.debug(f"dels:{dels}")
+            fib_changed = True
+        fib_update_dt = self.data["kernel_fib"]["update_time"]
+        if fib_changed:
             self.data["metric"]["is_fib_stable"] = False
-        # if len(adds) > 0 or len(dels) > 0:
-            # self.logger.debug(f"initial fib change, adds:{adds}, dels:{dels}")
+
+        if t0 - fib_update_dt > self.config["fib_stable_threshold"]:
+            if not self.data["metric"]["is_fib_stable"]:
+                self.data["metric"]["is_fib_stable"] = True
+                self.data["metric"]["last_fib_stable_dt"] = fib_update_dt
+                self.logger.debug(f"FIB stable at {fib_update_dt}")
+                if not self.data["metric"]["initial_fib_stable"]:
+                    self.data["metric"]["initial_fib_stable"] = True
+                    self.data["metric"]["initial_fib_stable_dt"] = fib_update_dt
+        if self.data["metric"]["is_fib_stable"]:
+            self.bird_man.update_fib(self.config["local_as"])
         return self.data["kernel_fib"]["data"], adds, dels
 
 
@@ -537,8 +548,8 @@ class SavAgent():
                     add_rules.append(row)
             # TODO d
             del_rules.extend(d)
-        self.logger.debug(f"add_rules:{add_rules}")
-        self.logger.debug(f"del_rules:{del_rules}")
+        # self.logger.debug(f"add_rules:{add_rules}")
+        # self.logger.debug(f"del_rules:{del_rules}")
         self.update_sav_table(add_rules, del_rules)
         # self.ip_man.add(add_rules)
 
@@ -1041,16 +1052,13 @@ class SavAgent():
                     if cur_t - data["events"][event]["last_trigger"] > data["events"][event]["interval"]:
                         data["events"][event]["last_trigger"] = cur_t
                         if event == "spd":
+                            self._refresh_kernel_fib()
                             # self.logger.debug("triggering spd")
-                            if self.rpdp_app is None:
-                                self.logger.debug(
-                                    "rpdp_app missing,unable to send spd")
-                                continue
                             if not self.data["metric"]["initial_fib_stable"]:
                                 self.logger.debug(
                                     "fib not stable, not sending spd")
                                 continue
-                            # self._send_spd()
+                            self._send_spd()
                         else:
                             self.logger.warning(
                                 f"unknown event:{event}, skipping")

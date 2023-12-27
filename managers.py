@@ -583,7 +583,6 @@ class BirdCMDManager():
         """
         return adds, dels of bird fib
         """
-        self.logger.debug("updating fib")
         self.bird_fib["check_time"] = time.time()
         default, local, remote = self._parse_bird_fib(log_err,my_asn)
         # self.logger.debug(f"_parse_bird_fib finished")
@@ -605,6 +604,11 @@ class BirdCMDManager():
             something_updated = True
             # self.logger.debug(f"default_route updated")
         if something_updated:
+            self.logger.debug(f"BIRD something_updated")
+            # self.logger.debug(f"local_adds:{local_adds}")
+            # self.logger.debug(f"local_dels:{local_dels}")
+            # self.logger.debug(f"remote_adds:{remote_adds}")
+            # self.logger.debug(f"remote_dels:{remote_dels}")
             self.bird_fib["update_time"] = self.bird_fib["check_time"]
 
 
