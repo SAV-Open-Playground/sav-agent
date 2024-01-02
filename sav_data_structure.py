@@ -677,7 +677,7 @@ def parse_prefix(data,my_asn):
                       "\tvia ": "via",
                       "\tBGP.next_hop: ": "next_hop",
                       "\tBGP.local_pref: ": "metric",
-                      "\tBGP.otc: ": "only_to_customer"}
+                      "\tBGP.otc: ": "only_to_customer", "\tBGP.community: ": "community"}
     for prefix in ret:
         srcs = {}
         cur_key = None

@@ -66,64 +66,64 @@ app = Flask(__name__, instance_relative_config=True)
 app.config.from_mapping(SECRET_KEY="dev",)
 app_config = {
     "DEBUG": True,
-    "SQLALCHEMY_TRACK_MODIFICATIONS": True,
-    "SQLALCHEMY_POOL_SIZE": 20
 }
 app.config.from_object(app_config)
 # ensure the instance folder exists
-sa = SavAgent(
-    logger=LOGGER, path_to_config=r"/root/savop/SavAgent_config.json")
+SA_CFG_PATH = r"/root/savop/SavAgent_config.json"
+SA = SavAgent(logger=LOGGER, path_to_config=SA_CFG_PATH)
 # flask is used as a tunnel between reference_router and agent
-grpc_server = None
-quic_server = None
-grpc_addr = None
-quic_addr = None
+GRPC_SERVER = None
+QUIC_SERVER = None
+GRPC_ADDR = None
+QUIC_ADDR = None
 
 
 def start_grpc(grpc_addr, logger):
+    LOGGER.debug("starting grpc server")
     grpc_server = grpc.server(futures.ThreadPoolExecutor())
     agent_msg_pb2_grpc.add_AgentLinkServicer_to_server(
-        GrpcServer(sa, logger), grpc_server)
+        GrpcServer(SA, logger), grpc_server)
     grpc_server.add_insecure_port(grpc_addr)
     grpc_server.start()
     return grpc_server
 
 
-def _update_gprc_server(sa, logger, grpc_server, grpc_addr):
+def _update_gprc_server(sa, logger):
+    LOGGER.debug("updating grpc server")
     if sa.config["grpc_config"]["server_enabled"]:
         new_addr = sa.config["grpc_config"]["server_addr"]
-        if not grpc_server is None:
-            if new_addr == grpc_addr:
-                return grpc_server, grpc_addr
-            logger.debug(grpc_server)
-            grpc_server.stop(0)
-        grpc_server = start_grpc(new_addr, logger)
+        if GRPC_SERVER:
+            if new_addr == GRPC_ADDR:
+                return
+            logger.debug(GRPC_SERVER)
+            GRPC_SERVER.stop(0)
+        GRPC_SERVER = start_grpc(new_addr, logger)
+        GRPC_ADDR = new_addr
         logger.debug(f"GRPC server running at {new_addr}")
     else:
-        if grpc_server is None:
-            return grpc_server, grpc_addr
-        logger.debug(grpc_server)
-        grpc_server.stop(0)
-        grpc_server = None
+        if GRPC_SERVER is None:
+            return
+        logger.debug(GRPC_SERVER)
+        GRPC_SERVER.stop(0)
+        GRPC_SERVER = None
         logger.debug("GRPC server stopped")
-        grpc_addr = None
-    return grpc_server, grpc_addr
+        GRPC_ADDR = None
+    return
 
 
-def _update_config(sa, logger, grpc_server, quic_server, grpc_addr, quic_addr, data=None):
-    logger.debug("updating config")
-    msg = None
+def _update_config(new_sa_cfg_path=None):
+    """
+    """
+    LOGGER.debug("updating config")
     try:
-        if data:
-            data = json.loads(data)
-            sa.update_config(data)
-        grpc_server, grpc_addr = _update_gprc_server(
-            sa, logger, grpc_server, grpc_addr)
-        # quic_server,quic_addr = _update_quic_server(sa,logger,quic_server,quic_addr)
+        if new_sa_cfg_path:
+            SA.update_config(new_sa_cfg_path)
+            LOGGER.debug("SA config updated")
+        return ""
     except Exception as err:
-        logger.error(err)
+        LOGGER.error(err)
         msg = err
-    return (msg, grpc_server, quic_server, grpc_addr, quic_addr)
+        return msg
 
 
 @app.route("/bird_bgp_upload/", methods=["POST", "GET"])
@@ -131,6 +131,7 @@ def index():
     """
     the entrypoint for reference_router
     """
+    LOGGER.debug("enter bird_bgp_upload")
     t0 = time.time()
     rep = {}
     try:
@@ -190,6 +191,7 @@ def put_bgp_update():
     """
     put a bpg update message
     """
+    LOGGER.debug("enter put_bgp_update")
     t0 = time.time()
     try:
         msg = {"msg": {"protocol_name": "eth_r3"},
@@ -197,7 +199,7 @@ def put_bgp_update():
                "source_link": "eth_r3"}
         msg["source_app"] = "rpdp_app"
         msg["pkt_rec_dt"] = t0
-        sa.put_msg(msg)
+        SA.put_msg(msg)
         rep = {"code": "0000", "message": "success"}
     except Exception as err:
         LOGGER.exception(err)
@@ -213,6 +215,7 @@ def put_bgp_update():
 
 @app.route('/refresh_proto/<string:active_app>/', methods=["POST", "GET"])
 def refresh_proto(active_app):
+    LOGGER.debug("enter refresh_proto")
     tool = request.args.get('tool')
     if (tool is None) or (tool == "iptables"):
         info = iptables_refresh(active_app, LOGGER)
@@ -225,50 +228,56 @@ def refresh_proto(active_app):
 
 @app.route('/update_config/', methods=["POST"])
 def update_config():
+    LOGGER.debug("enter update_config")
     msg = "updated"
-    temp, grpc_server, quic_server, grpc_addr, quic_addr = _update_config(
-        sa, LOGGER, grpc_server, quic_server, grpc_addr, quic_addr, request.data)
-    if temp:
-        msg = temp
+    try:
+        return _update_config()
+    except Exception as err:
+        LOGGER.exception(err)
+        LOGGER.error(err)
+        msg = str(err)
     return {"code": "0000", "message": msg}
 
 
 @app.route('/metric/', methods=["POST", "GET"])
 def metric():
-    sa.data["metric"]["is_processing"] = sa._in_msgs.unfinished_tasks > 0 or sa.link_man._send_buff.unfinished_tasks > 0
-    rep = {"agent": sa.data["metric"]}
-    if sa.rpdp_app:
-        rep[sa.rpdp_app.name] = sa.rpdp_app.metric
-    if sa.passport_app:
-        rep[sa.passport_app.name] = sa.passport_app.metric
-    return json.dumps(rep, indent=2)
+    try:
+        SA.data["metric"]["is_processing"] = SA._in_msgs.unfinished_tasks > 0 or SA.link_man._send_buff.unfinished_tasks > 0
+        rep = {"agent": SA.data["metric"]}
+        if SA.rpdp_app:
+            rep[SA.rpdp_app.name] = SA.rpdp_app.metric
+        if SA.passport_app:
+            rep[SA.passport_app.name] = SA.passport_app.metric
+        return json.dumps(rep, indent=2)
+    except Exception as e:
+        LOGGER.exception(e)
+        return "{}"
 
 
 @app.route('/sav_table/', methods=["POST", "GET"])
 def sav_table():
-    rep = copy.deepcopy(sa.data["sav_table"])
+    LOGGER.debug("enter sav_table")
+    rep = copy.deepcopy(SA.data["sav_table"])
     rep = str(rep)
-    # rep = json.loads(rep)
-    # rep = json.dumps(rep,indent=2)
-    # return json.dumps(rep, indent=2)
     return rep
 
 
 @app.route('/savop_quic/', methods=["POST"])
 def savop_quic():
+    LOGGER.debug("enter savop_quic")
     t0 = time.time()
-    if sa.config["quic_config"]["server_enabled"]:
+    if SA.config["quic_config"]["server_enabled"]:
         msg = json.loads(request.data.decode())
         msg = {
             "msg": msg,
-            "source_app": sa.rpdp_app.name,
+            "source_app": SA.rpdp_app.name,
             "link_type": "quic",
             "msg_type": "quic_msg",
             "source_link": msg["dummy_link"],
             "pkt_rec_dt": t0
         }
         try:
-            sa.put_msg(msg)
+            SA.put_msg(msg)
         except Exception as err:
             LOGGER.error(err)
         return {"code": "0000", "message": "msg received"}
@@ -279,22 +288,19 @@ def savop_quic():
 
 @app.route('/reset_metric/', methods=["POST", "GET"])
 def reset_metric():
-    sa.data["msg_count"] = 0
-    if sa.rpdp_app:
-        sa.rpdp_app.reset_metric()
-    if sa.passport_app:
-        sa.passport_app.reset_metric()
+    LOGGER.debug("enter reset_metric")
+    SA.data["msg_count"] = 0
+    if SA.rpdp_app:
+        SA.rpdp_app.reset_metric()
+    if SA.passport_app:
+        SA.passport_app.reset_metric()
     LOGGER.debug(F"PERF-TEST: TEST BEGIN at {time.time()}")
     return {"code": "0000", "message": "reset received"}
-
-    # the returned value is not used by client
-_, grpc_server, quic_server, grpc_addr, quic_addr = _update_config(
-    sa, LOGGER, grpc_server, quic_server, grpc_addr, quic_addr)
 
 
 @app.route('/long_nlri_test/', methods=["POST", "GET"])
 def long_nlri_test():
-    LOGGER.debug(F"got long_nlri_test at {time.time()}")
+    LOGGER.debug(F"enter long_nlri_test at {time.time()}")
     try:
         bgp_sample = {"as_path": "2,1,0,0,255,222",
                       "as_path_len": 6,
@@ -316,8 +322,8 @@ def long_nlri_test():
 
 @app.route('/passport_key_exchange/', methods=['GET', 'POST'])
 def passport_key_exchange():
-    # LOGGER.debug(request.json)
-    if sa.passport_app is None:
+    LOGGER.debug("enter passport_key_exchange")
+    if SA.passport_app is None:
         LOGGER.error("passport app not detected")
         return None
     msg = {
@@ -327,13 +333,14 @@ def passport_key_exchange():
         "source_link": "",
         "pkt_rec_dt": time.time()
     }
-    sa.put_msg(msg)
-    return sa.passport_app.get_public_key_dict()
+    SA.put_msg(msg)
+    return SA.passport_app.get_public_key_dict()
 
 
 @app.route('/passport_send_pkt/', methods=['GET', 'POST'])
 def passport_send_pkt():
-    if sa.passport_app is None:
+    LOGGER.debug("enter passport_send_pkt")
+    if SA.passport_app is None:
         LOGGER.error("passport app not detected")
         return {}
     msg = {
@@ -344,29 +351,30 @@ def passport_send_pkt():
         "pkt_rec_dt": time.time()
     }
     # LOGGER.debug(msg)
-    sa.put_msg(msg)
+    SA.put_msg(msg)
     # LOGGER.debug("good")
     return "received"
 
 
 @app.route('/passport_rec_pkt/', methods=['GET', 'POST'])
 def passport_rec_pkt():
-    if sa.passport_app is None:
+    LOGGER.debug("enter passport_rec_pkt")
+    if SA.passport_app is None:
         LOGGER.error("passport app not detected")
         return {}
-    sa.put_msg({"msg": request.json, "msg_type": "passport_recv_pkt",
+    SA.put_msg({"msg": request.json, "msg_type": "passport_recv_pkt",
                 "source_app": "passport_app", "source_link": "", "pkt_rec_dt": time.time()})
     return "received"
 
 
 @app.route('/perf_test/', methods=["POST", "GET"])
 def perf_test():
-    LOGGER.debug("got perf test")
+    LOGGER.debug("enter perf_test")
     try:
         f = open(r"./perf_test.json", "r")
         lines = f.readlines()
         f.close()
-        sa.put_msg({"msg": lines, "msg_type": "perf_test",
+        SA.put_msg({"msg": lines, "msg_type": "perf_test",
                    "source_app": "", "source_link": "", "pkt_rec_dt": time.time()})
         return {"code": "0000", "message": "msg received"}
 
@@ -376,4 +384,4 @@ def perf_test():
 
 
 if __name__ == '__main__':
-    app.run("0.0.0.0:8888", debug=True)
+    app.run("0.0.0.0:8888", debug=True, use_reloader=True)

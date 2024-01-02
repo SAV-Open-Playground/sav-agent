@@ -171,41 +171,42 @@ def iptables_link_tc(active_app, logger, rules):
 
 
 def iptables_refresh(active_app, logger, limit_rate=None):
-    try:
-        if active_app is None:
-            logger.debug("active app is None")
-            return
-        # TODO dynamic changing
-        # tell if current node is sav enabled
-        with open('/root/savop/SavAgent_config.json', 'r') as f:
-            config = json.load(f)
-            enabled_sav_app = config.get("enabled_sav_app")
-        if enabled_sav_app is None:
-            logger.debug("enabled_sav_app app is None")
-            return
-        session = db.session
-        rules = session.query(SavTable).filter(
-            SavTable.source == active_app).all()
-        session.close()
-        if len(rules) == 0:
-            return f"there is no {active_app} sav rules, so don't need to refresh iptables"
-        for r in rules:
-            # logger.debug(f" 'direction':{r.direction}, 'id':{r.id}, 'interface':{r.interface}, 'metadata':{r.metadata}, \
-            # 'neighbor_as':{r.neighbor_as}, 'prefix':{r.prefix}, 'source':{r.source}, 'local_role:{r.local_role}")
-            pass
-        # flush existing rules
-        flush_chain_status = subprocess.call(['iptables', '-F', KEY_WORD])
-        if flush_chain_status != 0:
-            logger.error(f"flush {active_app} iptables failed")
-        if (limit_rate is None) or (limit_rate is not True):
-            log_info = iptable_static_refresh(active_app, logger, rules)
-        else:
-            log_info = iptables_link_tc(active_app, logger, rules)
-        return log_info
-    except Exception as e:
-        logger.error(e)
-        logger.exception(e)
-        return f"refresh {active_app} iptables failed"
+    raise NotImplementedError
+    # try:
+    #     if active_app is None:
+    #         logger.debug("active app is None")
+    #         return
+    #     # TODO dynamic changing
+    #     # tell if current node is sav enabled
+    #     with open('/root/savop/SavAgent_config.json', 'r') as f:
+    #         config = json.load(f)
+    #         enabled_sav_app = config.get("enabled_sav_app")
+    #     if enabled_sav_app is None:
+    #         logger.debug("enabled_sav_app app is None")
+    #         return
+    #     session = db.session
+    #     rules = session.query(SavTable).filter(
+    #         SavTable.source == active_app).all()
+    #     session.close()
+    #     if len(rules) == 0:
+    #         return f"there is no {active_app} sav rules, so don't need to refresh iptables"
+    #     for r in rules:
+    #         # logger.debug(f" 'direction':{r.direction}, 'id':{r.id}, 'interface':{r.interface}, 'metadata':{r.metadata}, \
+    #         # 'neighbor_as':{r.neighbor_as}, 'prefix':{r.prefix}, 'source':{r.source}, 'local_role:{r.local_role}")
+    #         pass
+    #     # flush existing rules
+    #     flush_chain_status = subprocess.call(['iptables', '-F', KEY_WORD])
+    #     if flush_chain_status != 0:
+    #         logger.error(f"flush {active_app} iptables failed")
+    #     if (limit_rate is None) or (limit_rate is not True):
+    #         log_info = iptable_static_refresh(active_app, logger, rules)
+    #     else:
+    #         log_info = iptables_link_tc(active_app, logger, rules)
+    #     return log_info
+    # except Exception as e:
+    #     logger.error(e)
+    #     logger.exception(e)
+    #     return f"refresh {active_app} iptables failed"
 
 
 class IPTableManager():
@@ -248,151 +249,155 @@ class IPTableManager():
         return command_result.returncode
 
     def add_old(self, data_list):
-        """
-        add list of rules to the STB
-        currently only add ipv4 and inter-domain rules
-        """
-        if len(data_list) == 0:
-            return
-        self.logger.debug(f"BEGIN inserting {len(data_list)}")
-        session = db.session
-        src_apps = set()
-        for data in data_list:
-            prefix, src_app, interface, local_role = data.get(
-                "prefix"), data.get("source_app"), data.get("interface"), data.get("local_role")
-            if (prefix is None) or (src_app is None) or (interface is None):
-                self.logger.error(f"Missing required fields [{data.keys()}]")
-                raise ValueError("Missing required field")
-            # update local dict
-            if not src_app in self.sav_rules:
-                self.sav_rules[src_app] = {}
+        raise NotImplementedError
+        # """
+        # add list of rules to the STB
+        # currently only add ipv4 and inter-domain rules
+        # """
+        # if len(data_list) == 0:
+        #     return
+        # self.logger.debug(f"BEGIN inserting {len(data_list)}")
+        # session = db.session
+        # src_apps = set()
+        # for data in data_list:
+        #     prefix, src_app, interface, local_role = data.get(
+        #         "prefix"), data.get("source_app"), data.get("interface"), data.get("local_role")
+        #     if (prefix is None) or (src_app is None) or (interface is None):
+        #         self.logger.error(f"Missing required fields [{data.keys()}]")
+        #         raise ValueError("Missing required field")
+        #     # update local dict
+        #     if not src_app in self.sav_rules:
+        #         self.sav_rules[src_app] = {}
 
-            neighbor_as = data.get("neighbor_as")
-            interface_list = get_host_interface_list()
-            interface_list.append("*")
-            if interface not in interface_list:
-                self.logger.error(
-                    f"the interface {interface} doesn't exit in the list:{interface_list}")
-                self.logger.error(
-                    f"sav rule {data} is not added")
-                continue
-            rules_in_table = session.query(SavTable).filter(
-                SavTable.prefix == prefix,
-                SavTable.interface == interface,
-                SavTable.source == src_app)
-            if rules_in_table.count() != 0:
-                log_msg = f"SAV RULE EXISTS: {data}"
-                # self.logger.debug(log_msg)
-                continue
-            src_apps.add(src_app)
-            sib_row = SavTable(
-                prefix=prefix,
-                neighbor_as=neighbor_as,
-                interface=interface,
-                local_role=local_role,
-                source=src_app,
-                direction=None)
-            # self.logger.debug(dir(session))
-            try:
-                session.add(sib_row)
-            except Exception as e:
-                self.logger.error(e)
-                self.logger.exception(e)
-                continue
-            # log_msg = f"SAV RULE ADDED: {data}"
-            # self.logger.info(log_msg)
-        session.commit()
-        session.close()
-        self.logger.debug(f"END inserting {len(data_list)}")
+        #     neighbor_as = data.get("neighbor_as")
+        #     interface_list = get_host_interface_list()
+        #     interface_list.append("*")
+        #     if interface not in interface_list:
+        #         self.logger.error(
+        #             f"the interface {interface} doesn't exit in the list:{interface_list}")
+        #         self.logger.error(
+        #             f"sav rule {data} is not added")
+        #         continue
+        #     rules_in_table = session.query(SavTable).filter(
+        #         SavTable.prefix == prefix,
+        #         SavTable.interface == interface,
+        #         SavTable.source == src_app)
+        #     if rules_in_table.count() != 0:
+        #         log_msg = f"SAV RULE EXISTS: {data}"
+        #         # self.logger.debug(log_msg)
+        #         continue
+        #     src_apps.add(src_app)
+        #     sib_row = SavTable(
+        #         prefix=prefix,
+        #         neighbor_as=neighbor_as,
+        #         interface=interface,
+        #         local_role=local_role,
+        #         source=src_app,
+        #         direction=None)
+        #     # self.logger.debug(dir(session))
+        #     try:
+        #         session.add(sib_row)
+        #     except Exception as e:
+        #         self.logger.error(e)
+        #         self.logger.exception(e)
+        #         continue
+        #     # log_msg = f"SAV RULE ADDED: {data}"
+        #     # self.logger.info(log_msg)
+        # session.commit()
+        # session.close()
+        # self.logger.debug(f"END inserting {len(data_list)}")
 
     def add(self, data_list):
-        """
-        add list of rules to the STB
-        currently only add ipv4 and inter-domain rules
-        """
-        if len(data_list) == 0:
-            return
-        self.logger.debug(f"BEGIN inserting {len(data_list)}")
-        session = db.session
-        interface_list = get_host_interface_list()
-        interface_list.append("*")
-        batch_data = []
-        for data in data_list:
-            prefix, src_app, interface, local_role = data.get("prefix"), data.get(
-                "source_app"), data.get("interface"), data.get("local_role")
-            if (prefix is None) or (src_app is None) or (interface is None):
-                self.logger.error(f"Missing required fields [{data.keys()}]")
-                raise ValueError("Missing required field")
-            # update local dict
-            # if not src_app in self.sav_rules:
-            #     self.sav_rules[src_app] = {}
-            neighbor_as = data.get("neighbor_as")
-            if interface not in interface_list:
-                self.logger.error(
-                    f"the interface {interface} doesn't exit in the list:{interface_list}")
-                self.logger.error(
-                    f"sav rule {data} is not added")
-                continue
-            if session.query(SavTable).filter_by(prefix=prefix, interface=interface, source=src_app).first() is not None:
-                # log_msg = f"SAV RULE EXISTS: {data}"
-                # self.logger.debug(log_msg)
-                continue
-            sib_row = SavTable(
-                prefix=prefix,
-                neighbor_as=neighbor_as,
-                interface=interface,
-                local_role=local_role,
-                source=src_app,
-                direction=None)
-            batch_data.append(sib_row)
-            if len(batch_data) == 300:
-                try:
-                    session.bulk_save_objects(batch_data)
-                    session.commit()
-                    batch_data = []
-                except Exception as e:
-                    self.logger.error(e)
-                    self.logger.exception(e)
-                    continue
-        if len(batch_data) > 0:
-            session.bulk_save_objects(batch_data)
-            session.commit()
-        session.close()
-        self.logger.debug(f"END inserting {len(data_list)}")
+        raise NotImplementedError
+        # """
+        # add list of rules to the STB
+        # currently only add ipv4 and inter-domain rules
+        # """
+        # if len(data_list) == 0:
+        #     return
+        # self.logger.debug(f"BEGIN inserting {len(data_list)}")
+        # session = db.session
+        # interface_list = get_host_interface_list()
+        # interface_list.append("*")
+        # batch_data = []
+        # for data in data_list:
+        #     prefix, src_app, interface, local_role = data.get("prefix"), data.get(
+        #         "source_app"), data.get("interface"), data.get("local_role")
+        #     if (prefix is None) or (src_app is None) or (interface is None):
+        #         self.logger.error(f"Missing required fields [{data.keys()}]")
+        #         raise ValueError("Missing required field")
+        #     # update local dict
+        #     # if not src_app in self.sav_rules:
+        #     #     self.sav_rules[src_app] = {}
+        #     neighbor_as = data.get("neighbor_as")
+        #     if interface not in interface_list:
+        #         self.logger.error(
+        #             f"the interface {interface} doesn't exit in the list:{interface_list}")
+        #         self.logger.error(
+        #             f"sav rule {data} is not added")
+        #         continue
+        #     if session.query(SavTable).filter_by(prefix=prefix, interface=interface, source=src_app).first() is not None:
+        #         # log_msg = f"SAV RULE EXISTS: {data}"
+        #         # self.logger.debug(log_msg)
+        #         continue
+        #     sib_row = SavTable(
+        #         prefix=prefix,
+        #         neighbor_as=neighbor_as,
+        #         interface=interface,
+        #         local_role=local_role,
+        #         source=src_app,
+        #         direction=None)
+        #     batch_data.append(sib_row)
+        #     if len(batch_data) == 300:
+        #         try:
+        #             session.bulk_save_objects(batch_data)
+        #             session.commit()
+        #             batch_data = []
+        #         except Exception as e:
+        #             self.logger.error(e)
+        #             self.logger.exception(e)
+        #             continue
+        # if len(batch_data) > 0:
+        #     session.bulk_save_objects(batch_data)
+        #     session.commit()
+        # session.close()
+        # self.logger.debug(f"END inserting {len(data_list)}")
 
     def delete(self, input_id):
-        session = db.session
-        sib_row = session.query(SavTable).filter(
-            SavTable.id == input_id).first()
-        prefix, interface = sib_row.prefix, sib_row.interface
-        session.delete(sib_row)
-        session.commit()
-        if session.query(SavTable).filter(SavTable.prefix == prefix).count() == 0:
-            command = f"iptables -L -v -n --line-numbers | grep {interface} | grep {prefix}"
-            command += " |awk '{ print $1 }' | xargs - I v1  iptables - D "
-            command += f"{KEY_WORD} v1"
-            self._iptables_command_execute(command=command)
-        else:
-            command = f"iptables -A {KEY_WORD} -i {interface} -s {prefix} -j DROP"
-            self._iptables_command_execute(command=command)
-        session.close()
-        return {"code": "0000", "message": "success"}
+        raise NotImplementedError
+        # session = db.session
+        # sib_row = session.query(SavTable).filter(
+        #     SavTable.id == input_id).first()
+        # prefix, interface = sib_row.prefix, sib_row.interface
+        # session.delete(sib_row)
+        # session.commit()
+        # if session.query(SavTable).filter(SavTable.prefix == prefix).count() == 0:
+        #     command = f"iptables -L -v -n --line-numbers | grep {interface} | grep {prefix}"
+        #     command += " |awk '{ print $1 }' | xargs - I v1  iptables - D "
+        #     command += f"{KEY_WORD} v1"
+        #     self._iptables_command_execute(command=command)
+        # else:
+        #     command = f"iptables -A {KEY_WORD} -i {interface} -s {prefix} -j DROP"
+        #     self._iptables_command_execute(command=command)
+        # session.close()
+        # return {"code": "0000", "message": "success"}
 
     def read(self):
-        session = db.session
-        sib_tables = session.query(SavTable).all()
-        data = []
-        for row in sib_tables:
-            data.append({"id": row.id,
-                         "prefix": row.prefix,
-                         "neighbor_as": row.neighbor_as,
-                         "interface": row.interface,
-                         "source": row.source,
-                         "direction": row.direction,
-                         "createtime": row.createtime,
-                         "local_role": row.local_role})
-        session.close()
-        return data
+        raise NotImplementedError
+        # session = db.session
+        # sib_tables = session.query(SavTable).all()
+        # data = []
+        # for row in sib_tables:
+        #     data.append({"id": row.id,
+        #                  "prefix": row.prefix,
+        #                  "neighbor_as": row.neighbor_as,
+        #                  "interface": row.interface,
+        #                  "source": row.source,
+        #                  "direction": row.direction,
+        #                  "createtime": row.createtime,
+        #                  "local_role": row.local_role})
+        # session.close()
+        # return data
 
 
 class BirdCMDManager():
@@ -605,10 +610,10 @@ class BirdCMDManager():
             # self.logger.debug(f"default_route updated")
         if something_updated:
             self.logger.debug(f"BIRD something_updated")
-            # self.logger.debug(f"local_adds:{local_adds}")
-            # self.logger.debug(f"local_dels:{local_dels}")
-            # self.logger.debug(f"remote_adds:{remote_adds}")
-            # self.logger.debug(f"remote_dels:{remote_dels}")
+            self.logger.debug(f"local_adds:{local_adds}")
+            self.logger.debug(f"local_dels:{local_dels}")
+            self.logger.debug(f"remote_adds:{remote_adds}")
+            self.logger.debug(f"remote_dels:{remote_dels}")
             self.bird_fib["update_time"] = self.bird_fib["check_time"]
 
 
@@ -900,6 +905,7 @@ class LinkManager(InfoManager):
         self._send_buff = queue.Queue()
         self.bird_cmd_buff = queue.Queue()
         self.post_session = requests.Session()
+        self.post_session.keep_alive = True
         self.result_buff = {}
         self._job_id = 0
         self._add_lock = False

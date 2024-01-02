@@ -17,7 +17,6 @@ import sqlite3
 import requests
 from sav_common import get_logger
 
-
 class Bot():
     def __init__(self):
         self.data_path = r"/root/savop"
@@ -93,6 +92,42 @@ class Bot():
         """预留函数，防止将来测试不同的机制的sav协议，此时修改配置文件"""
         pass
 
+    def update_metric(self):
+        """
+        wait until the fib is stable for the first time
+        return None if not stable or error"""
+        try:
+            ret = self._http_request_executor("/metric/", False)
+
+            ret = json.loads(ret)["agent"]
+            if ret["initial_fib_stable"]:
+                initial_stable_time = ret["initial_fib_stable_dt"] - \
+                    ret["first_dt"]
+                return initial_stable_time
+        except Exception as e:
+            self.logger.exception(e)
+        return None
+
+    def _wait_for_fib_first_stable(self, check_interval=5):
+        """
+        wait until the fib is stable for the first time
+        write the stable time to the exec_result
+        """
+        while True:
+            time.sleep(check_interval)
+            try:
+                ret = self._http_request_executor("/metric/", False)
+                ret = json.loads(ret)["agent"]
+                if ret["initial_fib_stable"]:
+                    initial_stable_time = ret["initial_fib_stable_dt"] - \
+                        ret["first_dt"]
+                    self.exec_result.update(
+                        {"initial_stable_time": initial_stable_time})
+                    self._write_json(self.exec_results_path, self.exec_result)
+            except Exception as e:
+                self.logger.exception(e)
+
+
     def monitor_sav_convergence(self):
         """功能：监控sav-agent与bird的状态，并计算sav_rule的收敛时间
         根据monitor_node字段判断是否为监控结点，非监控结点不需要打开监控功能
@@ -152,11 +187,6 @@ class Bot():
                 self.logger.warning("fib not stabled")
             exec_result["fib_stable_time"] = fib_stable_dt - sav_start_time
 
-            # try:
-            #     self._http_request_executor(
-            #         url_str=f"/refresh_proto/{source}/")
-            # except Exception as e:
-            #     self.logger.exception(e)
             exec_result["sav_last_update_dt"] = self._get_max_update_timestamp(
                 source)
             with open(f"{self.data_path}/logs/sav_table.json", "w") as f:
@@ -252,13 +282,15 @@ class Bot():
             time.sleep(0.1)
             try:
                 action = self.check_signal_file()
+                # self.logger.debug(f"action: {action}")
                 if action == "start":
                     self.start_server(action=action)
                 elif action == "stop":
                     self.stop_server(action=action)
                 elif action == "keep":
                     if self.is_monitor:
-                        self.monitor_sav_convergence()
+                        if self.last_cmd == "start":
+                            self._wait_for_fib_first_stable()
                 else:
                     self.logger.error(f"unknown action {action}")
             except Exception as e:

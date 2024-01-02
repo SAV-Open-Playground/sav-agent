@@ -237,13 +237,26 @@ class SavAgent():
         self.logger.debug(
             msg=f"initialized apps: {list(self.data['apps'].keys())},using {self.data['active_app']}")
 
-    def _refresh_kernel_fib(self):
+    def _refresh_kernel_fib(self, filter_base=True):
         """
         update kernel fib
         tell if kernel fib stable
         return new_fib, adds, dels
         """
         new_ = parse_kernel_fib()
+        if filter_base:
+             # TODO read from config
+            remove_prefixes = [netaddr.IPNetwork("1.1.0.0/16")]
+            temp = {}
+            for prefix in new_:
+                keep = True
+                for p in remove_prefixes:
+                    if prefix in p:
+                        keep = False
+                        break
+                if keep:
+                    temp[prefix] = new_[prefix]
+            new_ = temp
         # self.logger.debug(new_)
         # for prefix in new_:
         # self.logger.debug(f"{prefix}:{new_[prefix]}")
@@ -270,8 +283,8 @@ class SavAgent():
             self.data["kernel_fib"]["update_time"] = t0
             self.data["kernel_fib"]["data"] = new_
             self.logger.debug(f"kernel fib changed")
-            # self.logger.debug(f"adds:{adds}")
-            # self.logger.debug(f"dels:{dels}")
+            self.logger.debug(f"adds:{adds}")
+            self.logger.debug(f"dels:{dels}")
             fib_changed = True
         fib_update_dt = self.data["kernel_fib"]["update_time"]
         if fib_changed:
@@ -286,7 +299,8 @@ class SavAgent():
                     self.data["metric"]["initial_fib_stable"] = True
                     self.data["metric"]["initial_fib_stable_dt"] = fib_update_dt
         if self.data["metric"]["is_fib_stable"]:
-            self.bird_man.update_fib(self.config["local_as"])
+            pass
+            # self.bird_man.update_fib(self.config["local_as"])
         return self.data["kernel_fib"]["data"], adds, dels
 
 
@@ -478,13 +492,14 @@ class SavAgent():
         """
         the msg is not used here
         """
-        _, adds, dels = self._refresh_kernel_fib()
+        return
+        # _, adds, dels = self._refresh_kernel_fib()
 
-        if len(adds) == 0 and len(dels) == 0:
-            return
-        self.bird_man.update_fib(self.config["local_as"])
-        self._notify_apps(adds, dels, reset)
-        self.logger.debug(f"_notify_apps finished")
+        # if len(adds) == 0 and len(dels) == 0:
+        # return
+        # self.bird_man.update_fib(self.config["local_as"])
+        # self._notify_apps(adds, dels, reset)
+        # self.logger.debug(f"_notify_apps finished")
 
     def reset(self):
         self._process_native_bgp_update(True)
@@ -511,7 +526,7 @@ class SavAgent():
                 a, d = app.fib_changed()
             elif app_type in [RPDPApp]:
                 adds, dels = self.rpdp_app.diff_pp_v4(reset)
-                self.logger.debug(f"adds:{adds}")
+                self.logger.debug(f"adds:{len(adds)}")
                 changed_routes = []
                 for prefix, path in adds:
                     changed_routes.append({prefix: path})
