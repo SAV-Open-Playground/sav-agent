@@ -131,7 +131,6 @@ def index():
     """
     the entrypoint for reference_router
     """
-    LOGGER.debug("enter bird_bgp_upload")
     t0 = time.time()
     rep = {}
     try:
@@ -256,10 +255,8 @@ def metric():
 
 @app.route('/sav_table/', methods=["POST", "GET"])
 def sav_table():
-    LOGGER.debug("enter sav_table")
     rep = copy.deepcopy(SA.data["sav_table"])
-    rep = str(rep)
-    return rep
+    return str(rep)
 
 
 @app.route('/savop_quic/', methods=["POST"])

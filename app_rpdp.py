@@ -1052,7 +1052,7 @@ class RPDPApp(SavApp):
                 
                 msg = get_agent_bird_msg(
                     data,link_meta["link_type"], self.name, timeout, False)
-                self.logger.debug(msg)
+                # self.logger.debug(msg)
                 self.agent.link_man.put_send_async(msg)
             except Exception as e:
                 self.logger.exception(e)
@@ -1090,7 +1090,7 @@ class RPDPApp(SavApp):
                                         ,addresses=addresses)
                 msg = get_agent_bird_msg(
                         data,link_meta["link_type"], self.name, timeout, False)
-                self.logger.debug(msg)
+                # self.logger.debug(msg)
                 self.agent.link_man.put_send_async(msg)
             except Exception as e:
                 self.logger.exception(e)
@@ -1161,7 +1161,6 @@ class RPDPApp(SavApp):
         else:
             self.logger.debug(msg)
             self.logger.error(f"unknown subtype: {spd_msg['subtype']}")
-
 
         # self.logger.debug(self.spd_data)
         self._refresh_sav_rules()
@@ -1273,6 +1272,7 @@ class RPDPApp(SavApp):
         """
         rpdp_links = self.agent.link_man.get_all_link_meta()
         local_prefixes = self.agent.bird_man.get_local_fib()
+        self.logger.debug(f"raw_local_prefixes: {local_prefixes}")
         for p,p_srcs in local_prefixes.items():
             # TODO: remove filter
             # currently we only send spa for prefixes that in our config

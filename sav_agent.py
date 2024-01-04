@@ -299,8 +299,8 @@ class SavAgent():
                     self.data["metric"]["initial_fib_stable"] = True
                     self.data["metric"]["initial_fib_stable_dt"] = fib_update_dt
         if self.data["metric"]["is_fib_stable"]:
-            pass
-            # self.bird_man.update_fib(self.config["local_as"])
+            # pass
+            self.bird_man.update_fib(self.config["local_as"])
         return self.data["kernel_fib"]["data"], adds, dels
 
 
