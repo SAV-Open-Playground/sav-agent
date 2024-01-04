@@ -35,7 +35,7 @@ class GrpcServer(agent_msg_pb2_grpc.AgentLinkServicer):
             msg_dict = {"msg": json.loads(msg_str)}
             # self.logger.debug(json.dumps(msg_dict, indent=2))
             req_dst_ip = msg_dict['msg']['dst_ip']
-            msg_dict["source_app"] = sa.rpdp_app.name
+            msg_dict["source_app"] = SA.rpdp_app.name
             # TODO better ways to add source_link
             temp = msg_dict['msg']["protocol_name"].split("_")
             source_link = "_".join([temp[0], temp[2], temp[1]])
@@ -88,10 +88,10 @@ def start_grpc(grpc_addr, logger):
     return grpc_server
 
 
-def _update_gprc_server(sa, logger):
+def _update_gprc_server(logger):
     LOGGER.debug("updating grpc server")
-    if sa.config["grpc_config"]["server_enabled"]:
-        new_addr = sa.config["grpc_config"]["server_addr"]
+    if SA.config["grpc_config"]["server_enabled"]:
+        new_addr = SA.config["grpc_config"]["server_addr"]
         if GRPC_SERVER:
             if new_addr == GRPC_ADDR:
                 return
@@ -151,12 +151,12 @@ def index():
             rep = {"code": "0000", "message": "success"}
             try:
                 # LOGGER.debug(f"bird try to get cmd")
-                cmd = sa.link_man.bird_cmd_buff.get()
-                sa.link_man.bird_cmd_buff.task_done()
+                cmd = SA.link_man.bird_cmd_buff.get()
+                SA.link_man.bird_cmd_buff.task_done()
                 # LOGGER.debug(f"bird got cmd {cmd}")
                 return {"code": "2000", "data": cmd, "message": "success"}
             except IndexError as err:
-                sa.logger.warning(f"bird try to get cmd but no cmd in queue")
+                SA.logger.warning(f"bird try to get cmd but no cmd in queue")
                 pass
             t = time.time()-t0
             if t > TIMEIT_THRESHOLD:
@@ -172,7 +172,7 @@ def index():
                 if "rpdp" in msg["msg"]["channels"]:
                     msg['link_type'] = "dsav"
         msg["pkt_rec_dt"] = t0
-        sa.put_msg(msg)
+        SA.put_msg(msg)
         rep = {"code": "0000", "message": "success"}
     except Exception as err:
         LOGGER.exception(err)
