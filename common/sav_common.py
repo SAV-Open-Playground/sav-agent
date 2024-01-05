@@ -8,27 +8,21 @@
 @Desc    :   The sav_common.py contains shared functions and classes
 """
 
-import json
 import os
-
 import logging
 import logging.handlers
 import netaddr
-import requests
 import subprocess
-import copy
 import requests
-import timeit
 import netifaces
-
-from sav_data_structure import *
+from common.sav_data_structure import *
 
 
 def subprocess_run(command):
     return subprocess.run(command, shell=True, capture_output=True, encoding='utf-8')
 
 
-class RPDPPeer():
+class RPDPPeer:
     def __init__(self, asn, port, ip, is_as4) -> None:
         self.asn = asn
         self.port = port
@@ -108,7 +102,7 @@ def parse_bird_table(table, logger=None):
 
 def check_msg(key, msg, meta=SAV_META):
     """check msg before sending to ensure the msg can be processed properly"""
-    if not key in SAV_META:
+    if key not in SAV_META:
         raise KeyError(f"key {key} not in SAV_META")
     keys_types_check(msg, meta[key])
 
@@ -128,11 +122,12 @@ def rule_list_diff(old_rules, new_rules):
     return adds_, dels_
 
 
-
-
-
 def subproc_run(cmd, shell=True, capture_output=True, encoding='utf-8'):
-    return subprocess.run(cmd, shell=shell, capture_output=capture_output, encoding=encoding)
+    return subprocess.run(
+        cmd,
+        shell=shell,
+        capture_output=capture_output,
+        encoding=encoding)
 
 
 def run_cmd(command):
@@ -161,30 +156,7 @@ def get_next_hop(target_ip):
     hex_hop = run_cmd(f"ip route get {target_ip}").split(" ")
     for i in range(len(hex_hop)):
         if hex_hop[i] == "via":
-            return netaddr.IPAddress(hex_hop[i+1])
-
-
-def get_logger(file_name):
-    """
-    get logger function for all modules
-    """
-    maxsize = 1024*1024*50
-    backup_num = 1
-    level = logging.WARN
-    level = logging.DEBUG
-    logger = logging.getLogger(__name__)
-    logger.setLevel(level)
-    handler = logging.handlers.RotatingFileHandler(os.path.dirname(os.path.abspath(
-        __file__))+f"/../logs/{file_name}.log", maxBytes=maxsize, backupCount=backup_num)
-    handler.setLevel(level)
-
-    formatter = logging.Formatter(
-        "[%(asctime)s]  [%(filename)s:%(lineno)s-%(funcName)s] [%(levelname)s] %(message)s")
-    formatter.converter = time.gmtime
-    handler.setFormatter(formatter)
-
-    logger.addHandler(handler)
-    return logger
+            return netaddr.IPAddress(hex_hop[i + 1])
 
 
 def tell_str_is_interior(input_str):
@@ -209,7 +181,7 @@ def tell_str_is_interior(input_str):
     try:
         map(netaddr.IPAddress, input_str)
         return False
-    except:
+    except BaseException:
         raise ValueError("invalid string: " + input_str)
 
 
@@ -385,10 +357,10 @@ def birdc_cmd(logger, cmd, log_err=True):
         logger.debug(cmd)
         logger.debug(type(e))
         logger.error(e)
-    t = time.time()-t0
+    t = time.time() - t0
     if t > TIMEIT_THRESHOLD:
         logger.debug(cmd)
-        logger.warning(f"TIMEIT {time.time()-t0:.4f} seconds")
+        logger.warning(f"TIMEIT {time.time() - t0:.4f} seconds")
     temp = out.split("\n")[0]
     temp = temp.split()
     if len(temp) < 2:
@@ -402,7 +374,7 @@ def birdc_cmd(logger, cmd, log_err=True):
         logger.error(f"birdc execute error:{out}")
         return None
     out = "\n".join(out.split("\n")[1:])
-    t = time.time()-t0
+    t = time.time() - t0
     # if t> TIMEIT_THRESHOLD:
     #     logger.warning(f"TIMEIT {time.time()-t0:.4f} seconds")
     return out
@@ -410,7 +382,7 @@ def birdc_cmd(logger, cmd, log_err=True):
 
 def birdc_show_protocols(logger):
     """
-    execute show protocols 
+    execute show protocols
     """
     data = birdc_cmd(logger, cmd="show protocols")
     if data is None:
@@ -430,7 +402,7 @@ def birdc_get_protos_by(logger, key, value):
         a = {}
         for i in range(min(len(title), len(temp))):
             a[title[i]] = temp[i]
-        if not key in a:
+        if key not in a:
             logger.error(f"key {key} missing in:{list(a.keys())}")
             return result
         if a[key] == value:
@@ -459,7 +431,7 @@ def parse_kernel_fib():
         for row in table:
             if 'Genmask' in row:
                 prefix = netaddr.IPNetwork(
-                    row["Destination"]+"/"+row["Genmask"])
+                    row["Destination"] + "/" + row["Genmask"])
                 ret[prefix] = row
             else:
                 prefix = netaddr.IPNetwork(row["Destination"])
@@ -493,7 +465,7 @@ def get_roa(logger, t_name='r4', ns_scope=None):
     """
     get ROA info from bird table
     """
-    cmd = "show route table "+t_name
+    cmd = "show route table " + t_name
     row_str = []
     # detect if roa table have rows and stale
     last_len = -1
@@ -526,7 +498,7 @@ def get_roa(logger, t_name='r4', ns_scope=None):
                 temp[1] = temp[1].split("-")[0]
             prefix = temp[0] + '/' + temp[1]
             if ns_scope:
-                if not as_number in ns_scope:
+                if as_number not in ns_scope:
                     continue
             if as_number not in result:
                 result[as_number] = []
@@ -549,10 +521,10 @@ def get_p_by_asn(asn, roa, aspa):
         added = False
         for customer_asn, providers in aspa.items():
             if element_exist_check(ass, providers):
-                if not customer_asn in ass:
+                if customer_asn not in ass:
                     ass.append(customer_asn)
                     for p in roa[customer_asn]:
-                        if not p in result:
+                        if p not in result:
                             result[p] = customer_asn
                     added = True
     return result
@@ -570,7 +542,8 @@ def element_exist_check(a, b):
 #     """
 #     the intermedia between two sav agents
 #     """
-    # def __init__(self,link_name,source_app,remote_addr,remote_as,local_addr,local_as,interface,type):
+    # def
+    # __init__(self,link_name,source_app,remote_addr,remote_as,local_addr,local_as,interface,type):
 
 
 def get_agent_app_msg(link_meta, msg_meta, logger):
@@ -639,7 +612,7 @@ def get_aspa(logger, hostname="savopkrill.com", port_number=3000, pwd="krill"):
                     s = s.replace("AS", "")
                     s = s.replace("(v4)", "")
                     s = int(s)
-                    if not s in temp2:
+                    if s not in temp2:
                         temp2.append(s)
                 result[row["customer"]] = temp2
             return result
@@ -673,7 +646,7 @@ def sav_timer(logger):
             result = func(*args, **kwargs)
             t2 = time.time()
             logger.debug(
-                f'Function {func.__name__!r} executed in {(t2-t1):.4f}s')
+                f'Function {func.__name__!r} executed in {(t2 - t1):.4f}s')
             return result
         return wrap_func
     return timer_func

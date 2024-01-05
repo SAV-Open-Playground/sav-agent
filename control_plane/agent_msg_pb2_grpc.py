@@ -2,7 +2,7 @@
 """Client and server classes corresponding to protobuf-defined services."""
 import grpc
 
-import agent_msg_pb2 as agent__msg__pb2
+from control_plane import agent_msg_pb2 as agent__msg__pb2
 
 
 class AgentLinkStub(object):

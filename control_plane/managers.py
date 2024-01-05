@@ -6,398 +6,9 @@
 
 @Desc    :   the managers.py is responsible for the execution of selected sav mechanism and other manager classes
 '''
-import subprocess
-import json
 import queue
 import copy
-
-from sav_common import *
-
-KEY_WORD = "SAVAGENT"
-DATA_PATH = "/root/sav-agent/data"
-
-
-def huawei_acl_generator(acl_sav_rule):
-    status = subprocess_run(
-        command=f'cat /dev/null > {DATA_PATH}/huawei_acl_rule.txt')
-    status = subprocess_run(
-        command=f'echo "system-view" >> {DATA_PATH}/huawei_acl_rule.txt')
-    for iface, prefix_set in acl_sav_rule.items():
-        status = subprocess_run(
-            command=f'echo "acl name sav_{iface}" >> {DATA_PATH}/huawei_acl_rule.txt')
-        for prefix in prefix_set:
-            status = subprocess_run(
-                command=f'echo "rule deny {prefix} 0.0.0.255" >> {DATA_PATH}/huawei_acl_rule.txt')
-        status = subprocess_run(
-            command=f'echo "quit" >> {DATA_PATH}/huawei_acl_rule.txt')
-        status = subprocess_run(
-            command=f'echo "interface Ethernet {iface}" >> {DATA_PATH}/huawei_acl_rule.txt')
-        status = subprocess_run(
-            command=f'echo acl sav_{iface} inbound >> {DATA_PATH}/huawei_acl_rule.txt')
-        status = subprocess_run(
-            command=f'echo "quit" >> {DATA_PATH}/huawei_acl_rule.txt')
-    status = subprocess_run(
-        command=f'echo "save" >> {DATA_PATH}/huawei_acl_rule.txt')
-
-
-def h3c_acl_generator(acl_sav_rule):
-    status = subprocess_run(
-        command=f'cat /dev/null > {DATA_PATH}/h3c_acl_rule.txt')
-    status = subprocess_run(
-        command=f'echo "system-view" >> {DATA_PATH}/h3c_acl_rule.txt')
-    for iface, prefix_set in acl_sav_rule.items():
-        status = subprocess_run(
-            command=f'echo "acl name sav_{iface}" >> {DATA_PATH}/h3c_acl_rule.txt')
-        for prefix in prefix_set:
-            status = subprocess_run(
-                command=f'echo "rule deny {prefix} 0.0.0.255" >> {DATA_PATH}/h3c_acl_rule.txt')
-        status = subprocess_run(
-            command=f'echo "quit" >> {DATA_PATH}/h3c_acl_rule.txt')
-        status = subprocess_run(
-            command=f'echo "interface Ethernet {iface}" >> {DATA_PATH}/h3c_acl_rule.txt')
-        status = subprocess_run(
-            command=f'echo acl sav_{iface} inbound >> {DATA_PATH}/h3c_acl_rule.txt')
-        status = subprocess_run(
-            command=f'echo "quit" >> {DATA_PATH}/h3c_acl_rule.txt')
-    status = subprocess_run(
-        command=f'echo "save" >> {DATA_PATH}/h3c_acl_rule.txt')
-
-
-def router_acl_refresh(active_app, logger):
-    raise NotImplementedError
-    # TODO: match new DB
-    # if active_app is None:
-    #     return
-    # # TODO dynamic changing
-    # with open('/root/savop/SavAgent_config.json', 'r') as file:
-    #     config = json.load(file)
-    #     enabled_sav_app = config.get("enabled_sav_app")
-    # if enabled_sav_app is None:
-    #     return
-    # session = db.session
-    # rules = session.query(SavTable).filter(SavTable.source == active_app).all()
-    # session.close()
-    # if len(rules) == 0:
-    #     return f"there is no {active_app} sav rules, so don't need to refresh ACL"
-    # interface_set = set(get_host_interface_list())
-    # sav_rule = {}
-    # for rule in rules:
-    #     prefix, interface = rule.prefix.split("/")[0], rule.interface
-    #     if interface == "*":
-    #         continue
-    #     if prefix not in sav_rule.keys():
-    #         sav_rule[prefix] = {interface}
-    #     else:
-    #         sav_rule[prefix].add(interface)
-    # for key, value in sav_rule.items():
-    #     sav_rule[key] = interface_set - value
-    # acl_sav_rule = {}
-    # for prefix, iface_set in sav_rule.items():
-    #     for iface in iface_set:
-    #         if iface not in acl_sav_rule:
-    #             acl_sav_rule[iface] = {prefix}
-    #         else:
-    #             acl_sav_rule[iface].add(prefix)
-    # # acl rule generator
-    # huawei_acl_generator(acl_sav_rule=acl_sav_rule)
-    # h3c_acl_generator(acl_sav_rule=acl_sav_rule)
-    # log_info = f"refresh sav_{active_app} acl successfully"
-    # logger.info(log_info)
-    # return log_info
-
-
-def iptable_static_refresh(active_app, logger, rules):
-    interface_set = set(get_host_interface_list())
-    # using white list mode for EFP-uRPF
-    if active_app in ["EFP-uRPF-Algorithm-A_app", "EFP-uRPF-Algorithm-B_app"]:
-        for r in rules:
-            add_rule_status = subprocess.call(
-                ['iptables', '-A', KEY_WORD, '-i', r.interface, '-s', r.prefix, '-j', 'ACCEPT'])
-        for interface in interface_set:
-            add_rule_status = subprocess.call(
-                ['iptables', '-A', KEY_WORD, '-i', interface, '-s', '192.168.0.0/16', '-j', 'DROP'])
-    else:
-        sav_rule = {}
-        for rule in rules:
-            prefix, interface = rule.prefix, rule.interface
-            if interface == "*":
-                continue
-            if prefix not in sav_rule.keys():
-                sav_rule[prefix] = {interface}
-            else:
-                sav_rule[prefix].add(interface)
-        for key, value in sav_rule.items():
-            sav_rule[key] = interface_set - value
-        for prefix, iface_set in sav_rule.items():
-            for iface in iface_set:
-                add_rule_status = subprocess.call(
-                    ['iptables', '-A', KEY_WORD, '-i', iface, '-s', prefix, '-j', 'DROP'])
-    log_info = f"refresh {active_app} iptables successfully"
-    logger.info(log_info)
-    return log_info
-
-
-def iptables_link_tc(active_app, logger, rules):
-    interface_set = get_host_interface_list()
-    # using white list mode for EFP-uRPF
-    if active_app in ["EFP-uRPF-Algorithm-A_app", "EFP-uRPF-Algorithm-B_app"]:
-        for r in rules:
-            tc_handle = interface_set.index(r.interface) + 1
-            add_rule_status = subprocess.call(
-                ['iptables', '-A', KEY_WORD, '-i', r.interface, '-s', r.prefix, '-j', 'MARK', '--set-mark', tc_handle])
-        for interface in interface_set:
-            add_rule_status = subprocess.call(
-                ['iptables', '-A', KEY_WORD, '-i', interface, '-s', '192.168.0.0/16', '-j', 'MARK'])
-    else:
-        sav_rule = {}
-        for rule in rules:
-            prefix, interface = rule.prefix, rule.interface
-            if interface == "*":
-                continue
-            if prefix not in sav_rule.keys():
-                sav_rule[prefix] = {interface}
-            else:
-                sav_rule[prefix].add(interface)
-        for key, value in sav_rule.items():
-            sav_rule[key] = interface_set - value
-        for prefix, iface_set in sav_rule.items():
-            for iface in iface_set:
-                tc_handle = interface_set.index(iface) + 1
-                add_rule_status = subprocess.call(['iptables', '-A', KEY_WORD, '-i', iface, '-s', prefix, '-j', 'MARK',
-                                                   '--set-mark', tc_handle])
-    log_info = f"refresh {active_app} iptables successfully"
-    logger.info(log_info)
-    return log_info
-
-
-def iptables_refresh(active_app, logger, limit_rate=None):
-    raise NotImplementedError
-    # try:
-    #     if active_app is None:
-    #         logger.debug("active app is None")
-    #         return
-    #     # TODO dynamic changing
-    #     # tell if current node is sav enabled
-    #     with open('/root/savop/SavAgent_config.json', 'r') as f:
-    #         config = json.load(f)
-    #         enabled_sav_app = config.get("enabled_sav_app")
-    #     if enabled_sav_app is None:
-    #         logger.debug("enabled_sav_app app is None")
-    #         return
-    #     session = db.session
-    #     rules = session.query(SavTable).filter(
-    #         SavTable.source == active_app).all()
-    #     session.close()
-    #     if len(rules) == 0:
-    #         return f"there is no {active_app} sav rules, so don't need to refresh iptables"
-    #     for r in rules:
-    #         # logger.debug(f" 'direction':{r.direction}, 'id':{r.id}, 'interface':{r.interface}, 'metadata':{r.metadata}, \
-    #         # 'neighbor_as':{r.neighbor_as}, 'prefix':{r.prefix}, 'source':{r.source}, 'local_role:{r.local_role}")
-    #         pass
-    #     # flush existing rules
-    #     flush_chain_status = subprocess.call(['iptables', '-F', KEY_WORD])
-    #     if flush_chain_status != 0:
-    #         logger.error(f"flush {active_app} iptables failed")
-    #     if (limit_rate is None) or (limit_rate is not True):
-    #         log_info = iptable_static_refresh(active_app, logger, rules)
-    #     else:
-    #         log_info = iptables_link_tc(active_app, logger, rules)
-    #     return log_info
-    # except Exception as e:
-    #     logger.error(e)
-    #     logger.exception(e)
-    #     return f"refresh {active_app} iptables failed"
-
-
-class IPTableManager():
-    """
-    manage the STB with SQLite and Flask-SQLAlchemy
-    generate iptables rules and apply them
-    """
-
-    def __init__(self, logger, active_app):
-        """
-        the rule generated by all apps will be added to DB,
-        but only the rule generated by the active app will be applied via iptables or traffic control(tc) tools
-        """
-        self.sav_rules = {}
-        self.logger = logger
-        self.active_app = active_app
-        create_chain_status = subprocess.call(['iptables', '-N', KEY_WORD])
-        if create_chain_status != 0:
-            return
-        self.input_status = subprocess.call(
-            ['iptables', '-I', 'INPUT', '-j', KEY_WORD])
-        self.forward_status = subprocess.call(
-            ['iptables', '-I', 'FORWARD', '-j', KEY_WORD])
-        # init tc tool's qdisc, class, filter
-        interface_list = get_host_interface_list()
-        for index in range(0, len(interface_list)):
-            init_tc_command = f"tc qdisc add dev {interface_list[index]} root handle 1: htb default 20 && " \
-                              f"tc class add dev {interface_list[index]} parent 1:0 classid 1:1 htb rate 3Mbit && " \
-                              f"tc filter add dev {interface_list[index]} parent 1:0 prio 1 protocol ip handle {str(index + 1)} fw flowid 1:1"
-            print(init_tc_command)
-            init_tc_status = self._command_executor(command=init_tc_command)
-
-    def _command_executor(self, command):
-        command_result = subprocess.run(
-            command, shell=True, capture_output=True, encoding='utf-8')
-        return command_result.returncode
-
-    def _iptables_command_execute(self, command):
-        command_result = self._command_executor(command=command)
-        return command_result.returncode
-
-    def add_old(self, data_list):
-        raise NotImplementedError
-        # """
-        # add list of rules to the STB
-        # currently only add ipv4 and inter-domain rules
-        # """
-        # if len(data_list) == 0:
-        #     return
-        # self.logger.debug(f"BEGIN inserting {len(data_list)}")
-        # session = db.session
-        # src_apps = set()
-        # for data in data_list:
-        #     prefix, src_app, interface, local_role = data.get(
-        #         "prefix"), data.get("source_app"), data.get("interface"), data.get("local_role")
-        #     if (prefix is None) or (src_app is None) or (interface is None):
-        #         self.logger.error(f"Missing required fields [{data.keys()}]")
-        #         raise ValueError("Missing required field")
-        #     # update local dict
-        #     if not src_app in self.sav_rules:
-        #         self.sav_rules[src_app] = {}
-
-        #     neighbor_as = data.get("neighbor_as")
-        #     interface_list = get_host_interface_list()
-        #     interface_list.append("*")
-        #     if interface not in interface_list:
-        #         self.logger.error(
-        #             f"the interface {interface} doesn't exit in the list:{interface_list}")
-        #         self.logger.error(
-        #             f"sav rule {data} is not added")
-        #         continue
-        #     rules_in_table = session.query(SavTable).filter(
-        #         SavTable.prefix == prefix,
-        #         SavTable.interface == interface,
-        #         SavTable.source == src_app)
-        #     if rules_in_table.count() != 0:
-        #         log_msg = f"SAV RULE EXISTS: {data}"
-        #         # self.logger.debug(log_msg)
-        #         continue
-        #     src_apps.add(src_app)
-        #     sib_row = SavTable(
-        #         prefix=prefix,
-        #         neighbor_as=neighbor_as,
-        #         interface=interface,
-        #         local_role=local_role,
-        #         source=src_app,
-        #         direction=None)
-        #     # self.logger.debug(dir(session))
-        #     try:
-        #         session.add(sib_row)
-        #     except Exception as e:
-        #         self.logger.error(e)
-        #         self.logger.exception(e)
-        #         continue
-        #     # log_msg = f"SAV RULE ADDED: {data}"
-        #     # self.logger.info(log_msg)
-        # session.commit()
-        # session.close()
-        # self.logger.debug(f"END inserting {len(data_list)}")
-
-    def add(self, data_list):
-        raise NotImplementedError
-        # """
-        # add list of rules to the STB
-        # currently only add ipv4 and inter-domain rules
-        # """
-        # if len(data_list) == 0:
-        #     return
-        # self.logger.debug(f"BEGIN inserting {len(data_list)}")
-        # session = db.session
-        # interface_list = get_host_interface_list()
-        # interface_list.append("*")
-        # batch_data = []
-        # for data in data_list:
-        #     prefix, src_app, interface, local_role = data.get("prefix"), data.get(
-        #         "source_app"), data.get("interface"), data.get("local_role")
-        #     if (prefix is None) or (src_app is None) or (interface is None):
-        #         self.logger.error(f"Missing required fields [{data.keys()}]")
-        #         raise ValueError("Missing required field")
-        #     # update local dict
-        #     # if not src_app in self.sav_rules:
-        #     #     self.sav_rules[src_app] = {}
-        #     neighbor_as = data.get("neighbor_as")
-        #     if interface not in interface_list:
-        #         self.logger.error(
-        #             f"the interface {interface} doesn't exit in the list:{interface_list}")
-        #         self.logger.error(
-        #             f"sav rule {data} is not added")
-        #         continue
-        #     if session.query(SavTable).filter_by(prefix=prefix, interface=interface, source=src_app).first() is not None:
-        #         # log_msg = f"SAV RULE EXISTS: {data}"
-        #         # self.logger.debug(log_msg)
-        #         continue
-        #     sib_row = SavTable(
-        #         prefix=prefix,
-        #         neighbor_as=neighbor_as,
-        #         interface=interface,
-        #         local_role=local_role,
-        #         source=src_app,
-        #         direction=None)
-        #     batch_data.append(sib_row)
-        #     if len(batch_data) == 300:
-        #         try:
-        #             session.bulk_save_objects(batch_data)
-        #             session.commit()
-        #             batch_data = []
-        #         except Exception as e:
-        #             self.logger.error(e)
-        #             self.logger.exception(e)
-        #             continue
-        # if len(batch_data) > 0:
-        #     session.bulk_save_objects(batch_data)
-        #     session.commit()
-        # session.close()
-        # self.logger.debug(f"END inserting {len(data_list)}")
-
-    def delete(self, input_id):
-        raise NotImplementedError
-        # session = db.session
-        # sib_row = session.query(SavTable).filter(
-        #     SavTable.id == input_id).first()
-        # prefix, interface = sib_row.prefix, sib_row.interface
-        # session.delete(sib_row)
-        # session.commit()
-        # if session.query(SavTable).filter(SavTable.prefix == prefix).count() == 0:
-        #     command = f"iptables -L -v -n --line-numbers | grep {interface} | grep {prefix}"
-        #     command += " |awk '{ print $1 }' | xargs - I v1  iptables - D "
-        #     command += f"{KEY_WORD} v1"
-        #     self._iptables_command_execute(command=command)
-        # else:
-        #     command = f"iptables -A {KEY_WORD} -i {interface} -s {prefix} -j DROP"
-        #     self._iptables_command_execute(command=command)
-        # session.close()
-        # return {"code": "0000", "message": "success"}
-
-    def read(self):
-        raise NotImplementedError
-        # session = db.session
-        # sib_tables = session.query(SavTable).all()
-        # data = []
-        # for row in sib_tables:
-        #     data.append({"id": row.id,
-        #                  "prefix": row.prefix,
-        #                  "neighbor_as": row.neighbor_as,
-        #                  "interface": row.interface,
-        #                  "source": row.source,
-        #                  "direction": row.direction,
-        #                  "createtime": row.createtime,
-        #                  "local_role": row.local_role})
-        # session.close()
-        # return data
+from common.sav_common import *
 
 
 class BirdCMDManager():
@@ -516,7 +127,7 @@ class BirdCMDManager():
                          "Neighbor address", "Role", "Source address"]
         for line in raw_input:
             # self.logger.debug(line)
-            if line.startswith(" "*indent):
+            if line.startswith(" " * indent):
                 if last_key is None:
                     self.logger.error("last_key is None")
                     self.logger.error(line)
@@ -584,12 +195,12 @@ class BirdCMDManager():
                 result[p] = d
         return result
 
-    def update_fib(self, my_asn,log_err=True):
+    def update_fib(self, my_asn, log_err=True):
         """
         return adds, dels of bird fib
         """
         self.bird_fib["check_time"] = time.time()
-        default, local, remote = self._parse_bird_fib(log_err,my_asn)
+        default, local, remote = self._parse_bird_fib(log_err, my_asn)
         # self.logger.debug(f"_parse_bird_fib finished")
         something_updated = False
         local_adds, local_dels = self._diff_fib(
@@ -615,7 +226,6 @@ class BirdCMDManager():
             self.logger.debug(f"remote_adds:{remote_adds}")
             self.logger.debug(f"remote_dels:{remote_dels}")
             self.bird_fib["update_time"] = self.bird_fib["check_time"]
-
 
     def _diff_fib(self, old_fib, new_fib):
         """
@@ -690,7 +300,8 @@ class BirdCMDManager():
         prefix_data["remote_ip"] = netaddr.IPAddress(remote_ip)
         # self.logger.debug(prefix_data)
         return prefix_data
-    def _tell_prefix(self,prefix,prefix_srcs,my_asn):
+
+    def _tell_prefix(self, prefix, prefix_srcs, my_asn):
         """
         tell if prefix is a local remote or default
         local: the prefixes that I will broadcast
@@ -722,8 +333,8 @@ class BirdCMDManager():
         self.logger.error("unable to tell")
         self.logger.error(src)
         self.logger.error(prefix)
-        
-    def _parse_bird_fib(self, log_err,my_asn):
+
+    def _parse_bird_fib(self, log_err, my_asn):
         """
         using birdc show all to get bird fib,
         """
@@ -734,7 +345,7 @@ class BirdCMDManager():
         if data is None:
             return {}
         try:
-            data = parse_table(data,my_asn)
+            data = parse_table(data, my_asn)
         except Exception as e:
             self.logger.error(e)
             self.logger.exception(e)
@@ -754,7 +365,7 @@ class BirdCMDManager():
         remote = {}
         for table_name, table_value in data.items():
             for prefix, data in table_value.items():
-                t = self._tell_prefix(prefix,data,my_asn)
+                t = self._tell_prefix(prefix, data, my_asn)
                 if t == "default":
                     default[prefix] = data
                 elif t == "local":
@@ -763,7 +374,7 @@ class BirdCMDManager():
                     remote[prefix] = data
         t = time.time() - t0
         if t > TIMEIT_THRESHOLD:
-            self.logger.warning(f"TIMEIT {time.time()-t0:.4f} seconds")
+            self.logger.warning(f"TIMEIT {time.time() - t0:.4f} seconds")
         # self.logger.debug(remote)
         # self.logger.debug(local)
         # self.logger.debug(default)
@@ -848,9 +459,9 @@ class BirdCMDManager():
                 self.logger.warning(f"prefix {str(prefix)} already exists")
             else:
                 parsed_rows[prefix] = temp
-        t = time.time()-t0
+        t = time.time() - t0
         if t > TIMEIT_THRESHOLD:
-            self.logger.debug(f"TIMEIT {time.time()-t0:.4f} seconds")
+            self.logger.debug(f"TIMEIT {time.time() - t0:.4f} seconds")
         return table_name, parsed_rows
 
 
@@ -898,6 +509,7 @@ class LinkManager(InfoManager):
     the link_name should be generated using _get_link_name() function
     the bird command function is also here
     """
+
     # TODO: we have three types of link: native bgp, modified bgp and grpc
 
     def __init__(self, data, agent, logger=None):
@@ -915,7 +527,7 @@ class LinkManager(InfoManager):
 
     def get_by_name(self, name):
         """
-        if found, return the deepcopy of the link meta 
+        if found, return the deepcopy of the link meta
         """
         if not name in self.data["links"]:
             self.logger.debug(self.data)
@@ -955,7 +567,7 @@ class LinkManager(InfoManager):
         """
         supported type : ["http-post","grpc","quic","dsav"]
         timeout is in seconds, if set to 0, then will keep trying until sent
-        "retry" is optional, if set, then will retry for the given times (default is 10)  
+        "retry" is optional, if set, then will retry for the given times (default is 10)
         """
         # check if msg is valid
         # self.logger.debug(f"put_send_async got {msg}")

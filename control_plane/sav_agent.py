@@ -7,21 +7,18 @@
 This is a benchmark to test the performance of BIRD
 """
 
-
+import copy
 import sys
-import asyncio
-import time
-import queue
 import threading
-
-from sav_common import *
-from managers import *
-from app_rpdp import RPDPApp
-from app_urpf import UrpfApp
-from app_efp_urpf import EfpUrpfApp
-from app_fp_urpf import FpUrpfApp
-from app_bar import BarApp
-from app_passport import PassportApp
+from common.logger import LOGGER
+from control_plane.managers import *
+from sav_app.app_rpdp import RPDPApp
+from sav_app.app_urpf import UrpfApp
+from sav_app.app_efp_urpf import EfpUrpfApp
+from sav_app.app_fp_urpf import FpUrpfApp
+from sav_app.app_bar import BarApp
+from sav_app.app_passport import PassportApp
+from data_plane.data_plane_enable import interceptor
 
 
 def add_path(given_asn_path, data_dict):
@@ -61,7 +58,7 @@ class SavAgent():
             os.path.dirname(os.path.abspath(__file__)), "SavAgent_config.json")):
         first_dt = time.time()
         if logger is None:
-            logger = get_logger("SavAgent")
+            logger = LOGGER
         self.logger = logger
         self.config = {}
         self.link_man = None
@@ -69,8 +66,7 @@ class SavAgent():
         self._init_data(first_dt)
         self._in_msgs = queue.Queue()
         self._init_apps()
-        # self.sib_man = SIBManager(logger=self.logger)
-        self.ip_man = IPTableManager(self.logger, self.data["active_app"])
+        # self.sib_man = s(logger=self.logger)
         # self.sib_man.upsert("config", json.dumps(self.config))
         # self.sib_man.upsert("active_app", json.dumps(self.data["active_app"]))
         self.bird_man = BirdCMDManager(logger=self.logger)

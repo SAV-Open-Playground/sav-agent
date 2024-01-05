@@ -7,7 +7,7 @@
 @Desc    :   the app_efp_urpf.py is responsible for EFP-uRPF-SAV rule generation
 """
 
-from sav_common import *
+from common.sav_common import *
 
 
 class EfpUrpfApp(SavApp):

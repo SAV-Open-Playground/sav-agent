@@ -7,7 +7,7 @@
 @Desc    :   the app_fp_urpf.py is responsible for Fp-uRPF-SAV rule generation
 """
 
-from sav_common import *
+from common.sav_common import *
 
 
 class FpUrpfApp(SavApp):

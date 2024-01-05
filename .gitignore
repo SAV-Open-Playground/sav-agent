@@ -2,3 +2,6 @@ pylint.conf
 __pycache__/*
 data/*
 .idea
+__pycache__
+*.pyc
+logs

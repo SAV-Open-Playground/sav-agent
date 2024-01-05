@@ -7,14 +7,12 @@
 @Desc    :   implements internal key generation and handling
 """
 
-import time
 import random
-import requests
 import hashlib
 import hmac
 
 
-from sav_common import *
+from common.sav_common import *
 
 
 class PassportApp(SavApp):

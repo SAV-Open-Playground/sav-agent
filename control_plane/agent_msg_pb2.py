@@ -18,7 +18,6 @@ DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x0f\x61gent_msg.p
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, globals())
 _builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, 'agent_msg_pb2', globals())
 if _descriptor._USE_C_DESCRIPTORS == False:
-
   DESCRIPTOR._options = None
   _AGENTMSG._serialized_start=30
   _AGENTMSG._serialized_end=77

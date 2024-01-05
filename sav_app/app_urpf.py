@@ -7,7 +7,7 @@
 @Desc    :   the app_urpf.py is responsible for uRPF-SAV rule generation (Strict and Loose)
 """
 
-from sav_common import *
+from common.sav_common import *
 
 
 class UrpfApp(SavApp):

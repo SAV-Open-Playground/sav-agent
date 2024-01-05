@@ -6,7 +6,7 @@
 
 @Desc    :   the app_bar.py is responsible for BAR-SAV rule generation (when ROA and ASPA are available)
 """
-from sav_common import *
+from common.sav_common import *
 
 
 class BarApp(SavApp):
