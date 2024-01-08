@@ -15,7 +15,7 @@ import subprocess
 from datetime import datetime
 import sqlite3
 import requests
-from common.sav_common import get_logger
+from common.logger import get_logger
 
 class Bot():
     def __init__(self):
