@@ -24,7 +24,7 @@ def get_logger(file_name):
     level = logging.DEBUG
     logger = logging.getLogger(__name__)
     logger.setLevel(level)
-    handler = handlers.RotatingFileHandler(os.path.dirname(os.path.abspath(__file__)) +f"/../logs/{file_name}.log",
+    handler = handlers.RotatingFileHandler(os.path.dirname(os.path.abspath(__file__)) +f"/../../logs/{file_name}.log",
         maxBytes=maxsize,
         backupCount=backup_num)
     handler.setLevel(level)
