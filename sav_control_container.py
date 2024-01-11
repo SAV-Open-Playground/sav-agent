@@ -4,8 +4,9 @@
 @File    :   sav_control_container.py
 @Time    :   2023/09/14
 @Version :   0.1
-@Desc    :   The unisav_bot.py is responsible for the container 
-status and metric report during the emulation process. it should be run as main process inside the container.
+@Desc    :   The sav_control_container.py is responsible for the container 
+status and metric report during the emulation process. 
+it should be run as main process inside the container.
 """
 
 import time
@@ -65,7 +66,7 @@ class Bot():
 
     def check_signal_file(self):
         # 根据signal.json, sav_agent_config判断下一步路由器的执行动作
-        # 执行动作有：start, stop, keep
+        # 执行动作有:start, stop, keep
 
         signal = self._read_json(self.signal_path)
         self.stable_threshold = signal["stable_threshold"]
@@ -129,7 +130,7 @@ class Bot():
 
 
     def monitor_sav_convergence(self):
-        """功能：监控sav-agent与bird的状态，并计算sav_rule的收敛时间
+        """功能:监控sav-agent与bird的状态，并计算sav_rule的收敛时间
         根据monitor_node字段判断是否为监控结点，非监控结点不需要打开监控功能
         根据字段action, execute_result来判断sav协议机制已经开始
         根据last_rule_num, this_rule_num, stable_number来判断sav是否收敛

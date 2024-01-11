@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
 """
 -------------------------------------------------
-   File Name：     __init__.py
+   File Name:     __init__.py
    Description :
    Author :       MichaelYoung
-   date：          2023/12/27
+   date:          2023/12/27
 -------------------------------------------------
    Change Activity:
                    2023/12/27:

@@ -9,8 +9,6 @@
 """
 
 import os
-import logging
-import logging.handlers
 import netaddr
 import subprocess
 import requests

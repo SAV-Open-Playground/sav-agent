@@ -22,12 +22,13 @@ def send_pkts(target_ip, pkt_num, kbytes_of_data):
     json_data = {"target_ip": target_ip,
                  "data": data}
     s = requests.Session()
+
     for i in range(pkt_num):
         rep = s.post(
             f"http://localhost:8888/passport_send_pkt/", json=json_data, timeout=30)
         if not rep.status_code == 200:
             print(f"send packet failed with {rep.status_code}")
-
+    s.close()
 
 if __name__ == "__main__":
     pkt_num = int(sys.argv[1])

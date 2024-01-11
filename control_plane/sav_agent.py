@@ -269,11 +269,17 @@ class SavAgent():
                 del new_[prefix]["Met"]
             if "Metric" in new_[prefix]:
                 del new_[prefix]["Metric"]
-            if old_.get(prefix, None) != new_[prefix]:
+            if not prefix in old_:
                 adds[prefix] = new_[prefix]
+            else:
+                if new_[prefix] != old_[prefix]:
+                    adds[prefix] = new_[prefix]
         for prefix in old_:
-            if new_.get(prefix, None) != old_[prefix]:
+            if not prefix in new_:
                 dels[prefix] = old_[prefix]
+            else:
+                if new_[prefix] != old_[prefix]:
+                    dels[prefix] = old_[prefix]
         fib_changed = False
         if len(adds) + len(dels) > 0 or len(new_) == 0:
             self.data["kernel_fib"]["update_time"] = t0
