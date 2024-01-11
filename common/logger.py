@@ -13,6 +13,7 @@
 import os
 import time
 import logging
+from logging import handlers
 def get_logger(file_name):
     """
     get logger function for all modules
@@ -23,16 +24,12 @@ def get_logger(file_name):
     level = logging.DEBUG
     logger = logging.getLogger(__name__)
     logger.setLevel(level)
-    handler = logging.handlers.RotatingFileHandler(
-        os.path.dirname(
-            os.path.abspath(__file__)) +
-        f"/../logs/{file_name}.log",
+    handler = handlers.RotatingFileHandler(os.path.dirname(os.path.abspath(__file__)) +f"/../logs/{file_name}.log",
         maxBytes=maxsize,
         backupCount=backup_num)
     handler.setLevel(level)
 
-    formatter = logging.Formatter(
-        "[%(asctime)s]  [%(filename)s:%(lineno)s-%(funcName)s] [%(levelname)s] %(message)s")
+    formatter = logging.Formatter("[%(asctime)s]  [%(filename)s:%(lineno)s-%(funcName)s] [%(levelname)s] %(message)s")
     formatter.converter = time.gmtime
     handler.setFormatter(formatter)
 
