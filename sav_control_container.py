@@ -30,6 +30,36 @@ class Bot:
         self.exec_result = {}
         self.stable_threshold = 30
         self.last_check_dt = 0
+        self._system_check()
+
+    def _system_check(self):
+        """
+        ensure the system is ready to run the emulation
+        """
+        cmd = "sysctl -w "
+        # remove rp_filter
+        cmds = ["net.ipv4.conf.all.rp_filter=0",
+                "net.ipv4.conf.default.rp_filter=0"]
+        # set ip forward
+        cmds += ["net.ipv4.ip_forward=1", "net.ipv6.conf.all.forwarding=1"]
+        # fast closing tcp connection
+        cmds += ["net.ipv4.tcp_fin_timeout=1", "net.ipv4.tcp_tw_reuse=1"]
+
+        # increase max open files
+        cmds += ["fs.file-max=1000000"]
+        # increase max tcp connection
+
+        cmds += ["net.ipv4.tcp_max_syn_backlog=1000000",
+                 "net.core.somaxconn=1000000",
+                 "net.ipv4.tcp_max_tw_buckets=1000000",
+                 "net.ipv4.tcp_max_orphans=1000000"
+                 "net.ipv4.tcp_syncookies=1"
+                 ]
+        for c in cmds:
+            try:
+                self._run_cmd(cmd+c)
+            except Exception as e:
+                pass
 
     def _run_cmd(self, cmd, timeout=60):
         try:
