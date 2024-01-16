@@ -176,22 +176,22 @@ class Bot:
         # dynamically modify the configuration file of the SAV agent
         sav_agent_config = self._read_json(self.sa_config_path)
         source = signal["source"]
-        if source in ["rpdp_app"]:
-            sav_agent_config["apps"] = [source]
+        if source in ["RPDP"]:
+            sav_agent_config["enabled_sav_app"] = source
         elif source == "fpurpf_app":
-            sav_agent_config["apps"] = ["rpdp_app", "FP-uRPF"]
+            sav_agent_config["apps"] = ["RPDP", "FP-uRPF"]
         elif source == "strict_urpf_app":
-            sav_agent_config["apps"] = ["strict-uRPF"]
+            sav_agent_config["apps"] = ["Strict-uRPF"]
         elif source == "loose_urpf_app":
-            sav_agent_config["apps"] = ["loose-uRPF"]
+            sav_agent_config["apps"] = ["Loose-uRPF"]
         elif source == "EFP-uRPF-Algorithm-A_app":
-            sav_agent_config["apps"] = ["rpdp_app", "EFP-uRPF-A"]
+            sav_agent_config["apps"] = ["RPDP", "EFP-uRPF-A"]
         elif source == "EFP-uRPF-Algorithm-B_app":
-            sav_agent_config["apps"] = ["rpdp_app", "EFP-uRPF-B"]
-        elif source == "passport":
-            sav_agent_config["apps"] = ["passport"]
-        elif source == "bar_app":
-            sav_agent_config["apps"] = ["bar_app"]
+            sav_agent_config["apps"] = ["RPDP", "EFP-uRPF-B"]
+        elif source == "Passport_app":
+            sav_agent_config["apps"] = ["Passport"]
+        elif source == "BAR_app":
+            sav_agent_config["apps"] = ["BAR"]
         elif source is None:
             sav_agent_config["apps"] = []
         else:

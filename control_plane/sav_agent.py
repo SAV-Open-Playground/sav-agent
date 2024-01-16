@@ -67,8 +67,6 @@ class SavAgent():
         self._in_msgs = queue.Queue()
         self._init_apps()
         # self.sib_man = s(logger=self.logger)
-        # self.sib_man.upsert("config", json.dumps(self.config))
-        # self.sib_man.upsert("active_app", json.dumps(self.data["active_app"]))
         self.bird_man = BirdCMDManager(logger=self.logger)
         self._start()
 
@@ -126,7 +124,8 @@ class SavAgent():
         self.logger.error(msg)
         self.logger.error(link)
         raise NotImplementedError
-
+    def _init_sav_table(self):
+        self.data["sav_table"] = {}
     def _init_data(self, first_dt):
         """
         all major data should be initialized here
@@ -142,7 +141,7 @@ class SavAgent():
         self.data["links"] = {}  # link manager"s data
         self.data["fib"] = []  # system"s fib table
         # key is prefix (str), value is as paths in csv
-        self.data["sav_table"] = {}
+        self._init_sav_table()
         # node key is as number, value is None; link key is as number,
         # value is list of directly connected as numbers, link is undirected
         self.data["sav_graph"] = {"nodes": {}, "links": {}}
@@ -164,8 +163,6 @@ class SavAgent():
                 # self.logger.info(f"SAV GRAPH NODE ADDED :{node}")
                 added = True
         if added:
-            # self.sib_man.upsert(
-            #     "sav_graph", json.dumps((self.data["sav_graph"])))
             pass
 
     def add_sav_link(self, asn_a, asn_b):
@@ -180,13 +177,11 @@ class SavAgent():
         value_asn = max(asn_a, asn_b)
         if not key_asn in data_dict["links"]:
             data_dict["links"][key_asn] = [value_asn]
-            # self.sib_man.upsert("sav_graph", json.dumps((data_dict)))
             self.logger.info(f"SAV GRAPH LINK ADDED :{key_asn}-{value_asn}")
             return
         # now key_asn in data_dict["links"]
         if value_asn not in data_dict["links"][key_asn]:
             data_dict["links"][key_asn].append(value_asn)
-            # self.sib_man.upsert("sav_graph", json.dumps((data_dict)))
             self.logger.info(f"SAV GRAPH LINK ADDED :{key_asn}-{value_asn}")
 
     def _init_apps(self):
@@ -198,11 +193,11 @@ class SavAgent():
         if len(self.config["apps"]) == 0:
             self.logger.warning("no sav app given")
         for name in self.config["apps"]:
-            if name == "strict-uRPF":
+            if name == "Strict-uRPF":
                 app_instance = UrpfApp(
                     self, mode="strict", logger=self.logger)
                 self.add_app(app_instance)
-            elif name == "loose-uRPF":
+            elif name == "Loose-uRPF":
                 app_instance = UrpfApp(
                     self, mode="loose", logger=self.logger)
                 self.add_app(app_instance)
@@ -213,14 +208,14 @@ class SavAgent():
             elif name == "FP-uRPF":
                 app_instance = FpUrpfApp(self, logger=self.logger)
                 self.add_app(app_instance)
-            elif name == "rpdp_app":
+            elif name == "RPDP":
                 app_instance = RPDPApp(self, logger=self.logger)
                 self.add_app(app_instance)
                 self.rpdp_app = app_instance
-            elif name == "bar_app":
+            elif name == "BAR":
                 app_instance = BarApp(self, logger=self.logger)
                 self.add_app(app_instance)
-            elif name == "passport":
+            elif name == "Passport":
                 app_instance = PassportApp(
                     self, self.config["local_as"], self.config["router_id"], logger=self.logger)
                 self.passport_app = app_instance
@@ -235,9 +230,9 @@ class SavAgent():
 
     def _refresh_kernel_fib(self, filter_base=True):
         """
-        update kernel fib
-        tell if kernel fib stable
-        return new_fib, adds, dels
+        update kernel fib using cmd
+        tell if kernel fib has changed
+        return adds, dels
         """
         new_ = parse_kernel_fib()
         if filter_base:
@@ -259,7 +254,7 @@ class SavAgent():
         if len(new_) == 0:
             self.logger.error("kernel fib empty")
         t0 = time.time()
-        old_ = self.data["kernel_fib"]["data"]
+        old_ = self.get_kernel_fib()
         # self.logger.debug(old_)
         self.data["kernel_fib"]["check_time"] = t0
         adds = {}
@@ -303,14 +298,13 @@ class SavAgent():
         if self.data["metric"]["is_fib_stable"]:
             # pass
             self.bird_man.update_fib(self.config["local_as"])
-        return self.data["kernel_fib"]["data"], adds, dels
+        return adds, dels
 
 
     def _initial_wait(self, check_span=0.1):
         """
         1. wait for bird to be ready
         2. wait for fib to be stable
-        3. perform initial events(send spa)
         """
         while not self.bird_man.is_bird_ready():
             time.sleep(check_span)
@@ -318,11 +312,7 @@ class SavAgent():
         while not self.data["metric"]["initial_fib_stable"]:
             # wait for fib to first fib stable
             self._refresh_kernel_fib()
-
             time.sleep(check_span)
-        if self.rpdp_app:
-            self.rpdp_app.send_spa_init()
-            self.logger.debug("spa init sent")
         return
 
     def is_all_msgs_finished(self):
@@ -354,15 +344,20 @@ class SavAgent():
             msgs.append(msg)
         return bgp_update_msg, msgs
 
-    def _run(self):
+    def _start_main(self):
         """
         start a thread to check the cmd queue and process each cmd
         """
         self._initial_wait()
+       
+        # generate initial sav rules
+        self._notify_apps(reset=True)
         # self.logger.debug("starting main loop")
         while True:
             try:
                 try:
+                    if self.rpdp_app:
+                        self.rpdp_app.send_spa_init()
                     msgs = []
                     # we first detect all native bgp update,
                     # if we detect one native bgp update, we insert a msg to trigger the kernel fib update
@@ -370,7 +365,6 @@ class SavAgent():
                     msg0 = self._in_msgs.get()
                     bgp_update_msg, msgs = self._precheck_msg(
                         msg0, bgp_update_msg, msgs)
-                    # self.logger.debug(self._in_msgs.qsize())
                     for _ in range(self._in_msgs.qsize()):
                         msg = self._in_msgs.get()
                         bgp_update_msg, msgs = self._precheck_msg(
@@ -378,7 +372,7 @@ class SavAgent():
                     if bgp_update_msg:
                         msgs = [bgp_update_msg] + msgs
                     for m in msgs:
-                        # self.logger.debug(f"processing msg {m}")
+                        self.logger.debug(f"processing msg {m}")
                         self._process_msg(m)
                         self._in_msgs.task_done()
                 except Exception as err:
@@ -441,13 +435,13 @@ class SavAgent():
         keys_types_check(msg, key_types)
         new_state = msg["msg"]
         link_name = msg["source_link"]
-        if not new_state:
-            return  # ignore link down
-        try:
+        if not new_state == self.link_man.get_link_state(link_name):
             self.link_man.update_link_kv(link_name, "state", new_state)
-        except KeyError:
-            pass
-
+            self.logger.info(f"link {link_name} state changed to {new_state}")
+            if new_state is False:
+                # reset initial_broadcast status
+                self.link_man.update_link_kv(
+                    link_name, "initial_broadcast", False)
         if self.passport_app:
             self.passport_app.init_key_publish()
 
@@ -489,82 +483,91 @@ class SavAgent():
     def get_kernel_fib(self):
         """return the cached fib"""
         return self.data["kernel_fib"]["data"]
-
-    def _process_native_bgp_update(self, reset=False):
+    def _process_native_bgp_update(self):
         """
-        the msg is not used here
+        notify apps about native bgp update
         """
-        return
-        # _, adds, dels = self._refresh_kernel_fib()
+        fib_adds, fib_dels = self._refresh_kernel_fib()
+        is_bird_fib_changed, bird_fib_change_dict = self.bird_man.update_fib(self.config["local_as"])
+        is_kernel_fib_change = fib_adds!=0 and fib_dels !=0
+        # now we have the latest fib in kernel and bird
+        if is_bird_fib_changed != is_kernel_fib_change:
+            self.logger.warning("bird fib and kernel fib change inconsistent")
+            self.logger.debug(f"bird_fib_change_d:{bird_fib_change_dict}")
+            self.logger.debug(f"fib_adds:{fib_adds}")
+            self.logger.debug(f"fib_dels:{fib_dels}")
+        if is_bird_fib_changed or is_kernel_fib_change:
+            self._notify_apps(False,fib_adds,fib_dels,bird_fib_change_dict)
 
-        # if len(adds) == 0 and len(dels) == 0:
-        # return
-        # self.bird_man.update_fib(self.config["local_as"])
-        # self._notify_apps(adds, dels, reset)
-        # self.logger.debug(f"_notify_apps finished")
-
-    def reset(self):
-        self._process_native_bgp_update(True)
-
-    def _notify_apps(self, adds, dels, reset, app_list=None):
+    def _notify_apps(self, reset,fib_adds, fib_dels, bird_fib_change_dict
+                     ,app_list=None):
         """
-        rpdp logic is handled in other function
-        here we pass the FIB change to SAV mechanism,
-        who does not need other information
+        notify sav_apps to generate sav rules
+        if reset is True, it will clear all existing rules and re-generate all rules(the fib_adds and fib_dels will be ignored)
+        if app_list is None, all apps will be notified.
         """
         add_rules = []
         del_rules = []
         if app_list is None:
             app_list = self.get_all_app_names()
+        self.logger.debug(f"app list:{app_list}")
+        if reset is True:
+            self.logger.debug(f"resetting sav table")
+            self._init_sav_table()
         for app_name in app_list:
             app = self.get_app(app_name)
             self.logger.debug(f"notifying app: {app_name}")
-            a, d = [], []
             app_type = type(app)
-            if app_type in [UrpfApp]:
-                if len(adds) > 0 or len(dels) > 0:
-                    a, d = app.fib_changed(adds, dels)
-            elif app_type in [EfpUrpfApp, FpUrpfApp, BarApp, PassportApp]:
-                a, d = app.fib_changed()
-            elif app_type in [RPDPApp]:
-                adds, dels = self.rpdp_app.diff_pp_v4(reset)
-                self.logger.debug(f"adds:{len(adds)}")
-                changed_routes = []
-                for prefix, path in adds:
-                    changed_routes.append({prefix: path})
-                self.logger.debug(f"changed_routes:{changed_routes}")
-                # self._send_origin(None, changed_routes)
-            else:
-                self.logger.error(f":{type(app)}")
-            for rule in a:
-                row = {"prefix":        rule[0],
-                       "interface":     rule[1],
-                       "source_app":    rule[2],
-                       "neighbor_as":   rule[3]
-                       }
-                if rule[1] == "*":
-                    up_link_names = self.link_man.get_all_up_type(True)
-                    # TODO currently we only apply to bgp interfaces
-                    for link_name in up_link_names:
-                        link_dict = self.link_man.get_by_name(
-                            link_name)
-                        row["local_role"] = link_dict["local_role"]
-                        add_rules.append(row)
+            try:
+                if app_type in [RPDPApp]:
+                    adds, dels = self.rpdp_app.diff_pp_v4(reset)
+                    self.logger.debug(f"adds:{len(adds)}")
+                    changed_routes = []
+                    for prefix, path in adds:
+                        changed_routes.append({prefix: path})
+                    self.logger.debug(f"changed_routes:{changed_routes}")
+                    # self._send_origin(None, changed_routes)
                 else:
-                    temp = self.bird_man.get_bgp_by_interface(rule[1])
-                    if temp == []:
-                        self.logger.warning(
-                            f"unable to find meta fo link {rule[1]}")
-                        return
-                    if len(temp) != 1:
-                        self.logger.error(temp)
-                        self.logger.error(
-                            f"{len(temp)} bgp instances found on interface [{rule[1]}],")
-                    temp = temp[0]
-                    row["local_role"] = temp["local_role"]
-                    add_rules.append(row)
-            # TODO d
-            del_rules.extend(d)
+                    new_rules = app.generate_sav_rules(fib_adds, fib_dels, bird_fib_change_dict)
+                    old_rules = self.get_sav_rules_by_app(app_name)
+                    # a, d = diff_sav_rules(old_rules, new_rules)
+                    self.logger.debug(f"new_rules:{new_rules}")
+                    self.logger.debug(f"old_rules:{old_rules}")
+                    # self.logger.debug(f"adds:{a}")
+                    # self.logger.debug(f"dels:{d}")
+                    
+                for rule in a:
+                    row = {"prefix":        rule[0],
+                        "interface":     rule[1],
+                        "source_app":    rule[2],
+                        "neighbor_as":   rule[3]
+                        }
+                    if rule[1] == "*":
+                        up_link_names = self.link_man.get_all_up_type(True)
+                        # TODO currently we only apply to bgp interfaces
+                        for link_name in up_link_names:
+                            link_dict = self.link_man.get_by_name(
+                                link_name)
+                            row["local_role"] = link_dict["local_role"]
+                            add_rules.append(row)
+                    else:
+                        temp = self.bird_man.get_bgp_by_interface(rule[1])
+                        if temp == []:
+                            self.logger.warning(
+                                f"unable to find meta fo link {rule[1]}")
+                            return
+                        if len(temp) != 1:
+                            self.logger.error(temp)
+                            self.logger.error(
+                                f"{len(temp)} bgp instances found on interface [{rule[1]}],")
+                        temp = temp[0]
+                        row["local_role"] = temp["local_role"]
+                        add_rules.append(row)
+                # TODO d
+                del_rules.extend(d)
+            except Exception as e:
+                self.logger.exception(e)
+                self.logger.error(f"error when notifying app {app_name}")
         # self.logger.debug(f"add_rules:{add_rules}")
         # self.logger.debug(f"del_rules:{del_rules}")
         self.update_sav_table(add_rules, del_rules)
@@ -819,7 +822,6 @@ class SavAgent():
         key_types = [("msg_type", str), ("pkt_id", int), ("pkt_rec_dt", float)]
         keys_types_check(input_msg, key_types)
         msg, m_t = input_msg["msg"], input_msg["msg_type"]
-        # self.logger.debug(input_msg)
         match m_t:
             case "link_state_change":
                 self._process_link_state_change(input_msg)
@@ -829,12 +831,14 @@ class SavAgent():
             case "bgp_update":
                 self._process_native_bgp_update()
             case "rpdp_update":
-                self.rpdp_app.process_rpdp_spa_msg(input_msg)
-            case "rpdp_route_refresh":
-                # self.logger.debug(f"got rpdp_route_refresh:{input_msg}")
+                # self.logger.debug(f"rpdp_update:{msg}")
                 link_name = input_msg["source_link"]
                 link_meta = self.link_man.get_by_name(link_name)
-                self.rpdp_app.process_rpdp_route_refresh(input_msg, link_meta)
+                self.rpdp_app.process_spa(input_msg, link_meta)
+            case "rpdp_route_refresh":
+                link_name = input_msg["source_link"]
+                link_meta = self.link_man.get_by_name(link_name)
+                self.rpdp_app.process_spd(input_msg, link_meta)
             case "grpc_msg":
                 if self.rpdp_app:
                     self.rpdp_app.process_grpc_msg(input_msg)
@@ -886,7 +890,7 @@ class SavAgent():
         metric["time"] += t1-t0
         # self.logger.debug(f", time used: {t1-t0:.4f}; msg:{input_msg}")
         metric["size"] += len(str(input_msg))
-        # if not m_t.startswith("passport"):
+        # if not m_t.startswith("Passport"):
         self._update_sav_rule_nums()
         # self.logger.debug(f"finished")
 
@@ -1083,7 +1087,7 @@ class SavAgent():
 
     def _start(self):
         self._thread_pool = []
-        self._thread_pool.append(threading.Thread(target=self._run))
+        self._thread_pool.append(threading.Thread(target=self._start_main))
         self._thread_pool.append(threading.Thread(target=self.link_man._run))
         self._thread_pool.append(threading.Thread(
             target=self._interval_trigger))

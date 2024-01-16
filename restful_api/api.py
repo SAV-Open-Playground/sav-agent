@@ -58,7 +58,7 @@ def index():
             if t > TIMEIT_THRESHOLD:
                 LOGGER.warning(f"TIMEIT {time.time()-t0:.4f} seconds")
             return rep
-        msg["source_app"] = "rpdp_app"
+        msg["source_app"] = "RPDP"
         if m_t == "link_state_change":
             msg["source_link"] = msg["protocol_name"]
         else:
@@ -93,7 +93,7 @@ def put_bgp_update():
         msg = {"msg": {"protocol_name": "eth_r3"},
                "msg_type": "bgp_update",
                "source_link": "eth_r3"}
-        msg["source_app"] = "rpdp_app"
+        msg["source_app"] = "RPDP"
         msg["pkt_rec_dt"] = t0
         SA.put_msg(msg)
         rep = {"code": "0000", "message": "success"}

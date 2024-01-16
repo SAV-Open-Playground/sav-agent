@@ -197,7 +197,7 @@ class BirdCMDManager():
 
     def update_fib(self, my_asn, log_err=True):
         """
-        return adds, dels of bird fib
+        return if changed and a dict of changes
         """
         self.bird_fib["check_time"] = time.time()
         default, local, remote = self._parse_bird_fib(log_err, my_asn)
@@ -216,25 +216,29 @@ class BirdCMDManager():
             self.bird_fib["remote_route"] = remote
             # self.logger.debug(f"remote_route updated")
         if default != self.bird_fib["default_route"]:
+            # ignore default route change
             self.bird_fib["default_route"] = default
-            something_updated = True
+            # something_updated = True
             # self.logger.debug(f"default_route updated")
         if something_updated:
             self.logger.debug(f"BIRD something_updated")
-            self.logger.debug(f"local_adds:{local_adds}")
-            self.logger.debug(f"local_dels:{local_dels}")
-            self.logger.debug(f"remote_adds:{remote_adds}")
-            self.logger.debug(f"remote_dels:{remote_dels}")
+            # self.logger.debug(f"local_adds:{local_adds}")
+            # self.logger.debug(f"local_dels:{local_dels}")
+            # self.logger.debug(f"remote_adds:{remote_adds}")
+            # self.logger.debug(f"remote_dels:{remote_dels}")
             self.bird_fib["update_time"] = self.bird_fib["check_time"]
-
+        return something_updated,{"local_adds":local_adds,"local_dels":local_dels,"remote_adds":remote_adds,"remote_dels":remote_dels}
     def _diff_fib(self, old_fib, new_fib):
         """
         return list of added and deleted rows in dict format
+        
         """
         # self.logger.debug(f"old fib:{old_fib}, new_fib:{new_fib}")
         dels = {}
         adds = {}
+        # skip_keys = ["time"]
         for prefix in new_fib:
+            old_data = old_fib.get(prefix, None)
             if not (new_fib.get(prefix, None) == old_fib.get(prefix, None)):
                 adds[prefix] = new_fib[prefix]
         for prefix in old_fib:
@@ -525,6 +529,12 @@ class LinkManager(InfoManager):
         self.read_brd_cfg(agent.config['local_as'])
         self.bird_man = BirdCMDManager(logger)
 
+    def get_link_state(self, link_name):
+        """
+        return the state of the link
+        """
+        return self.data["links"][link_name]["status"]
+
     def get_by_name(self, name):
         """
         if found, return the deepcopy of the link meta
@@ -580,7 +590,7 @@ class LinkManager(InfoManager):
         if not msg["msg_type"] in supported_type:
             raise ValueError(
                 f"unknown msg type {msg['msg_type']} / {supported_type}")
-        supported_apps = ["rpdp_app", "passport_app"]
+        supported_apps = ["RPDP", "passport_app"]
         if not msg["source_app"] in supported_apps:
             raise ValueError(
                 f"unknown msg source_app {msg['source_app']} / {supported_apps}")
@@ -588,9 +598,10 @@ class LinkManager(InfoManager):
         msg["created_dt"] = time.time()
         self._send_buff.put(msg)
         self._job_id += 1
-        # do not remove this line, will trigger the shoot
-        self.logger.info(
-            f"send_trigger PLEASE IGNORE: {self._send_buff.qsize()}")
+        # do not remove this line. This line will trigger the sending process of the message
+        self._send_buff.qsize()
+        # self.logger.info(
+        # f"send_trigger PLEASE IGNORE: {self._send_buff.qsize()}")
 
     def put_send_sync(self, msg):
         """
@@ -681,7 +692,8 @@ class LinkManager(InfoManager):
                 try:
                     self.agent.bird_man.bird_cmd("call_agent")
                     sent = True
-                except:
+                except Exception as e:
+                    self.logger.exception(e)
                     sent = False
             case "grpc":
                 raise NotImplementedError
@@ -690,7 +702,7 @@ class LinkManager(InfoManager):
         msg["finished_dt"] = time.time()
         # update_metric
         match msg["source_app"]:
-            case "rpdp_app":
+            case "RPDP":
                 match msg["msg_type"]:
                     case "dsav":
                         temp = self._update_metric(

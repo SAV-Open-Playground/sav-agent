@@ -24,7 +24,8 @@ GRPC_SERVER = None
 QUIC_SERVER = None
 GRPC_ADDR = None
 QUIC_ADDR = None
-
+SA_CFG_PATH = r"/root/savop/SavAgent_config.json"
+SA = SavAgent(logger=LOGGER, path_to_config=SA_CFG_PATH)
 
 class GrpcServer(agent_msg_pb2_grpc.AgentLinkServicer):
     def __init__(self, agent, logger):
@@ -65,9 +66,6 @@ class GrpcServer(agent_msg_pb2_grpc.AgentLinkServicer):
             self.logger.error(f"grpc msg adding error: {err}")
 
         return response
-SA_CFG_PATH = r"/root/savop/SavAgent_config.json"
-SA = SavAgent(logger=LOGGER, path_to_config=SA_CFG_PATH)
-# flask is used as a tunnel between reference_router and agent
 
 def start_grpc(grpc_addr, logger):
     LOGGER.debug("starting grpc server")
@@ -104,6 +102,7 @@ def _update_gprc_server(logger):
 
 def _update_config(new_sa_cfg_path=None):
     """
+    reserved for future use
     """
     LOGGER.debug("updating config")
     try:
