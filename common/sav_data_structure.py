@@ -9,6 +9,7 @@
 import netaddr
 import time
 import json
+# for RPDP SPA msg
 DEFAULT_MIIG_TYPE = 0
 DEFAULT_MIIG_TAG = 0
 
@@ -373,7 +374,6 @@ def get_send_buff_msg(src_app, type, argv, msg, retry_forever, response):
     ret = {"source_app": src_app, "type": type, "argv": argv, "msg": msg}
     check_send_buff_msg(ret)
     return ret
-
 
 def check_send_buff_msg(msg):
     """

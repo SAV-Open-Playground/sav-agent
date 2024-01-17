@@ -36,7 +36,7 @@ from aioquic.quic.events import QuicEvent
 USER_AGENT = "aioquic/" + aioquic.__version__
 GRPC_RETRY_INTERVAL = 0.1
 
-
+RPDP_ID = "rpdp"
 class URL:
     def __init__(self, url: str) -> None:
         parsed = urlparse(url)
@@ -291,7 +291,7 @@ class RPDPApp(SavApp):
     embedded grpc link
     """
 
-    def __init__(self, agent, name="rpdp_app", logger=None):
+    def __init__(self, agent, name, logger=None):
         super(RPDPApp, self).__init__(agent, name, logger)
         self.pp_v4_dict = {}
         self.connect_objs = {}
@@ -304,6 +304,7 @@ class RPDPApp(SavApp):
         self.spd_data = {"inter": {}, "intra": {}}
         # local rule cache
         self.spd_sn_dict = {}
+        self.spa_sn_dict = {}
     def get_init_metric_dict(self):
         return {
             "dsav": init_protocol_metric(),
@@ -466,9 +467,6 @@ class RPDPApp(SavApp):
         except Exception as e:
             self.logger.exception(e)
             self.logger.debug(f"connect {host} failed")
-            self.logger.error(type(e))
-            self.logger.error(dir(e))
-            self.logger.debug(e.name())
             trace = e.with_traceback()
             # self.logger.error(str(e))
             self.logger.error(str(trace))
@@ -631,7 +629,7 @@ class RPDPApp(SavApp):
             msg["sav_nlri"] = nlri[:max_nlri_len]
             msg_byte = self._msg_to_hex_str(msg)
             out_msg = {"msg_type": "dsav", "data": msg_byte,
-                       "source_app": self.name, "timeout": 0, "store_rep": False}
+                       "source_app": self.app_id, "timeout": 0, "store_rep": False}
             self.agent.put_out_msg(out_msg)
             nlri = nlri[max_nlri_len:]
         # self.logger.info(
@@ -770,14 +768,14 @@ class RPDPApp(SavApp):
     #             link_type = "dsav"
     #         else:
     #             link_type = "native_bgp"
-    #         msg["source_app"] = self.name
+    #         msg["source_app"] = self.app_id
     #         msg["source_link"] = msg["msg"]["protocol_name"]
 
     #         if m_t == "bgp_update":
     #             self.put_link_up(msg["source_link"], link_type)
     #             msg["msg"] = self.preprocess_msg(msg["msg"])
     #             # self.logger.debug("receive_http_msg")
-    #             adds = self.process_rpdp_spa_msg(msg)
+    #             adds = self.process_spa(msg)
     #         else:
     #             self.logger.error(msg)
     #             self.agent.put_msg(msg)
@@ -796,13 +794,13 @@ class RPDPApp(SavApp):
 
         msg["msg"]["interface_name"] = link_meta["interface_name"]
         msg["link_type"] = "grpc"
-        return self.process_rpdp_spa_msg(msg)
+        return self.process_spa(msg)
 
     def process_quic_msg(self, msg, is_test_msg=False, test_id=None):
         self.logger.debug("enter")
         msg = self._quic_msg_unbox(msg)
         self.logger.debug("unboxed")
-        return self.process_rpdp_spa_msg(msg)
+        return self.process_spa(msg)
 
     def preprocess_msg(self, msg):
         # as_path is easier to process in string format, so we keep it
@@ -925,13 +923,17 @@ class RPDPApp(SavApp):
                     self.logger.debug(
                         f"unable to find interior link for as: {next_as}, no SAV ?")
 
-    def process_rpdp_spa_msg(self, msg):
+    def process_spa(self, msg, link_meta):
         """
         process rpdp message, only inter-domain is supported
         regarding the nlri part, the processing procedure is the same
         """
         # t0 = time.time()
-        # self.logger.debug(msg)
+        self.logger.debug(msg)
+        self.logger.debug(link_meta)
+        # if not self._spa_sn_check(msg["msg"]["SN"], msg["source_link"]):
+        #     self.logger.warning("spd_sn check failed")
+        #     return
         link_name = msg["source_link"]
         is_interior = self.agent.link_man.get_by_name(link_name)["is_interior"]
         result = []
@@ -986,7 +988,7 @@ class RPDPApp(SavApp):
             self.spa_data["inter"] = data
         else:
             self.spa_data["intra"] = data
-        self.logger.debug(self.spa_data)
+        # self.logger.debug(self.spa_data)
         self._refresh_sav_rules()
     def _find_prefix_in_spa(self, prefix, is_inter):
         if is_inter:
@@ -1021,7 +1023,7 @@ class RPDPApp(SavApp):
         # send intra-as spds
         # self.logger.debug(remote_links)
         # self.logger.debug(as_neighbors)
-        self.logger.debug(my_as_prefixes)
+        # self.logger.debug(my_as_prefixes)
         timeout = 0
         # send inter-as spds
         # for inter-as spd,we only send to the neighbor that we have a sav link
@@ -1035,7 +1037,7 @@ class RPDPApp(SavApp):
                 as_neighbors[peer_as] = []
             try:
                 data = get_bird_spd_data(protocol_name=link_name
-                                            ,channel="rpdp"
+                                            ,channel=RPDP_ID
                                             ,rpdp_version=ip_version
                                             ,sn=self._get_spd_sn(self._get_spd_key(link_meta['remote_ip'],is_interior,peer_as))
                                             ,origin_router_id=my_router_id
@@ -1047,7 +1049,7 @@ class RPDPApp(SavApp):
                                             )
                 
                 msg = get_agent_bird_msg(
-                    data,link_meta["link_type"], self.name, timeout, False)
+                    data,link_meta["link_type"], self.app_id, timeout, False)
                 # self.logger.debug(msg)
                 self.agent.link_man.put_send_async(msg)
             except Exception as e:
@@ -1085,7 +1087,7 @@ class RPDPApp(SavApp):
                                         ,is_interior=is_interior
                                         ,addresses=addresses)
                 msg = get_agent_bird_msg(
-                        data,link_meta["link_type"], self.name, timeout, False)
+                        data,link_meta["link_type"], self.app_id, timeout, False)
                 # self.logger.debug(msg)
                 self.agent.link_man.put_send_async(msg)
             except Exception as e:
@@ -1112,7 +1114,7 @@ class RPDPApp(SavApp):
                 f"spd sn check failed, processed sn {link_meta['spd_sn']}, received sn {sn},ignore")
             return False
 
-    def process_rpdp_route_refresh(self, msg, link_meta):
+    def process_spd(self, msg, link_meta):
         """
         process rpdp route refresh message
         """
@@ -1201,7 +1203,7 @@ class RPDPApp(SavApp):
                                  link_meta["as4_session"],
                                  link_meta["is_interior"])
         msg = get_agent_bird_msg(
-            data, "dsav", self.name, 0, False)
+            data, "dsav", self.app_id, 0, False)
         self.logger.debug(f"sending spa on {link_name} : {msg}")
         try:
             self.agent.link_man.put_send_async(msg)
@@ -1250,14 +1252,14 @@ class RPDPApp(SavApp):
                                     link_meta["as4_session"],
                                     link_meta["is_interior"])
             msg = get_agent_bird_msg(
-                data, "dsav", self.name, 0, False)
+                data, "dsav", self.app_id, 0, False)
         except Exception as e:
             self.logger.exception(e)
             self.logger.error(e)
             return
         # self.logger.debug(f"sending spa on {link_name} : {msg}")
         self.agent.link_man.put_send_async(msg)
-        self.logger.debug(f"sent spa on {link_name} : {msg}")
+        # self.logger.debug(f"sent spa on {link_name} : {msg}")
         self.agent.link_man.update_link_kv(
             link_name, "initial_broadcast", True)
         # self.logger.debug(f"key updated {link_name} : {msg}")
@@ -1290,20 +1292,18 @@ class RPDPApp(SavApp):
                     continue
             temp[p] = local_prefixes[p]
         local_prefixes = temp
-        self.logger.debug(f"local_prefixes: {local_prefixes}")
+        # self.logger.debug(f"local_prefixes: {local_prefixes}")
         for link_name, link in rpdp_links.items():
             if link["initial_broadcast"]:
                 continue
             if link["is_interior"]:
-                self.logger.debug(f"link {link_name} is inter")
                 self._send_spa_origin_inter(
                     link_name, link, local_prefixes)
-                self.logger.debug(f"finished sending spa on {link_name}")
+                self.logger.info(f"init spa sent on INTER {link_name}")
             else:
-                self.logger.debug(f"link {link_name} is intra")
                 self._send_spa_origin_intra(
                     link_name, link, local_prefixes)
-                self.logger.debug(f"finished sending spa on {link_name}")
+                self.logger.info(f"init spa sent on INTRA {link_name}")
 
         
 
@@ -1328,7 +1328,7 @@ class RPDPApp(SavApp):
                 local_ip = link_meta["local_ip"]
                 for prefix, prefix_data in prefixes_data.items():
                     rule = get_sav_rule(
-                        prefix, get_ifa_by_ip(local_ip), self.name, router_id, is_inter)
+                        prefix, get_ifa_by_ip(local_ip), self.app_id, router_id, is_inter)
                     rule_key = get_key_from_sav_rule(rule)
                     if rule_key in new_rules:
                         raise KeyError("sav rule key conflict")
@@ -1341,13 +1341,13 @@ class RPDPApp(SavApp):
         based on current spd and spa data, generate new sav rules
         and update the sav table in agent
         """
-        old_rules = self.agent.get_sav_rules_by_app(self.name, None)
-        # self.logger.debug(f"old_rules: {old_rules}")
+        old_rules = self.agent._get_sav_rules_by_app(self.app_id, None)
+        self.logger.debug(f"old_rules: {old_rules}")
         
         spa_data = self.spa_data["intra"]
         spd_data = self.spd_data["intra"]
-        # self.logger.debug(f"spa_data: {spa_data}")
-        # self.logger.debug(f"spd_data: {spd_data}")
+        self.logger.debug(f"spa_data: {spa_data}")
+        self.logger.debug(f"spd_data: {spd_data}")
         new_intra_rules = self._gen_rules(spa_data, spd_data, False)
         spa_data = self.spa_data["inter"]
         spd_data = self.spd_data["inter"]
@@ -1359,4 +1359,4 @@ class RPDPApp(SavApp):
         add_dict, del_set = rule_dict_diff(old_rules, new_rules)
         # self.logger.debug(add_dict)
         # self.logger.debug(del_set)
-        self.agent.update_sav_table_by_app_name(add_dict, del_set, self.name)
+        self.agent.update_sav_table_by_app_id(add_dict, del_set, self.app_id)

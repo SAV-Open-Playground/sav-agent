@@ -18,6 +18,7 @@ from common.sav_common import TIMEIT_THRESHOLD
 from common.logger import LOGGER
 from control_plane import SA
 from data_plane.data_plane_enable import interceptor
+from sav_app import RPDP_ID
 
 api_blueprint = Blueprint("api", __name__)
 
@@ -58,14 +59,14 @@ def index():
             if t > TIMEIT_THRESHOLD:
                 LOGGER.warning(f"TIMEIT {time.time()-t0:.4f} seconds")
             return rep
-        msg["source_app"] = "RPDP"
+        msg["source_app"] = RPDP_ID
         if m_t == "link_state_change":
             msg["source_link"] = msg["protocol_name"]
         else:
             msg["source_link"] = msg["msg"]["protocol_name"]
             if not m_t == "link_state_change":
                 msg['link_type'] = "native_bgp"
-                if "rpdp" in msg["msg"]["channels"]:
+                if RPDP_ID in msg["msg"]["channels"]:
                     msg['link_type'] = "dsav"
         msg["pkt_rec_dt"] = t0
         SA.put_msg(msg)
@@ -93,7 +94,7 @@ def put_bgp_update():
         msg = {"msg": {"protocol_name": "eth_r3"},
                "msg_type": "bgp_update",
                "source_link": "eth_r3"}
-        msg["source_app"] = "RPDP"
+        msg["source_app"] = RPDP_ID
         msg["pkt_rec_dt"] = t0
         SA.put_msg(msg)
         rep = {"code": "0000", "message": "success"}

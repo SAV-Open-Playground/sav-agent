@@ -35,7 +35,7 @@ ASN_TYPE = int
 IP_ADDR_TYPE = netaddr.IPAddress
 PREFIX_TYPE = netaddr.IPNetwork
 RPDP_PEER_TYPE = RPDPPeer
-
+TIMEIT_THRESHOLD = 0.5
 
 def parse_bird_table(table, logger=None):
     """
@@ -145,8 +145,19 @@ def get_host_interface_list():
     result = std_out.split("\n")[:-1]
     result = list(map(lambda x: x.split('@')[0], result))
     return [i for i in result if len(i) != 0]
-
-
+def diff_sav_rules(old_rules, new_rules):
+    """
+    return a list of adds and dels
+    """
+    adds_ = []
+    dels_ = []
+    for item in new_rules:
+        if item not in old_rules:
+            adds_.append(item)
+    for item in old_rules:
+        if item not in new_rules:
+            dels_.append(item)
+    return adds_, dels_
 def get_next_hop(target_ip):
     """
     find next hop for the given ip using ip route get
@@ -252,7 +263,6 @@ def save_json(path_to_json, json_obj):
     with open(path_to_json, "w", encoding="utf-8") as json_file:
         json_file.write(json.dumps(json_obj, indent=4))
 
-
 class SavApp():
     """
     SavApp class helps receive and send massage using links
@@ -262,14 +272,19 @@ class SavApp():
     app manage the links status by inserting update msg
     """
 
-    def __init__(self, agent, name, logger=None):
+    def __init__(self, agent, app_id, logger=None):
         if not logger:
-            logger = get_logger(name)
+            logger = get_logger(app_id)
         self.logger = logger
         self.status = True
-        self.name = name
+        self.app_id = app_id
         self.agent = agent
-
+    def _get_cur_kernel_fib(self):
+        return self.agent.get_kernel_fib()
+    def _get_bird_local_fib(self):
+        return self.agent.bird_man.get_local_fib()
+    def _get_bird_remote_fib(self):
+        return self.agent.bird_man.get_remote_fib()
     def is_up(self):
         return self.status is True
 
@@ -282,14 +297,17 @@ class SavApp():
     def check_status(self):
         raise NotImplementedError
 
-    def fib_changed(self):
+    def generate_sav_rules(self):
+        """
+        generate sav rules based on the current information
+        """
         raise NotImplementedError
 
     def put_link_up(self, link_name, link_type):
         # this msg may incur creating of new link, so we need to know the type
         msg = {
             "msg_type": "link_state_change",
-            "source_app": self.name,
+            "source_app": self.app_id,
             "source_link": link_name,
             "link_type": link_type,
             "msg": True,
@@ -301,7 +319,7 @@ class SavApp():
         # this msg may incur creating of new link, so we need to know the type
         msg = {
             "msg_type": "set_link_type",
-            "source_app": self.name,
+            "source_app": self.app_id,
             "source_link": link_name,
             "msg": link_type,
             "pkt_rec_dt": time.time()
@@ -311,7 +329,7 @@ class SavApp():
     def put_link_down(self, link_name):
         msg = {
             "msg_type": "link_state_change",
-            "source_app": self.name,
+            "source_app": self.app_id,
             "source_link": link_name,
             "msg": False,
             "pkt_rec_dt": time.time()
@@ -410,7 +428,7 @@ def birdc_get_protos_by(logger, key, value):
 
 def parse_kernel_fib():
     """
-    parsing the output of "route -n -F" command
+    execute and parse the output of "route -n -F" command
     """
     v4table = run_cmd("route -n -F")
     v6table = run_cmd("route -6 -n -F")
@@ -632,7 +650,7 @@ def aspa_check(meta, aspa_info):
     return False
 
 
-TIMEIT_THRESHOLD = 0.5
+
 
 
 def sav_timer(logger):

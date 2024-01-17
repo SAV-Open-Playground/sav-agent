@@ -14,7 +14,6 @@ import time
 import json
 from common.logger import LOGGER
 from control_plane.sav_agent import SavAgent
-
 from concurrent import futures
 import grpc
 from control_plane import agent_msg_pb2, agent_msg_pb2_grpc
@@ -44,7 +43,7 @@ class GrpcServer(agent_msg_pb2_grpc.AgentLinkServicer):
             msg_dict = {"msg": json.loads(msg_str)}
             # self.logger.debug(json.dumps(msg_dict, indent=2))
             req_dst_ip = msg_dict['msg']['dst_ip']
-            msg_dict["source_app"] = SA.rpdp_app.name
+            msg_dict["source_app"] = SA.rpdp_app.app_id
             # TODO better ways to add source_link
             temp = msg_dict['msg']["protocol_name"].split("_")
             source_link = "_".join([temp[0], temp[2], temp[1]])

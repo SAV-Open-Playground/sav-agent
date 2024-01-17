@@ -16,6 +16,7 @@ import subprocess
 from datetime import datetime
 import requests
 from common.logger import get_logger
+from sav_app import *
 
 class Bot:
     def __init__(self):
@@ -176,27 +177,26 @@ class Bot:
         # dynamically modify the configuration file of the SAV agent
         sav_agent_config = self._read_json(self.sa_config_path)
         source = signal["source"]
-        if source in ["RPDP"]:
-            sav_agent_config["enabled_sav_app"] = source
-        elif source == "fpurpf_app":
-            sav_agent_config["apps"] = ["RPDP", "FP-uRPF"]
-        elif source == "strict_urpf_app":
-            sav_agent_config["apps"] = ["Strict-uRPF"]
-        elif source == "loose_urpf_app":
-            sav_agent_config["apps"] = ["Loose-uRPF"]
-        elif source == "EFP-uRPF-Algorithm-A_app":
-            sav_agent_config["apps"] = ["RPDP", "EFP-uRPF-A"]
-        elif source == "EFP-uRPF-Algorithm-B_app":
-            sav_agent_config["apps"] = ["RPDP", "EFP-uRPF-B"]
-        elif source == "Passport_app":
-            sav_agent_config["apps"] = ["Passport"]
-        elif source == "BAR_app":
-            sav_agent_config["apps"] = ["BAR"]
-        elif source is None:
-            sav_agent_config["apps"] = []
-        else:
-            self.logger.error(f"unknown source {source}")
-            raise ValueError("unknown source")
+        sav_agent_config["enabled_sav_app"] = source
+        # if source == "fpurpf_app":
+        #     sav_agent_config["apps"] = [RPDP_ID, "FP-uRPF"]
+        # elif source == "strict_urpf_app":
+        #     sav_agent_config["apps"] = ["strict_urpf"]
+        # elif source == "loose_urpf_app":
+        #     sav_agent_config["apps"] = ["Loose-uRPF"]
+        # elif source == "EFP-uRPF-Algorithm-A_app":
+        #     sav_agent_config["apps"] = [RPDP_ID, "EFP-uRPF-A"]
+        # elif source == "EFP-uRPF-Algorithm-B_app":
+        #     sav_agent_config["apps"] = [RPDP_ID, "EFP-uRPF-B"]
+        # elif source == "Passport_app":
+        #     sav_agent_config["apps"] = ["Passport"]
+        # elif source == "BAR_app":
+        #     sav_agent_config["apps"] = ["BAR"]
+        # elif source is None:
+        #     sav_agent_config["apps"] = []
+        # else:
+        #     self.logger.error(f"unknown source {source}")
+            # raise ValueError("unknown source")
         self._write_json(self.sa_config_path, sav_agent_config)
         exec_result.update({"command": f'{signal["command"]}_{time.time()}',
                             "execute_start_time": f"{self._get_current_datetime_str()}",

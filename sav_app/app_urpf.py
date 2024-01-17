@@ -8,8 +8,8 @@
 """
 
 from common.sav_common import *
-
-
+STRICT_URPF_ID = "strict_urpf"
+LOOSE_URPF_ID = "loose_urpf"
 class UrpfApp(SavApp):
     """
     a SavApp implementation of uRPF
@@ -20,48 +20,37 @@ class UrpfApp(SavApp):
         valid_modes = ["strict", "loose"]
         if mode not in valid_modes:
             raise ValueError(f"mode must be one of {valid_modes}")
-        name = mode + name
         self.mode = mode
         super(UrpfApp, self).__init__(agent, name, logger)
 
-    def fib_changed(self, adds, dels):
+    def generate_sav_rules(self,fib_adds, fib_dels, bird_fib_change_dict):
         """
         generate sav rule based on the latest fib,
         only add is implemented
         """
-        # TODO: implement del
-        # self.logger.debug(f"app {self.name} fib_changed")
-        # remove local prefixes
+        # new_fib = self._get_cur_kernel_fib()
         if self.mode == "strict":
-            return self._fib_changed_strict(adds, dels)
+            return self._gen_rules(fib_adds, fib_dels, False)
         elif self.mode == "loose":
-            return self._fib_changed_loose(adds, dels)
+            return self._gen_rules(fib_adds, fib_dels, True)
 
-    def _fib_changed_strict(self, adds, dels):
+    def _gen_rules(self, fib_adds, fib_dels, bird_fib_change_dict,is_loose=False):
         """
         generate sav rule based on the latest fib
-        return a list of add_rules, del_rules
+        return a list of deleted rules and a dict of new rules
         """
-        add_rules = []
-        del_rules = []
-        # self.logger.debug(adds)
-        # self.logger.debug(dels)
-        for prefix, row in adds.items():
-            add_rules.append(get_sav_rule(
-                prefix, row.get("Iface"), self.name))
-        for prefix, row in adds.items():
-            del_rules.append(get_sav_rule(
-                prefix, row.get("Iface"), self.name))
-        return add_rules, del_rules
-
-    def _fib_changed_loose(self, adds, dels):
-        """
-        generate sav rule based on the latest fib
-        """
-        add_rules = []
-        del_rules = []
-        for prefix, row in adds.items():
-            add_rules.append(get_sav_rule(prefix, "*", self.name))
-        for prefix, row in adds.items():
-            del_rules.append(get_sav_rule(prefix, "*", self.name))
-        return add_rules, del_rules
+        add_dict = {}
+        del_list = []
+        for prefix, row in fib_adds.items():
+            face = "*"
+            if not is_loose:
+                face = row.get("Iface")
+            this_rule = get_sav_rule(prefix, face, self.app_id)
+            add_dict[get_key_from_sav_rule(this_rule)] = this_rule
+        for prefix, row in fib_dels.items():
+            face = "*"
+            if not is_loose:
+                face = row.get("Iface")
+            this_rule = get_sav_rule(prefix, face, self.app_id)
+            del_list.append(get_key_from_sav_rule(this_rule))
+        return add_dict,del_list

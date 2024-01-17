@@ -12,12 +12,13 @@ import sys
 import threading
 from common.logger import LOGGER
 from control_plane.managers import *
-from sav_app.app_rpdp import RPDPApp
-from sav_app.app_urpf import UrpfApp
-from sav_app.app_efp_urpf import EfpUrpfApp
-from sav_app.app_fp_urpf import FpUrpfApp
-from sav_app.app_bar import BarApp
-from sav_app.app_passport import PassportApp
+from sav_app import *
+# from sav_app.app_rpdp import RPDPApp
+# from sav_app.app_urpf import UrpfApp
+# from sav_app.app_efp_urpf import EfpUrpfApp
+# from sav_app.app_fp_urpf import FpUrpfApp
+# from sav_app.app_bar import BarApp
+# from sav_app.app_passport import PassportApp
 from data_plane.data_plane_enable import interceptor
 
 
@@ -65,7 +66,7 @@ class SavAgent():
         self.update_config(path_to_config)
         self._init_data(first_dt)
         self._in_msgs = queue.Queue()
-        self._init_apps()
+        
         # self.sib_man = s(logger=self.logger)
         self.bird_man = BirdCMDManager(logger=self.logger)
         self._start()
@@ -124,8 +125,10 @@ class SavAgent():
         self.logger.error(msg)
         self.logger.error(link)
         raise NotImplementedError
+
     def _init_sav_table(self):
         self.data["sav_table"] = {}
+
     def _init_data(self, first_dt):
         """
         all major data should be initialized here
@@ -152,7 +155,9 @@ class SavAgent():
                                    "update_time": time.time(),
                                    "check_time": time.time()}
         self.data["fib_for_apps"] = {}
-        
+        self.rpdp_app = None
+        self.passport_app = None
+        self.data["active_app"] = None
 
     def add_sav_nodes(self, nodes):
         data = self.data["sav_graph"]["nodes"]
@@ -185,46 +190,57 @@ class SavAgent():
             self.logger.info(f"SAV GRAPH LINK ADDED :{key_asn}-{value_asn}")
 
     def _init_apps(self):
+        """
+        init all app instances
+        """
         # bird and grpc are must
-        self.rpdp_app = None
-        self.passport_app = None
-        self.data["active_app"] = None
-        # self.logger.debug(self.config)
+        self.logger.debug(self.config["apps"])
         if len(self.config["apps"]) == 0:
             self.logger.warning("no sav app given")
-        for name in self.config["apps"]:
-            if name == "Strict-uRPF":
-                app_instance = UrpfApp(
-                    self, mode="strict", logger=self.logger)
-                self.add_app(app_instance)
-            elif name == "Loose-uRPF":
-                app_instance = UrpfApp(
-                    self, mode="loose", logger=self.logger)
-                self.add_app(app_instance)
-            elif name.startswith("EFP-uRPF"):
-                app_instance = EfpUrpfApp(
-                    self, name, self.logger, self.config.get("ca_host"), self.config.get("ca_port", 3000))
-                self.add_app(app_instance)
-            elif name == "FP-uRPF":
-                app_instance = FpUrpfApp(self, logger=self.logger)
-                self.add_app(app_instance)
-            elif name == "RPDP":
-                app_instance = RPDPApp(self, logger=self.logger)
-                self.add_app(app_instance)
-                self.rpdp_app = app_instance
-            elif name == "BAR":
-                app_instance = BarApp(self, logger=self.logger)
-                self.add_app(app_instance)
-            elif name == "Passport":
-                app_instance = PassportApp(
-                    self, self.config["local_as"], self.config["router_id"], logger=self.logger)
-                self.passport_app = app_instance
-                self.add_app(app_instance)
+        all_instances = sav_app_init(self,self.logger)
+        self.logger.debug(all_instances)
+        sav_apps = {}
+        for app_id in self.config["apps"]:
+            if not app_id in all_instances:
+                self.logger.error(f"app_id:[{app_id}] not recognized")
+                continue
+            sav_apps[app_id]=all_instances[app_id]
+            if app_id == RPDP_ID:
+                self.rpdp_app = sav_apps[app_id]
+        self.data["apps"] = sav_apps
+        
+            # if app_id == "strict_urpf":
+            #     app_instance = UrpfApp(
+            #         self, mode="strict", logger=self.logger)
+            #     self.add_app(app_instance)
+            # elif app_id == "Loose-uRPF":
+            #     app_instance = UrpfApp(
+            #         self, mode="loose", logger=self.logger)
+            #     self.add_app(app_instance)
+            # elif app_id.startswith("EFP-uRPF"):
+            #     app_instance = EfpUrpfApp(
+            #         self, app_id, self.logger, self.config.get("ca_host"), self.config.get("ca_port", 3000))
+            #     self.add_app(app_instance)
+            # elif app_id == "FP-uRPF":
+            #     app_instance = FpUrpfApp(self, logger=self.logger)
+            #     self.add_app(app_instance)
+            # elif app_id == RPDP_ID:
+            #     app_instance = RPDPApp(self, app_id, logger=self.logger)
+            #     self.add_app(app_instance)
+            #     self.rpdp_app = app_instance
+            # elif app_id == "BAR":
+            #     app_instance = BarApp(self, logger=self.logger)
+            #     self.add_app(app_instance)
+            # elif app_id == "Passport":
+            #     app_instance = PassportApp(
+            #         self, self.config["local_as"], self.config["router_id"], logger=self.logger)
+            #     self.passport_app = app_instance
+            #     self.add_app(app_instance)
 
-            else:
-                self.logger.error(msg=f"unknown app name: {name}")
-            if self.config["enabled_sav_app"] == name:
-                self.data["active_app"] = app_instance.name
+            # else:
+            #     self.logger.error(msg=f"unknown app name: {app_id}")
+            # if self.config["enabled_sav_app"] == app_id:
+            #     self.data["active_app"] = app_instance.app_id
         self.logger.debug(
             msg=f"initialized apps: {list(self.data['apps'].keys())},using {self.data['active_app']}")
 
@@ -236,7 +252,7 @@ class SavAgent():
         """
         new_ = parse_kernel_fib()
         if filter_base:
-             # TODO read from config
+            # TODO read from config
             remove_prefixes = [netaddr.IPNetwork("1.1.0.0/16")]
             temp = {}
             for prefix in new_:
@@ -279,9 +295,9 @@ class SavAgent():
         if len(adds) + len(dels) > 0 or len(new_) == 0:
             self.data["kernel_fib"]["update_time"] = t0
             self.data["kernel_fib"]["data"] = new_
-            self.logger.debug(f"kernel fib changed")
-            self.logger.debug(f"adds:{adds}")
-            self.logger.debug(f"dels:{dels}")
+            # self.logger.debug(f"kernel fib changed")
+            # self.logger.debug(f"adds:{adds}")
+            # self.logger.debug(f"dels:{dels}")
             fib_changed = True
         fib_update_dt = self.data["kernel_fib"]["update_time"]
         if fib_changed:
@@ -300,12 +316,12 @@ class SavAgent():
             self.bird_man.update_fib(self.config["local_as"])
         return adds, dels
 
-
     def _initial_wait(self, check_span=0.1):
         """
         1. wait for bird to be ready
         2. wait for fib to be stable
         """
+        t0 = time.time()
         while not self.bird_man.is_bird_ready():
             time.sleep(check_span)
             # self.logger.debug("waiting for bird to be ready")
@@ -313,6 +329,8 @@ class SavAgent():
             # wait for fib to first fib stable
             self._refresh_kernel_fib()
             time.sleep(check_span)
+        self._init_apps()
+        self.logger.debug(f"initial wait: {time.time()-t0:.4f} seconds")
         return
 
     def is_all_msgs_finished(self):
@@ -349,10 +367,10 @@ class SavAgent():
         start a thread to check the cmd queue and process each cmd
         """
         self._initial_wait()
-       
+
         # generate initial sav rules
-        self._notify_apps(reset=True)
-        # self.logger.debug("starting main loop")
+        self._notify_apps(True, self.get_kernel_fib(), {}, {})
+        self.logger.debug("starting main loop")
         while True:
             try:
                 try:
@@ -372,7 +390,7 @@ class SavAgent():
                     if bgp_update_msg:
                         msgs = [bgp_update_msg] + msgs
                     for m in msgs:
-                        self.logger.debug(f"processing msg {m}")
+                        # self.logger.debug(f"processing msg {m}")
                         self._process_msg(m)
                         self._in_msgs.task_done()
                 except Exception as err:
@@ -388,13 +406,11 @@ class SavAgent():
                 self.logger.error(e)
                 self.logger.error(type(e))
 
-    def add_app(self, app):
-        self.data["apps"][app.name] = app
 
-    def get_app(self, name):
-        return self.data["apps"][name]
+    def get_app(self, app_id):
+        return self.data["apps"][app_id]
 
-    def get_all_app_names(self):
+    def get_all_app_ids(self):
         return list(self.data["apps"].keys())
 
     def get_apps_by_type(self, app_class):
@@ -483,42 +499,52 @@ class SavAgent():
     def get_kernel_fib(self):
         """return the cached fib"""
         return self.data["kernel_fib"]["data"]
+
+    def _refresh_both_fib(self):
+        """
+        refresh both kernel fib and bird fib
+        """
+        fib_adds, fib_dels = self._refresh_kernel_fib()
+        is_bird_fib_changed, bird_fib_change_dict = self.bird_man.update_fib(
+            self.config["local_as"])
+        is_kernel_fib_change = ((len(fib_adds) != 0) or (len(fib_dels) != 0))
+        return is_bird_fib_changed, is_kernel_fib_change, fib_adds, fib_dels, bird_fib_change_dict
+
     def _process_native_bgp_update(self):
         """
         notify apps about native bgp update
         """
-        fib_adds, fib_dels = self._refresh_kernel_fib()
-        is_bird_fib_changed, bird_fib_change_dict = self.bird_man.update_fib(self.config["local_as"])
-        is_kernel_fib_change = fib_adds!=0 and fib_dels !=0
+        bird_changed, kernel_changed, fib_adds, fib_dels, bird_fib_change_dict = self._refresh_both_fib()
         # now we have the latest fib in kernel and bird
-        if is_bird_fib_changed != is_kernel_fib_change:
+        if bird_changed != kernel_changed:
             self.logger.warning("bird fib and kernel fib change inconsistent")
             self.logger.debug(f"bird_fib_change_d:{bird_fib_change_dict}")
             self.logger.debug(f"fib_adds:{fib_adds}")
             self.logger.debug(f"fib_dels:{fib_dels}")
-        if is_bird_fib_changed or is_kernel_fib_change:
-            self._notify_apps(False,fib_adds,fib_dels,bird_fib_change_dict)
+            self.logger.debug(bird_changed)
+            self.logger.debug(kernel_changed)
+        if bird_changed or kernel_changed:
+            self._notify_apps(False, fib_adds, fib_dels, bird_fib_change_dict)
 
-    def _notify_apps(self, reset,fib_adds, fib_dels, bird_fib_change_dict
-                     ,app_list=None):
+    def _notify_apps(self, reset, fib_adds, fib_dels, bird_fib_change_dict, app_list=None):
         """
         notify sav_apps to generate sav rules
         if reset is True, it will clear all existing rules and re-generate all rules(the fib_adds and fib_dels will be ignored)
         if app_list is None, all apps will be notified.
         """
-        add_rules = []
-        del_rules = []
         if app_list is None:
-            app_list = self.get_all_app_names()
+            app_list = self.get_all_app_ids()
         self.logger.debug(f"app list:{app_list}")
         if reset is True:
             self.logger.debug(f"resetting sav table")
             self._init_sav_table()
-        for app_name in app_list:
-            app = self.get_app(app_name)
-            self.logger.debug(f"notifying app: {app_name}")
+        for app_id in app_list:
+            app = self.get_app(app_id)
+            self.logger.debug(f"notifying app: {app_id}")
             app_type = type(app)
             try:
+                add_dict = {}
+                del_list = []
                 if app_type in [RPDPApp]:
                     adds, dels = self.rpdp_app.diff_pp_v4(reset)
                     self.logger.debug(f"adds:{len(adds)}")
@@ -528,49 +554,47 @@ class SavAgent():
                     self.logger.debug(f"changed_routes:{changed_routes}")
                     # self._send_origin(None, changed_routes)
                 else:
-                    new_rules = app.generate_sav_rules(fib_adds, fib_dels, bird_fib_change_dict)
-                    old_rules = self.get_sav_rules_by_app(app_name)
-                    # a, d = diff_sav_rules(old_rules, new_rules)
-                    self.logger.debug(f"new_rules:{new_rules}")
-                    self.logger.debug(f"old_rules:{old_rules}")
-                    # self.logger.debug(f"adds:{a}")
-                    # self.logger.debug(f"dels:{d}")
-                    
-                for rule in a:
-                    row = {"prefix":        rule[0],
-                        "interface":     rule[1],
-                        "source_app":    rule[2],
-                        "neighbor_as":   rule[3]
-                        }
-                    if rule[1] == "*":
-                        up_link_names = self.link_man.get_all_up_type(True)
-                        # TODO currently we only apply to bgp interfaces
-                        for link_name in up_link_names:
-                            link_dict = self.link_man.get_by_name(
-                                link_name)
-                            row["local_role"] = link_dict["local_role"]
-                            add_rules.append(row)
-                    else:
-                        temp = self.bird_man.get_bgp_by_interface(rule[1])
-                        if temp == []:
-                            self.logger.warning(
-                                f"unable to find meta fo link {rule[1]}")
-                            return
-                        if len(temp) != 1:
-                            self.logger.error(temp)
-                            self.logger.error(
-                                f"{len(temp)} bgp instances found on interface [{rule[1]}],")
-                        temp = temp[0]
-                        row["local_role"] = temp["local_role"]
-                        add_rules.append(row)
+                    # app_type in [UrpfApp, EfpUrpfApp, FpUrpfApp]:
+                    add_dict, del_list = app.generate_sav_rules(
+                        fib_adds, fib_dels, bird_fib_change_dict)
+                
+                self.logger.debug(f"add_dict:{add_dict}")
+                self.logger.debug(f"dels:{del_list}")
+                self.update_sav_table_by_app_id(add_dict,del_list,app_id)
+                # for rule in a:
+                #     row = {"prefix":        rule[0],
+                #            "interface":     rule[1],
+                #            "source_app":    rule[2],
+                #            "neighbor_as":   rule[3]
+                #            }
+                #     if rule[1] == "*":
+                #         up_link_names = self.link_man.get_all_up_type(True)
+                #         # TODO currently we only apply to bgp interfaces
+                #         for link_name in up_link_names:
+                #             link_dict = self.link_man.get_by_name(
+                #                 link_name)
+                #             row["local_role"] = link_dict["local_role"]
+                #             add_rules.append(row)
+                #     else:
+                #         temp = self.bird_man.get_bgp_by_interface(rule[1])
+                #         if temp == []:
+                #             self.logger.warning(
+                #                 f"unable to find meta fo link {rule[1]}")
+                #             return
+                #         if len(temp) != 1:
+                #             self.logger.error(temp)
+                #             self.logger.error(
+                #                 f"{len(temp)} bgp instances found on interface [{rule[1]}],")
+                #         temp = temp[0]
+                #         row["local_role"] = temp["local_role"]
+                #         add_rules.append(row)
                 # TODO d
-                del_rules.extend(d)
+                # del_rules.extend(d)
             except Exception as e:
                 self.logger.exception(e)
                 self.logger.error(f"error when notifying app {app_name}")
         # self.logger.debug(f"add_rules:{add_rules}")
         # self.logger.debug(f"del_rules:{del_rules}")
-        self.update_sav_table(add_rules, del_rules)
         # self.ip_man.add(add_rules)
 
         return
@@ -616,14 +640,15 @@ class SavAgent():
                 self.logger.info(f"SAV RULE REFRESHED:{r}")
         self.data["sav_table"] = new_table
 
-    def update_sav_table_by_app_name(self, add_dict, del_set, source_app):
+    def update_sav_table_by_app_id(self, add_dict, del_set, app_id):
         """
         update sav table
         """
         cur_t = time.time()
-        if not source_app in self.data["sav_table"]:
+        if not app_id in self.data["sav_table"]:
             new_table = {}
-        new_table = copy.deepcopy(self.data["sav_table"][source_app])
+        else:    
+            new_table = copy.deepcopy(self.data["sav_table"][app_id])
         for str_key in del_set:
             if not str_key in new_table:
                 self.logger.error(
@@ -650,9 +675,9 @@ class SavAgent():
                     r["update_time"] = cur_t
                 new_table[str_key] = r
                 self.logger.info(f"SAV RULE REFRESHED:{r}")
-        self.data["sav_table"][source_app] = new_table
+        self.data["sav_table"][app_id] = new_table
 
-    def get_sav_rules_by_app(self, app_name, is_interior=None):
+    def _get_sav_rules_by_app(self, app_name, is_interior=None):
         """
         return all sav rules for given app
         if is_interior is None, return all rules
@@ -670,6 +695,44 @@ class SavAgent():
             if v["is_interior"] == is_interior:
                 temp[k] = v
         return temp
+    def _expand_sav_rule(self, sav_rule,all_interfaces):
+        """
+        expand sav rule with all interfaces
+        """
+        ret = {}
+        for ifa in all_interfaces:
+            new_rule = copy.deepcopy(sav_rule)
+            new_rule["interface_name"] = ifa
+            ret[get_key_from_sav_rule(new_rule)] = new_rule
+        return ret
+        
+    def get_sav_rules_by_app(self, app_name, is_interior=None, ip_version=None):
+        """
+        return all sav rules for given app
+        if is_interior is None, return all rules
+        if is_interior is True, return all interior rules
+        if is_interior is False, return all exterior rules
+        if any rules interface is * we will expand it to all interfaces
+        if ip_version is None(default), return all rules,otherwise return rules with given ip_version
+        return a dict of sav rules
+        """
+        temp = self._get_sav_rules_by_app(app_name, is_interior)
+        all_interfaces = get_host_interface_list()
+        ret = {}
+        for k,v in temp.items():
+            if ip_version is None:
+                pass
+            else:
+                if v["prefix"].version != ip_version:
+                    continue
+            if( v["interface_name"] is None) or (
+                v["interface_name"] == "*"
+            ):
+                for expanded_k,expanded_v in self._expand_sav_rule(v,all_interfaces).items():
+                    ret[expanded_k] = expanded_v
+            else:
+                ret[k] = v
+        return ret
 
     def _find_links_for_origin(self, input_link_name):
         inter_links = []
@@ -915,7 +978,11 @@ class SavAgent():
                 if k.endswith("_rule_num"):
                     metric["total"] += v
             self.logger.debug(f"SAV RULE NUMS: {metric['total']}")
-    def _get_spd_id(self,remote_as,remote_router_id):
+        self.logger.debug(self.get_sav_rules_by_app(STRICT_URPF_ID,None,6).keys())
+        self.logger.debug(self.get_sav_rules_by_app(STRICT_URPF_ID,None,4).keys())
+        self.logger.debug(self.get_sav_rules_by_app(STRICT_URPF_ID,None,None).keys())
+
+    def _get_spd_id(self, remote_as, remote_router_id):
         return f"{remote_as}-{remote_router_id.value}"
 
     def get_next_link_meta(self, target_ip):
@@ -947,6 +1014,7 @@ class SavAgent():
             self.logger.debug(f"next_hop_ip:{next_hop_ip}")
             self.logger.debug(f"target_ip:{target_ip}")
             return None
+
     def _send_spd(self):
         """
         build spd and send to all links
@@ -956,24 +1024,24 @@ class SavAgent():
         if self.rpdp_app is None:
             self.logger.debug("rpdp_app missing,unable to send spd")
             return False
-        possible_prefixes = self.bird_man.get_remote_fib() # here the remote refers to prefixes that are not originated by this router
+        # here the remote refers to prefixes that are not originated by this router
+        possible_prefixes = self.bird_man.get_remote_fib()
         inter_as_links = {}
-        for link_name in self.link_man.get_all_up_type(True,False):
+        for link_name in self.link_man.get_all_up_type(True, False):
             inter_as_links[link_name] = self.link_man.get_by_name(link_name)
-        
-        
+
         temp = {}
         intra_as_links = {}
         my_as_prefixes = {}
         as_neighbors = {}
         # self.logger.debug(inter_as_links)
         # self.logger.debug(possible_prefixes)
-        for prefix,srcs in possible_prefixes.items():
+        for prefix, srcs in possible_prefixes.items():
             # self.logger.debug(f"{prefix}:{srcs}")
             my_asn_prefix = False
-            
-            for src in srcs :
-                if src["origin_asn"]==my_asn:
+
+            for src in srcs:
+                if src["origin_asn"] == my_asn:
                     my_asn_prefix = True
                 if not src["origin_asn"] in as_neighbors:
                     as_neighbors[src["origin_asn"]] = []
@@ -984,26 +1052,22 @@ class SavAgent():
                     if my_asn in src["as_path"]:
                         x = src["as_path"].index(src["origin_asn"])
                         try:
-                            as_neighbors[src["origin_asn"]].append(src["as_path"][x+1])
+                            as_neighbors[src["origin_asn"]].append(
+                                src["as_path"][x+1])
                         except IndexError:
                             pass
                         try:
-                            as_neighbors[src["origin_asn"]].append(src["as_path"][x-1])
+                            as_neighbors[src["origin_asn"]].append(
+                                src["as_path"][x-1])
                         except IndexError:
                             pass
             if my_asn_prefix:
                 my_as_prefixes[prefix] = srcs
-                
-        # TODO add logic to find neighbors
-            
-      
-        self.rpdp_app.send_spd(inter_as_links
-                               , as_neighbors
-                               ,my_as_prefixes
-                               ,self.config["local_as"]
-                               ,self.config["router_id"])
+
+        self.rpdp_app.send_spd(inter_as_links, as_neighbors, my_as_prefixes,
+                               self.config["local_as"], self.config["router_id"])
         # for p, d in remote_prefixes.items():
-        #     link_meta = 
+        #     link_meta =
         #     is_inter = link_meta["is_interior"]
         #     if not is_inter:
         #         self.logger.error("attempt to send spd on intra-link for a inter-prefix,skipping")
@@ -1015,14 +1079,14 @@ class SavAgent():
         #     self.logger.debug(f"neighbor_as:{neighbor_as}")
         #     proto_name = link_meta["protocol_name"]
         #     ip_version = link_meta["remote_ip"].version
-        #     
+        #
         #     if is_inter:
         #         self.logger.debug(self.bird_man.get_remote_fib())
         #         for p,data in self.bird_man.get_remote_fib().items():
         #             self.logger.debug(data["as_path"])
-        #         data = get_bird_spd_data(proto_name, 
+        #         data = get_bird_spd_data(proto_name,
         #                              f"rpdp{ip_version}",
-        #                              ip_version, 
+        #                              ip_version,
         #                              sn,
         #                              self.config["router_id"],
         #                              [],
@@ -1032,9 +1096,9 @@ class SavAgent():
         #                              link_meta["remote_as"],
         #                              )
         #     else:
-        #         data = get_bird_spd_data(proto_name, 
+        #         data = get_bird_spd_data(proto_name,
         #                              f"rpdp{ip_version}",
-        #                              ip_version, 
+        #                              ip_version,
         #                              sn,
         #                              self.config["router_id"],
         #                              [],

@@ -9,7 +9,7 @@
 import queue
 import copy
 from common.sav_common import *
-
+from sav_app import *
 
 class BirdCMDManager():
     """manage the execution of bird command, avoid concurrency issue"""
@@ -81,7 +81,7 @@ class BirdCMDManager():
                 "as4_session": "4-octet AS numbers" in t["Local capabilities"],
                 "protocol_name": proto_data["Name"]
             }
-            if "rpdp" in str(t):
+            if RPDP_ID in str(t):
                 meta["link_type"] = "dsav"
             else:
                 meta["link_type"] = "native_bgp"
@@ -590,7 +590,7 @@ class LinkManager(InfoManager):
         if not msg["msg_type"] in supported_type:
             raise ValueError(
                 f"unknown msg type {msg['msg_type']} / {supported_type}")
-        supported_apps = ["RPDP", "passport_app"]
+        supported_apps = [RPDP_ID, "passport_app"]
         if not msg["source_app"] in supported_apps:
             raise ValueError(
                 f"unknown msg source_app {msg['source_app']} / {supported_apps}")
@@ -701,17 +701,16 @@ class LinkManager(InfoManager):
                 raise ValueError(f"unknown msg type {msg['type']}")
         msg["finished_dt"] = time.time()
         # update_metric
-        match msg["source_app"]:
-            case "RPDP":
-                match msg["msg_type"]:
-                    case "dsav":
-                        temp = self._update_metric(
-                            self.agent.rpdp_app.metric["dsav"], msg)
-                        self.agent.rpdp_app.metric["dsav"] = temp
-                    case _:
-                        raise ValueError(f"unknown msg type {msg['type']}")
-            case _:
-                raise ValueError(f"unknown msg source_app {msg['source_app']}")
+        if msg["source_app"] == RPDP_ID:
+            match msg["msg_type"]:
+                case "dsav":
+                    temp = self._update_metric(
+                        self.agent.rpdp_app.metric["dsav"], msg)
+                    self.agent.rpdp_app.metric["dsav"] = temp
+                case _:
+                    raise ValueError(f"unknown msg type {msg['type']}")
+        else:
+            raise ValueError(f"unknown msg source_app {msg['source_app']}")
         if not sent:
             self.logger.warning(f"send failed {msg}")
             self.send_buff.append(msg)
