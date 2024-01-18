@@ -3,91 +3,96 @@
 @File    :   app_fp_urpf.py
 @Time    :   2023/07/24
 @Version :   0.1
-
 @Desc    :   the app_fp_urpf.py is responsible for Fp-uRPF-SAV rule generation
 """
 
 from common.sav_common import *
-
+FPURPF_ID = "fp_urpf"
 
 class FpUrpfApp(SavApp):
     """
-    a SAV App implementation based on modified bird
+    fp-uRPF:
+    the idea is using prefix as a link between interfaces and origin (maybe AS or a device)
+    packet with same origin is allowed from all linked interfaces.
+    e.g.:
+    FIB:
+    Prefix        Interface   Origin
+    P1          I1          O1
+    P2          I2          O1
+    ==>
+    SAV:
+    Prefix        Interface
+    P1          I1
+    P2          I1
+    P1          I2
+    P2          I2
+    
+    
+    however, the sav rule is still prefix based. we expand a origin to all prefixes it has using fib table.
     """
 
-    def __init__(self, agent, name="fpurpf_app", logger=None):
+    def __init__(self, agent, name, logger=None):
         super(FpUrpfApp, self).__init__(agent, name, logger)
-        self.rules = {}
 
-    def _init_protocols(self):
-        result = self._parse_sav_protocols()
-        while result == {}:
-            time.sleep(0.1)
-            result = self._parse_sav_protocols()
-        self.protocols = result
-
-    def _parse_sav_protocols(self):
+    def _get_prefix_interface_table(self):
         """
-        using 'birdc show protocols' to get bird protocols
+        build prefix interface table
         """
-        data = birdc_show_protocols(self.logger)
-        result = []
-        for row in data:
-            protocol_name = row.split("\t")[0].split(" ")[0]
-            if protocol_name.startswith("sav"):
-                result.append(protocol_name)
-        return result
-
-    def _table_to_rules(self, table):
-        """
-        convert table to rules
-        """
-        result = []
-        for as_number in table:
-            self.logger.debug(table[as_number])
-            for prefix in table[as_number]["prefixes"]:
-                self.logger.debug(table[as_number]["interface_names"])
-                for interface_name in table[as_number]["interface_names"]:
-                    result.append(get_sav_rule(
-                        prefix, interface_name, self.name, as_number))
-        return result
-
-    def fib_changed(self):
-        """
-        fib change detected
-        """
-        # self._init_protocols()
-        new_ = self.agent.get_kernel_fib()
-        # we need prefix-interface table
-
-        for prefix, row in new_.items():
-            temp = []
-            temp.append(row["Iface"])
-            new_[prefix] = temp
-        # self.logger.debug(f"new_:{new_}")
-        old_rules = self.rules
-        add_rules = []
-        del_rules = []
-        for prefix in new_:
-            if prefix in old_rules:
-                for interface_name in new_[prefix]:
-                    if not interface_name in old_rules[prefix]:
-                        add_rules.append(get_sav_rule(
-                            prefix, interface_name, self.name))
-                for interface_name in old_rules[prefix]:
-                    if not interface_name in new_[prefix]:
-                        del_rules.append(get_sav_rule(
-                            prefix, interface_name, self.name))
+        origin_interfaces_table = {}
+        origin_prefix_table = {}
+        for prefix, rows in self.agent.bird_man.get_remote_fib().items():
+            if prefix.version == 4:
+                for line in rows:
+                    if "origin_asn" in line:
+                        origin = line["origin_asn"]
+                        if not origin in origin_prefix_table:
+                            origin_prefix_table[origin] = set()
+                            origin_interfaces_table[origin] = set()
+                        origin_prefix_table[origin].add(prefix)
+                    else:
+                        self.logger.error(f"no origin_asn in {prefix}:{line}")
+                    interface = line.get("interface_name", None)
+                    if interface:
+                        origin_interfaces_table[origin].add(interface)
+            # elif prefix.version == 6:
+                # temp[prefix].append(row["Use"])
             else:
-                for interface_name in new_[prefix]:
-                    add_rules.append(get_sav_rule(
-                        prefix, interface_name, self.name))
-        for prefix in old_rules:
-            if not prefix in new_:
-                for interface_name in old_rules[prefix]:
-                    del_rules.append(get_sav_rule(
-                        prefix, interface_name, self.name))
-        self.rules = new_
-        # self.logger.debug(f"{self.name}: add_rules={add_rules}")
-        # self.logger.debug(f"{self.name}: del_rules={del_rules}")
-        return add_rules, del_rules
+                raise ValueError(f"unknown ip version {prefix.version}")
+        my_asn = self.agent.config["local_as"]
+        if not my_asn in origin_prefix_table:
+            origin_prefix_table[my_asn] = set()
+            origin_interfaces_table[my_asn] = set()
+        for prefix,rows in self.agent.bird_man.get_local_fib().items():
+            if prefix.version == 4:
+                for line in rows:
+                    origin_prefix_table[my_asn].add(prefix)
+                    interface = line.get("interface_name", None)
+                    if interface:
+                        origin_interfaces_table[my_asn].add(interface)
+            else:
+                raise ValueError(f"unknown ip version {prefix.version}")
+        return origin_interfaces_table,origin_prefix_table
+
+    def generate_sav_rules(self, fib_adds, fib_dels, bird_fib_change_dict, old_rules):
+        """
+        only implement the inter-as mode
+        """
+        origin_interfaces_table,origin_prefix_table = self._get_prefix_interface_table()
+        add_dict = {}
+        del_set = set()
+        new_rules = {}
+        for origin, interfaces in origin_interfaces_table.items():
+            for prefix in origin_prefix_table[origin]:
+                for ifa in interfaces:
+                    new_rule = get_sav_rule(prefix, ifa, self.app_id)
+                    new_rule_key = get_key_from_sav_rule(new_rule)
+                    if not new_rule_key in old_rules:
+                        add_dict[new_rule_key] = new_rule
+                    new_rules[new_rule_key] = new_rule
+        for r_k in old_rules:
+            if not r_k in new_rules:
+                del_set.add(r_k)
+        self.rules = new_rules
+        # self.logger.debug(f"{self.app_id}: add_rules={add_dict}")
+        # self.logger.debug(f"{self.app_id}: del_rules={del_set}")
+        return add_dict, del_set

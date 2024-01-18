@@ -13,12 +13,6 @@ import threading
 from common.logger import LOGGER
 from control_plane.managers import *
 from sav_app import *
-# from sav_app.app_rpdp import RPDPApp
-# from sav_app.app_urpf import UrpfApp
-# from sav_app.app_efp_urpf import EfpUrpfApp
-# from sav_app.app_fp_urpf import FpUrpfApp
-# from sav_app.app_bar import BarApp
-# from sav_app.app_passport import PassportApp
 from data_plane.data_plane_enable import interceptor
 
 
@@ -66,7 +60,7 @@ class SavAgent():
         self.update_config(path_to_config)
         self._init_data(first_dt)
         self._in_msgs = queue.Queue()
-        
+
         # self.sib_man = s(logger=self.logger)
         self.bird_man = BirdCMDManager(logger=self.logger)
         self._start()
@@ -108,6 +102,10 @@ class SavAgent():
                     raise ValueError(
                         f"invalid location {config['location']}, should be one of {valid_location}")
                 self.config = config
+                if config["use_ignore_nets"]:
+                    self.ignore_prefixes = list(map(netaddr.IPNetwork,self.config["ignore_nets"]))
+                else:
+                    self.ignore_prefixes = []
                 return
             except Exception as e:
                 self.logger.debug(e)
@@ -189,58 +187,44 @@ class SavAgent():
             data_dict["links"][key_asn].append(value_asn)
             self.logger.info(f"SAV GRAPH LINK ADDED :{key_asn}-{value_asn}")
 
-    def _init_apps(self):
+    def _init_apps(self, ca_host, ca_port):
         """
         init all app instances
         """
         # bird and grpc are must
-        self.logger.debug(self.config["apps"])
+        # self.logger.debug(self.config["apps"])
         if len(self.config["apps"]) == 0:
             self.logger.warning("no sav app given")
-        all_instances = sav_app_init(self,self.logger)
-        self.logger.debug(all_instances)
+        all_instances = sav_app_init(self, self.logger, ca_host, ca_port)
+        # self.logger.debug(all_instances)
         sav_apps = {}
         for app_id in self.config["apps"]:
+            self.logger.debug(f"app_id:{app_id}")
             if not app_id in all_instances:
                 self.logger.error(f"app_id:[{app_id}] not recognized")
                 continue
-            sav_apps[app_id]=all_instances[app_id]
+            sav_apps[app_id] = all_instances[app_id]
             if app_id == RPDP_ID:
                 self.rpdp_app = sav_apps[app_id]
         self.data["apps"] = sav_apps
-        
-            # if app_id == "strict_urpf":
-            #     app_instance = UrpfApp(
-            #         self, mode="strict", logger=self.logger)
-            #     self.add_app(app_instance)
-            # elif app_id == "Loose-uRPF":
-            #     app_instance = UrpfApp(
-            #         self, mode="loose", logger=self.logger)
-            #     self.add_app(app_instance)
-            # elif app_id.startswith("EFP-uRPF"):
-            #     app_instance = EfpUrpfApp(
-            #         self, app_id, self.logger, self.config.get("ca_host"), self.config.get("ca_port", 3000))
-            #     self.add_app(app_instance)
-            # elif app_id == "FP-uRPF":
-            #     app_instance = FpUrpfApp(self, logger=self.logger)
-            #     self.add_app(app_instance)
-            # elif app_id == RPDP_ID:
-            #     app_instance = RPDPApp(self, app_id, logger=self.logger)
-            #     self.add_app(app_instance)
-            #     self.rpdp_app = app_instance
-            # elif app_id == "BAR":
-            #     app_instance = BarApp(self, logger=self.logger)
-            #     self.add_app(app_instance)
-            # elif app_id == "Passport":
-            #     app_instance = PassportApp(
-            #         self, self.config["local_as"], self.config["router_id"], logger=self.logger)
-            #     self.passport_app = app_instance
-            #     self.add_app(app_instance)
+        self.data["active_app"] = self.data["apps"][self.config["enabled_sav_app"]]
+        #     self.add_app(app_instance)
+        # elif app_id.startswith("EFP-uRPF"):
+        #     app_instance = EfpUrpfApp(
+        #         self, app_id, self.logger, self.config.get("ca_host"), self.config.get("ca_port", 3000))
+        #     self.add_app(app_instance)
+        # elif app_id == "BAR":
+        #     app_instance = BarApp(self, logger=self.logger)
+        #     self.add_app(app_instance)
+        # elif app_id == "Passport":
+        #     app_instance = PassportApp(
+        #         self, self.config["local_as"], self.config["router_id"], logger=self.logger)
+        #     self.passport_app = app_instance
+        #     self.add_app(app_instance)
 
-            # else:
-            #     self.logger.error(msg=f"unknown app name: {app_id}")
-            # if self.config["enabled_sav_app"] == app_id:
-            #     self.data["active_app"] = app_instance.app_id
+        # else:
+        #     self.logger.error(msg=f"unknown app name: {app_id}")
+
         self.logger.debug(
             msg=f"initialized apps: {list(self.data['apps'].keys())},using {self.data['active_app']}")
 
@@ -252,8 +236,7 @@ class SavAgent():
         """
         new_ = parse_kernel_fib()
         if filter_base:
-            # TODO read from config
-            remove_prefixes = [netaddr.IPNetwork("1.1.0.0/16")]
+            remove_prefixes = self.ignore_prefixes
             temp = {}
             for prefix in new_:
                 keep = True
@@ -313,7 +296,7 @@ class SavAgent():
                     self.data["metric"]["initial_fib_stable_dt"] = fib_update_dt
         if self.data["metric"]["is_fib_stable"]:
             # pass
-            self.bird_man.update_fib(self.config["local_as"])
+            self.bird_man.update_fib(self.config["local_as"],self.ignore_prefixes)
         return adds, dels
 
     def _initial_wait(self, check_span=0.1):
@@ -329,7 +312,7 @@ class SavAgent():
             # wait for fib to first fib stable
             self._refresh_kernel_fib()
             time.sleep(check_span)
-        self._init_apps()
+        self._init_apps(None, None)
         self.logger.debug(f"initial wait: {time.time()-t0:.4f} seconds")
         return
 
@@ -405,7 +388,6 @@ class SavAgent():
                 self.logger.exception(e)
                 self.logger.error(e)
                 self.logger.error(type(e))
-
 
     def get_app(self, app_id):
         return self.data["apps"][app_id]
@@ -506,7 +488,7 @@ class SavAgent():
         """
         fib_adds, fib_dels = self._refresh_kernel_fib()
         is_bird_fib_changed, bird_fib_change_dict = self.bird_man.update_fib(
-            self.config["local_as"])
+            self.config["local_as"],self.ignore_prefixes)
         is_kernel_fib_change = ((len(fib_adds) != 0) or (len(fib_dels) != 0))
         return is_bird_fib_changed, is_kernel_fib_change, fib_adds, fib_dels, bird_fib_change_dict
 
@@ -556,48 +538,14 @@ class SavAgent():
                 else:
                     # app_type in [UrpfApp, EfpUrpfApp, FpUrpfApp]:
                     add_dict, del_list = app.generate_sav_rules(
-                        fib_adds, fib_dels, bird_fib_change_dict)
-                
-                self.logger.debug(f"add_dict:{add_dict}")
-                self.logger.debug(f"dels:{del_list}")
-                self.update_sav_table_by_app_id(add_dict,del_list,app_id)
-                # for rule in a:
-                #     row = {"prefix":        rule[0],
-                #            "interface":     rule[1],
-                #            "source_app":    rule[2],
-                #            "neighbor_as":   rule[3]
-                #            }
-                #     if rule[1] == "*":
-                #         up_link_names = self.link_man.get_all_up_type(True)
-                #         # TODO currently we only apply to bgp interfaces
-                #         for link_name in up_link_names:
-                #             link_dict = self.link_man.get_by_name(
-                #                 link_name)
-                #             row["local_role"] = link_dict["local_role"]
-                #             add_rules.append(row)
-                #     else:
-                #         temp = self.bird_man.get_bgp_by_interface(rule[1])
-                #         if temp == []:
-                #             self.logger.warning(
-                #                 f"unable to find meta fo link {rule[1]}")
-                #             return
-                #         if len(temp) != 1:
-                #             self.logger.error(temp)
-                #             self.logger.error(
-                #                 f"{len(temp)} bgp instances found on interface [{rule[1]}],")
-                #         temp = temp[0]
-                #         row["local_role"] = temp["local_role"]
-                #         add_rules.append(row)
-                # TODO d
-                # del_rules.extend(d)
+                        fib_adds, fib_dels, bird_fib_change_dict, self.get_sav_rules_by_app(app_id))
+
+                    self.logger.debug(f"add_dict:{add_dict}")
+                    self.logger.debug(f"dels:{del_list}")
+                    self.update_sav_table_by_app_id(add_dict, del_list, app_id)
             except Exception as e:
                 self.logger.exception(e)
-                self.logger.error(f"error when notifying app {app_name}")
-        # self.logger.debug(f"add_rules:{add_rules}")
-        # self.logger.debug(f"del_rules:{del_rules}")
-        # self.ip_man.add(add_rules)
-
-        return
+                self.logger.error(f"error when notifying app {app_id}")
 
     def update_sav_table(self, adds, dels):
         """
@@ -647,7 +595,7 @@ class SavAgent():
         cur_t = time.time()
         if not app_id in self.data["sav_table"]:
             new_table = {}
-        else:    
+        else:
             new_table = copy.deepcopy(self.data["sav_table"][app_id])
         for str_key in del_set:
             if not str_key in new_table:
@@ -695,7 +643,8 @@ class SavAgent():
             if v["is_interior"] == is_interior:
                 temp[k] = v
         return temp
-    def _expand_sav_rule(self, sav_rule,all_interfaces):
+
+    def _expand_sav_rule(self, sav_rule, all_interfaces):
         """
         expand sav rule with all interfaces
         """
@@ -705,7 +654,7 @@ class SavAgent():
             new_rule["interface_name"] = ifa
             ret[get_key_from_sav_rule(new_rule)] = new_rule
         return ret
-        
+
     def get_sav_rules_by_app(self, app_name, is_interior=None, ip_version=None):
         """
         return all sav rules for given app
@@ -719,19 +668,18 @@ class SavAgent():
         temp = self._get_sav_rules_by_app(app_name, is_interior)
         all_interfaces = get_host_interface_list()
         ret = {}
-        for k,v in temp.items():
+        for k, v in temp.items():
             if ip_version is None:
                 pass
             else:
                 if v["prefix"].version != ip_version:
                     continue
-            if( v["interface_name"] is None) or (
-                v["interface_name"] == "*"
-            ):
-                for expanded_k,expanded_v in self._expand_sav_rule(v,all_interfaces).items():
+            if v["interface_name"] == "*":
+                for expanded_k, expanded_v in self._expand_sav_rule(v, all_interfaces).items():
                     ret[expanded_k] = expanded_v
             else:
                 ret[k] = v
+        ret = dict(sorted(ret.items()))
         return ret
 
     def _find_links_for_origin(self, input_link_name):
@@ -978,9 +926,6 @@ class SavAgent():
                 if k.endswith("_rule_num"):
                     metric["total"] += v
             self.logger.debug(f"SAV RULE NUMS: {metric['total']}")
-        self.logger.debug(self.get_sav_rules_by_app(STRICT_URPF_ID,None,6).keys())
-        self.logger.debug(self.get_sav_rules_by_app(STRICT_URPF_ID,None,4).keys())
-        self.logger.debug(self.get_sav_rules_by_app(STRICT_URPF_ID,None,None).keys())
 
     def _get_spd_id(self, remote_as, remote_router_id):
         return f"{remote_as}-{remote_router_id.value}"

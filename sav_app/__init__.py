@@ -12,25 +12,38 @@
 """
 # imort your sav_app here and include your string_id here
 # from .app_bar import BarApp
-# from .app_urpf import UrpfApp
 from .app_rpdp import RPDPApp, RPDP_ID
 from .app_urpf import UrpfApp, STRICT_URPF_ID, LOOSE_URPF_ID
-ALL_SAV_MECHANISM_IDs = [STRICT_URPF_ID, LOOSE_URPF_ID, RPDP_ID]
+from .app_fp_urpf import FpUrpfApp, FPURPF_ID
+from .app_efp_urpf import EfpUrpfApp, EFP_URPF_A_ID, EFP_URPF_B_ID
+from .app_efp_urpf import EFP_URPF_A_ASPA_ID, EFP_URPF_B_ASPA_ID
+from .app_efp_urpf import EFP_URPF_A_ROA_ID, EFP_URPF_B_ROA_ID
+from .app_efp_urpf import EFP_URPF_A_ROA_ASPA_ID, EFP_URPF_B_ROA_ASPA_ID
+
+ALL_SAV_MECHANISM_IDs = [STRICT_URPF_ID, LOOSE_URPF_ID, RPDP_ID, EFP_URPF_B_ROA_ASPA_ID, EFP_URPF_A_ROA_ASPA_ID,
+                         EFP_URPF_A_ASPA_ID, EFP_URPF_B_ASPA_ID, EFP_URPF_B_ROA_ID, EFP_URPF_A_ROA_ID, EFP_URPF_A_ID, EFP_URPF_B_ID]
 
 
-def sav_app_init(agent, logger):
+def sav_app_init(agent, logger, ca_host, ca_port):
     """
     init sav_app instances here,
     return a dict of instances,key is string_id,value is instance
     """
     try:
         ret = {}
-        ret[RPDP_ID] = RPDPApp(
-            agent, logger=logger, name=RPDP_ID)
-        ret[STRICT_URPF_ID] = UrpfApp(
-            agent, logger=logger, name=STRICT_URPF_ID, mode="strict")
-        ret[LOOSE_URPF_ID] = UrpfApp(
-            agent, logger=logger, name=LOOSE_URPF_ID, mode="loose")
+        ret[RPDP_ID] = RPDPApp(agent, RPDP_ID, logger)
+
+        ret[STRICT_URPF_ID] = UrpfApp(agent, STRICT_URPF_ID, "strict", logger)
+        ret[LOOSE_URPF_ID] = UrpfApp(agent, LOOSE_URPF_ID, "loose", logger)
+
+        ret[FPURPF_ID] = FpUrpfApp(agent, FPURPF_ID, logger)
+
+        ret[EFP_URPF_A_ID] = EfpUrpfApp(agent, EFP_URPF_A_ID, logger)
+        ret[EFP_URPF_B_ID] = EfpUrpfApp(agent, EFP_URPF_B_ID, logger)
+        ret[EFP_URPF_A_ROA_ID] = EfpUrpfApp(agent, EFP_URPF_A_ROA_ID, logger, ca_host, ca_port)
+        ret[EFP_URPF_B_ROA_ID] = EfpUrpfApp(agent, EFP_URPF_B_ROA_ID, logger, ca_host, ca_port)
+        
+
     except Exception as e:
         logger.exception(e)
         ret = {}

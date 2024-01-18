@@ -589,6 +589,9 @@ def my_split(str_data, split_char):
 
 
 def process_src_kv(k, v,my_asn):
+    """
+    add values to each source identified
+    """
     k_temp = k.split()
     if '*' in k_temp:
         k_temp.remove('*')
@@ -628,22 +631,7 @@ def process_src_kv(k, v,my_asn):
     else:
         raise ValueError(f"unknown key:{k_temp}")
     return 1
-    # if len(k_temp) == 4:
 
-    # #
-    # # m1 = int(k_temp[3][1:-1])
-    # # else:
-    # #     v["metric"] = m1
-    # # origin_asn = k_temp[4][1:-1]
-    # # if not (origin_asn.startswith("AS") and origin_asn.endswith("i")):
-    # #     print(origin_asn)
-    # #     raise ValueError("origin_asn not found")
-    # #
-
-    # if new_v is None:
-    #                 print(k)
-    #                 print(v)
-    #                 raise ValueError("new_v is None")
 
 
 def parse_prefix(data,my_asn):
@@ -657,7 +645,6 @@ def parse_prefix(data,my_asn):
     for i in lines:
         while "  " in i:
             i = i.replace("  ", " ")
-        # print([i])
         if i.startswith("\t"):
             if cur_prefix == None:
                 raise ValueError("prefix not found")
@@ -677,12 +664,12 @@ def parse_prefix(data,my_asn):
                       "\tvia ": "via",
                       "\tBGP.next_hop: ": "next_hop",
                       "\tBGP.local_pref: ": "metric",
-                      "\tBGP.otc: ": "only_to_customer", "\tBGP.community: ": "community"}
-    for prefix in ret:
+                      "\tBGP.otc: ": "only_to_customer",
+                      "\tBGP.community: ": "community"}
+    for prefix, lines in ret.items():
         srcs = {}
         cur_key = None
-        cur_poto = None
-        for l in ret[prefix]:
+        for l in lines:
             if l.startswith(" "):
                 cur_key = l[1:]
                 srcs[cur_key] = {}
@@ -690,15 +677,21 @@ def parse_prefix(data,my_asn):
                 if cur_key == None:
                     raise ValueError("key not found")
                 found = False
-                for k in hardcoded_keys:
+                # input(l)
+                for k, v in hardcoded_keys.items():
                     if l.startswith(k):
-                        srcs[cur_key][hardcoded_keys[k]] = l[len(k):]
+                        srcs[cur_key][v] = l[len(k):]
                         if k == "\tBGP.as_path: ":
-                            srcs[cur_key][hardcoded_keys[k]] = list(
-                                map(int, srcs[cur_key][hardcoded_keys[k]].split()))
+                            srcs[cur_key][v] = list(
+                                map(int, srcs[cur_key][v].split()))
+                            if len(srcs[cur_key][v]) > 0:
+                                srcs[cur_key]["origin"] = srcs[cur_key][v][0]
+                                srcs[cur_key]["origin_type"] = "AS"
                         elif k == "\tBGP.local_pref: ":
-                            srcs[cur_key][hardcoded_keys[k]] = int(
-                                srcs[cur_key][hardcoded_keys[k]])
+                            srcs[cur_key][v] = int(
+                                srcs[cur_key][v])
+                        elif k == "\tvia ":
+                            srcs[cur_key]["interface_name"] = l.split("on ")[1]
                         found = True
                         break
                 if not found:
@@ -739,8 +732,8 @@ def parse_prefix(data,my_asn):
     return ret
 
 
-def parse_table(data,my_asn):
-    """parse table data"""
+def parse_bird_show_route_all(data, my_asn):
+    """parse the out put of bird show route all cmd"""
     tables = my_split(data, "Table")
     ret = {}
     for i in tables:
@@ -750,11 +743,9 @@ def parse_table(data,my_asn):
         table_data = i.split(table_heading)[1][1:]
         ret[table_name] = parse_prefix(table_data,my_asn)
     return ret
-test_op = """'Table master4:\n1.1.7.0/24           blackhole [static1 09:20:53.065] * (200)\n\tType: static univ\n1.1.1.0/24           unicast [direct1 09:20:53.066] * (240)\n\tdev eth_r1\n\tType: device univ\n                     unicast [savbgp_3_1 09:20:56.966] (100) [i]\n\tvia 1.1.1.1 on eth_r1\n\tType: BGP univ\n\tBGP.origin: IGP\n\tBGP.as_path: \n\tBGP.next_hop: 1.1.1.1\n\tBGP.local_pref: 100\n1.1.2.0/24           unicast [savbgp_3_1 09:20:56.966] * (100) [i]\n\tvia 1.1.1.1 on eth_r1\n\tType: BGP univ\n\tBGP.origin: IGP\n\tBGP.as_path: \n\tBGP.next_hop: 1.1.1.1\n\tBGP.local_pref: 100\n                     unicast [savbgp_3_2 09:20:53.924] (100) [i]\n\tvia 1.1.3.1 on eth_r2\n\tType: BGP univ\n\tBGP.origin: IGP\n\tBGP.as_path: \n\tBGP.next_hop: 1.1.3.1\n\tBGP.local_pref: 100\n1.1.3.0/24           unicast [direct1 09:20:53.066] * (240)\n\tdev eth_r2\n\tType: device univ\n                     unicast [savbgp_3_2 09:20:53.924] (100) [i]\n\tvia 1.1.3.1 on eth_r2\n\tType: BGP univ\n\tBGP.origin: IGP\n\tBGP.as_path: \n\tBGP.next_hop: 1.1.3.1\n\tBGP.local_pref: 100\n1.1.4.0/24           blackhole [static1 09:20:53.065] * (200)\n\tType: static univ\n"""
+
+
+# test_op = """'Table master4:\n1.1.7.0/24           blackhole [static1 09:20:53.065] * (200)\n\tType: static univ\n1.1.1.0/24           unicast [direct1 09:20:53.066] * (240)\n\tdev eth_r1\n\tType: device univ\n                     unicast [savbgp_3_1 09:20:56.966] (100) [i]\n\tvia 1.1.1.1 on eth_r1\n\tType: BGP univ\n\tBGP.origin: IGP\n\tBGP.as_path: \n\tBGP.next_hop: 1.1.1.1\n\tBGP.local_pref: 100\n1.1.2.0/24           unicast [savbgp_3_1 09:20:56.966] * (100) [i]\n\tvia 1.1.1.1 on eth_r1\n\tType: BGP univ\n\tBGP.origin: IGP\n\tBGP.as_path: \n\tBGP.next_hop: 1.1.1.1\n\tBGP.local_pref: 100\n                     unicast [savbgp_3_2 09:20:53.924] (100) [i]\n\tvia 1.1.3.1 on eth_r2\n\tType: BGP univ\n\tBGP.origin: IGP\n\tBGP.as_path: \n\tBGP.next_hop: 1.1.3.1\n\tBGP.local_pref: 100\n1.1.3.0/24           unicast [direct1 09:20:53.066] * (240)\n\tdev eth_r2\n\tType: device univ\n                     unicast [savbgp_3_2 09:20:53.924] (100) [i]\n\tvia 1.1.3.1 on eth_r2\n\tType: BGP univ\n\tBGP.origin: IGP\n\tBGP.as_path: \n\tBGP.next_hop: 1.1.3.1\n\tBGP.local_pref: 100\n1.1.4.0/24           blackhole [static1 09:20:53.065] * (200)\n\tType: static univ\n"""
 # test_output = """Table master4:\n1.1.1.0/24           unicast [direct1 17:17:00.183] * (240)\n\tdev eth_r3\n\tType: device univ\n                     unicast [savbgp_1_3 17:17:01.084] (100) [AS65503i]\n\tvia 1.1.1.2 on eth_r3\n\tType: BGP univ\n\tBGP.origin: IGP\n\tBGP.as_path: 65503\n\tBGP.next_hop: 1.1.1.2\n\tBGP.local_pref: 100\n1.1.2.0/24           unicast [direct1 17:17:00.183] * (240)\n\tdev eth_r2\n\tType: device univ\n                     unicast [savbgp_1_2 17:17:01.031] (100) [AS65502i]\n\tvia 1.1.2.2 on eth_r2\n\tType: BGP univ\n\tBGP.origin: IGP\n\tBGP.as_path: 65502\n\tBGP.next_hop: 1.1.2.2\n\tBGP.local_pref: 100\n\tBGP.otc: 65502\n1.1.3.0/24           unicast [savbgp_1_2 17:17:01.031] * (100) [AS65502i]\n\tvia 1.1.2.2 on eth_r2\n\tType: BGP univ\n\tBGP.origin: IGP\n\tBGP.as_path: 65502\n\tBGP.next_hop: 1.1.2.2\n\tBGP.local_pref: 100\n\tBGP.otc: 65502\n                     unicast [savbgp_1_3 17:17:01.084] (100) [AS65503i]\n\tvia 1.1.1.2 on eth_r3\n\tType: BGP univ\n\tBGP.origin: IGP\n\tBGP.as_path: 65503\n\tBGP.next_hop: 1.1.1.2\n\tBGP.local_pref: 100\n111.192.7.0/24       unicast [savbgp_1_3 17:17:01.084] * (100) [AS65503i]\n\tvia 1.1.1.2 on eth_r3\n\tType: BGP univ\n\tBGP.origin: IGP\n\tBGP.as_path: 65503\n\tBGP.next_hop: 1.1.1.2\n\tBGP.local_pref: 100\n111.192.1.0/24       blackhole [static1 17:17:00.181] * (200)\n\tType: static univ\n111.192.3.0/24       unicast [savbgp_1_2 17:17:01.031] * (100) [AS65502i]\n\tvia 1.1.2.2 on eth_r2\n\tType: BGP univ\n\tBGP.origin: IGP\n\tBGP.as_path: 65502\n\tBGP.next_hop: 1.1.2.2\n\tBGP.local_pref: 100\n\tBGP.otc: 65502\n111.192.4.0/24       unicast [savbgp_1_3 17:17:01.084] * (100) [AS65503i]\n\tvia 1.1.1.2 on eth_r3\n\tType: BGP univ\n\tBGP.origin: IGP\n\tBGP.as_path: 65503\n\tBGP.next_hop: 1.1.1.2\n\tBGP.local_pref: 100\n"""
-# ret = parse_table(test_output)
-# for t,d in ret.items():
-#     print(t)
-#     for p,v in d.items():
-#         print(p)
-#         print(v)
+# ret = parse_bird_show_route_all(test_output, 65501)
+# print(ret)

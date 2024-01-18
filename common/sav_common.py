@@ -76,11 +76,15 @@ def parse_bird_table(table, logger=None):
             parsed_rows[prefix] = []
         temp = {}
         for line in row:
+            # logger.debug([line])
             if line.startswith("\tBGP.as_path:"):
-                temp["as_path"] = list(
-                    map(int, line.split(": ")[1].split(" ")))
-                temp["as_path"].reverse()
-                temp["origin_as"] = temp["as_path"][0]
+                if line.endswith("_path: "):
+                    temp["as_path"] = []
+                else:
+                    temp["as_path"] = list(
+                        map(int, line.split(": ")[1].split(" ")))
+                    temp["as_path"].reverse()
+                    temp["origin_as"] = temp["as_path"][0]
             if line.startswith("\tvia"):
                 temp["interface_name"] = line.split("on ")[-1]
                 temp["interface_ip"] = line.split(
@@ -107,17 +111,17 @@ def check_msg(key, msg, meta=SAV_META):
 
 def rule_list_diff(old_rules, new_rules):
     """
-    return adds and dels for the given lists
+    return add_dict and del_set
     """
-    adds_ = []
-    dels_ = []
-    for item in new_rules:
-        if item not in old_rules:
-            adds_.append(item)
-    for item in old_rules:
-        if item not in new_rules:
-            dels_.append(item)
-    return adds_, dels_
+    add_dict = {}
+    del_set = ()
+    for r_k,r in new_rules.items():
+        if r_k not in old_rules:
+            add_dict[r_k]=r
+    for r_k,r in old_rules.items():
+        if r_k not in new_rules:
+            del_set.add(r_k)
+    return add_dict, del_set
 
 
 def subproc_run(cmd, shell=True, capture_output=True, encoding='utf-8'):
@@ -145,6 +149,8 @@ def get_host_interface_list():
     result = std_out.split("\n")[:-1]
     result = list(map(lambda x: x.split('@')[0], result))
     return [i for i in result if len(i) != 0]
+
+
 def diff_sav_rules(old_rules, new_rules):
     """
     return a list of adds and dels
@@ -279,10 +285,13 @@ class SavApp():
         self.status = True
         self.app_id = app_id
         self.agent = agent
+
     def _get_cur_kernel_fib(self):
         return self.agent.get_kernel_fib()
+
     def _get_bird_local_fib(self):
         return self.agent.bird_man.get_local_fib()
+
     def _get_bird_remote_fib(self):
         return self.agent.bird_man.get_remote_fib()
     def is_up(self):
@@ -297,7 +306,7 @@ class SavApp():
     def check_status(self):
         raise NotImplementedError
 
-    def generate_sav_rules(self):
+    def generate_sav_rules(self, fib_adds, fib_dels, bird_fib_change_dict, old_rules):
         """
         generate sav rules based on the current information
         """
@@ -460,13 +469,14 @@ def birdc_get_import(logger, protocol_name, channel_name="ipv4"):
     using birdc show all import to get import table
     return a list
     """
+    default = {"import": {}}
     cmd = f"show route all import table {protocol_name}.{channel_name}"
     data = birdc_cmd(logger, cmd)
     if data.startswith("No import table in channel"):
         logger.warning(data[:-1])
-        return {"import": {}}
+        return default
     if data is None:
-        return {"import": {}}
+        return default
     data = data.split("Table")
     while "" in data:
         data.remove("")
@@ -474,7 +484,7 @@ def birdc_get_import(logger, protocol_name, channel_name="ipv4"):
         table_name, table_data = parse_bird_table(table, logger)
         if table_name == "import":
             return table_data
-    return []
+    return default
 
 
 def get_roa(logger, t_name='r4', ns_scope=None):
@@ -519,7 +529,6 @@ def get_roa(logger, t_name='r4', ns_scope=None):
             if as_number not in result:
                 result[as_number] = []
             result[as_number].append(netaddr.IPNetwork(prefix))
-            # result[as_number].append(prefix)
     return result
 
 
