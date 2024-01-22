@@ -11,7 +11,6 @@
 -------------------------------------------------
 """
 # imort your sav_app here and include your string_id here
-# from .app_bar import BarApp
 from .app_rpdp import RPDPApp, RPDP_ID
 from .app_urpf import UrpfApp, STRICT_URPF_ID, LOOSE_URPF_ID
 from .app_fp_urpf import FpUrpfApp, FPURPF_ID

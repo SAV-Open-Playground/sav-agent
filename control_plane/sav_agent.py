@@ -312,7 +312,7 @@ class SavAgent():
             # wait for fib to first fib stable
             self._refresh_kernel_fib()
             time.sleep(check_span)
-        self._init_apps(None, None)
+        self._init_apps(self.config["ca_host"], self.config["ca_port"])
         self.logger.debug(f"initial wait: {time.time()-t0:.4f} seconds")
         return
 

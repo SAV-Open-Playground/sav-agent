@@ -14,7 +14,7 @@ import json
 import time
 import copy
 from flask import request, Blueprint
-from common.sav_common import TIMEIT_THRESHOLD
+from common.sav_common import TIMEIT_THRESHOLD, save_json
 from common.logger import LOGGER
 from control_plane import SA
 from data_plane.data_plane_enable import interceptor
@@ -142,6 +142,23 @@ def sav_table():
     rep = copy.deepcopy(SA.data["sav_table"])
     return str(rep)
 
+
+@api_blueprint.route('/save_sav_table/', methods=["POST", "GET"])
+def save_sav_table():
+    p = "/root/savop/logs/sav_table.json"
+    st = copy.deepcopy(SA.data["sav_table"])
+    ret = {}
+    for app_id in SA.data["apps"]:
+        ret[app_id] = list(SA.get_sav_rules_by_app(
+            app_id, ip_version=4).keys())
+        # for rule_k, rule in rules.items():
+        #     rule["prefix"] = str(rule["prefix"])
+        #     rule["origin"] = str(rule["origin"])
+
+        #     st[app_id][rule_k] = rule
+    LOGGER.debug(f"{ret}")
+    save_json(p, ret)
+    return p
 
 @api_blueprint.route('/savop_quic/', methods=["POST"])
 def savop_quic():

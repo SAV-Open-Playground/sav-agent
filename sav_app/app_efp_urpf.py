@@ -8,7 +8,14 @@
 """
 
 from common.sav_common import *
-
+EFP_URPF_A_ID = "efp_urpf_a"
+EFP_URPF_B_ID = "efp_urpf_b"
+EFP_URPF_A_ROA_ID = "efp_urpf_a_roa"
+EFP_URPF_B_ROA_ID = "efp_urpf_b_roa"
+EFP_URPF_A_ASPA_ID = "efp_urpf_a_aspa"
+EFP_URPF_B_ASPA_ID = "efp_urpf_b_aspa"
+EFP_URPF_A_ROA_ASPA_ID = "efp_urpf_a_roa_aspa"
+EFP_URPF_B_ROA_ASPA_ID = "efp_urpf_b_roa_aspa"
 
 class EfpUrpfApp(SavApp):
     """
@@ -18,43 +25,36 @@ class EfpUrpfApp(SavApp):
     def __init__(self, agent, name, logger=None, ca_host="", ca_port=""):
         self.pp_v4_dict = {}
         # pp represents prefix-(AS)path
-        if not name.startswith("EFP-uRPF"):
-            raise ValueError("name should start with 'EFP-uRPF'")
-        name = name[9:].upper().split("-")
-        self.type = name.pop(0)
-        args = name
-        self.roa = False
-        self.aspa = False
-        name = f"EFP-uRPF-Algorithm-{self.type}"
-        if "ROA" in args:
-            name += "-ROA"
+        raw_name = name
+        name = name[9:].upper().split("_")
+        if "A" in name:
+            self.type = "A"
+        elif "B" in name:
+            self.type = "B"
+        else:
+            raise ValueError(f"unknown type {name}")
+        if "ROA" in name:
             self.roa = True
-        if "ASPA" in args:
-            name += "-ASPA"
+        else:
+            self.roa = False
+        if "ASPA" in name:
             self.aspa = True
             self.aspa_info = get_aspa(logger, ca_host, ca_port)
-        name += "_app"
-        super(EfpUrpfApp, self).__init__(agent, name, logger)
-        self.rules = []
+        else:
+            self.aspa = False
+        super(EfpUrpfApp, self).__init__(agent, raw_name, logger)
 
     def _init_protocols(self):
-        result = self._parse_sav_protocols()
-        while result == {}:
-            time.sleep(0.1)
-            result = self._parse_sav_protocols()
-        self.protocols = result
-
-    def _parse_sav_protocols(self):
         """
-        using 'birdc show protocols' to get bird protocols
+        get all protocol names that starts with sav
         """
-        data = birdc_show_protocols(self.logger)
-        result = []
-        for row in data:
-            protocol_name = row.split("\t")[0].split(" ")[0]
-            if protocol_name.startswith("sav"):
-                result.append(protocol_name)
-        return result
+        self.protocol_metas = []
+        for link_name,link_meta in self.agent.link_man.get_all_link_meta().items():
+            if not link_meta["is_interior"]:
+                continue
+                # only works for interior links
+            if link_meta["link_type"] in ["dsav"]:
+                self.protocol_metas.append(link_meta)
 
     def _dict_to_rules(self, RPF_dict):
         """
@@ -63,23 +63,25 @@ class EfpUrpfApp(SavApp):
         result = []
         for interface, data in RPF_dict.items():
             for prefix, as_number in data:
-                rule = get_sav_rule(prefix, interface, self.name, as_number)
+                rule = get_sav_rule(prefix, interface, self.app_id, as_number)
                 result.append(rule)
         return result
 
-    def _parse_import_table(self, protocol_name, channel_name="ipv4"):
+    def _parse_import_table(self, protocol_name):
         """
         using birdc show all import to get bird fib
         """
+        default = {"import":{}}
+        ret = birdc_get_import(self.logger, protocol_name, "ipv4")
+        if ret == default:
+            ret = birdc_get_import(self.logger, protocol_name, "rpdp4")
+        return ret
 
-        return birdc_get_import(self.logger, protocol_name, channel_name)
-
-    def fib_changed(self):
+    def generate_sav_rules(self, fib_adds, fib_dels, bird_fib_change_dict, old_rules):
         """
         fib change detected
         """
         self._init_protocols()
-        old_rules = self.rules
         if self.type == "A":
             return self.algorithm_a(old_rules)
         elif self.type == "B":
@@ -96,15 +98,9 @@ class EfpUrpfApp(SavApp):
         if self.roa:
             roa_info = self._parse_roa_table(t_name="r4")
             self.logger.debug(f"roa_info: {roa_info}")
-        # self.logger.debug(f"EFP-A old_rules:{old_rules}")
-        for protocol_name in self.protocols:
-            # self.logger.debug(msg=f"protocol_name:{protocol_name}")
-            meta = self.agent.bird_man.get_link_meta_by_name(
-                protocol_name)
-            if not meta:
-                self.logger.warning(
-                    f"get link data error for link:{protocol_name}")
-                continue
+        
+        for meta in self.protocol_metas:
+            protocol_name = meta["protocol_name"]
             all_int_in[protocol_name] = {"meta": meta}
             all_int_in[protocol_name]["adj-in"] = self._parse_import_table(
                 protocol_name)
@@ -123,7 +119,7 @@ class EfpUrpfApp(SavApp):
                 all_int_in[protocol_name]["adj-in"] = temp
         # self.logger.debug(f"EFP-A all_int_in:{all_int_in}")
         for protocol_name, data in all_int_in.items():
-            # self.logger.debug(data)
+            self.logger.debug(data)
             if data["meta"]["remote_role"] == "customer":
                 if self.aspa:
                     # self.logger.debug(data)
@@ -144,7 +140,7 @@ class EfpUrpfApp(SavApp):
                             # self.logger.debug(f"prefix:{prefix}")
                             X[origin_asn].add(prefix)
         # self.logger.debug(f"EFP-A X:{X}")
-        new_rules = set()
+        new_rules = {}
         for protocol_name, data in all_int_in.items():
             if not data["meta"]["remote_role"] == "customer":
                 # self.logger.debug(f"new_rules:{data['meta']['remote_role']}")
@@ -158,8 +154,8 @@ class EfpUrpfApp(SavApp):
                 if is_prefix_included:
                     for prefix in prefixes:
                         rule = get_sav_rule(
-                            prefix, data["meta"]["interface_name"], self.name, origin_asn)
-                        new_rules.add(rule)
+                            prefix, data["meta"]["interface_name"], self.app_id, origin_asn)
+                        new_rules[get_key_from_sav_rule(rule)]=rule
         # self.logger.debug(f"EFP-A new_rules:{new_rules}")
 
         return rule_list_diff(old_rules, new_rules)
@@ -173,10 +169,9 @@ class EfpUrpfApp(SavApp):
         A = set()
         Q = set()
         all_int_in = []
-        for protocol_name in self.protocols:
+        for link_meta in self.protocol_metas:
+            protocol_name = link_meta["protocol_name"]
             # self.logger.debug(msg=f"protocol_name:{protocol_name}")
-            link_meta = self.agent.bird_man.get_link_meta_by_name(
-                protocol_name)
             data = {"meta": link_meta}
             data["adj-in"] = self._parse_import_table(protocol_name)
             all_int_in.append(data)
@@ -202,11 +197,11 @@ class EfpUrpfApp(SavApp):
         # self.logger.debug(f"A:{A}")
         # self.logger.debug(f"Q:{Q}")
         # self.logger.debug(f"Z:{Z}")
-        new_rules = set()
+        new_rules = {}
         for interface in I:
             for prefix, origin_as in Z:
-                new_rules.add(get_sav_rule(
-                    prefix, interface, self.name, origin_as))
+                r =get_sav_rule(prefix, interface, self.app_id, origin_as)
+                new_rules[get_key_from_sav_rule(r)] = r
         # self.logger.debug(f"EFP-B new_rules:{new_rules}")
         # new_rules = self._set_to_rules(I, Z)
         return rule_list_diff(old_rules, new_rules)

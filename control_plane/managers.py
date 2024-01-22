@@ -663,7 +663,8 @@ class LinkManager(InfoManager):
                 l = l.split(" ")
                 temp[proto_name]["local_ip"] = netaddr.IPAddress(l[-1][:-1])
             elif l.startswith("interface"):
-                temp[proto_name]["interface_name"] = l.split("\"")[1]
+                self.logger.debug(l)
+                temp[proto_name]["interface_name"] = l.split(" ")[1][:-1]
         self.data["check_time"] = time.time()
         self.data["links"] = temp
         self.data["update_time"] = self.data["check_time"]

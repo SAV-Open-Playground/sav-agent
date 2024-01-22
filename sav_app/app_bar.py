@@ -7,14 +7,14 @@
 @Desc    :   the app_bar.py is responsible for BAR-SAV rule generation (when ROA and ASPA are available)
 """
 from common.sav_common import *
-
+BAR_ID = "bar"
 
 class BarApp(SavApp):
     """
     a SavApp implementation of BAR-SAV (ASPA and ROA required)
     """
 
-    def __init__(self, agent, name="bar_app", logger=None):
+    def __init__(self, agent, name="BAR", logger=None):
         super(BarApp, self).__init__(agent, name, logger)
         self.rules = []
         # TODO update and change detection
@@ -101,6 +101,6 @@ class BarApp(SavApp):
         for interface, asn in direct.items():
             allowed_prefix = get_p_by_asn(asn, self.roa_cache, self.aspa_cache)
             for p, origin_as in allowed_prefix.items():
-                rule = get_sav_rule(p, interface, self.name, origin_as)
+                rule = get_sav_rule(p, interface, self.app_id, origin_as)
                 new_rules.add(rule)
         return rule_list_diff(self.rules, new_rules)

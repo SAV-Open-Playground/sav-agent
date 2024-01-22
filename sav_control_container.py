@@ -16,8 +16,10 @@ import subprocess
 from datetime import datetime
 import requests
 from common.logger import get_logger
+from common.sav_common import *
 from sav_app import *
-
+import urllib3
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 class Bot:
     def __init__(self):
         self.data_path = r"/root/savop"
@@ -234,7 +236,54 @@ class Bot:
             except Exception as e:
                 continue
 
+    def insert_roa(self):
+        """
+        insert roa to rpki server
+        """
+        roa_path =  f"{self.data_path}/roas.json"
+        d = read_json(roa_path)
+        url = f"https://{d.get('ip')}:{d.get('port')}/api/v1/cas/testbed/"
+        url += "routes"
+        data = {"added": d.get("add"), "removed": []}
+        self._send(url, data)
+        self.logger.info("insert roa finished")
+        
+    def insert_aspa(self):
+        """
+        insert aspa to rpki server
+        """
+        aspas_path =  f"{self.data_path}/aspas.json"
+        d = read_json(aspas_path)
+        url = f"https://{d.get('ip')}:{d.get('port')}/api/v1/cas/testbed/"
+        url += "aspas"
+        data = {"add_or_replace": d.get("add"), "remove": []}
+        self._send(url, data)
+        self.logger.info("insert aspa finished")
 
+    def _send(self,url,d):
+        headers = {
+            'Authorization': 'Bearer ' + d.get("token"),
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
+        }
+        while True:
+            try:
+                response = requests.post(url=url, json=d,
+                                        verify=False, headers=headers, timeout=1)
+                if response.status_code == 200:
+                    print("finished")
+                    return
+                if response.status_code == 400:
+                    # 400 usually is roa rejected due to already existing
+                    print(response.json())
+                    print("finished")
+                    return
+                else:
+                    self.logger.warning(f"response status code: {response.status_code}")
+            except Exception as err:
+                print(err)
+                print(time.time())
+                time.sleep(3)
 if __name__ == "__main__":
     a = Bot()
     a.run()

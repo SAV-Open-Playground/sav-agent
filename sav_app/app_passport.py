@@ -13,7 +13,7 @@ import hmac
 
 
 from common.sav_common import *
-
+PASSPORT_ID = "passport"
 
 class PassportApp(SavApp):
     """
@@ -130,7 +130,7 @@ class PassportApp(SavApp):
             metric_key = "key_exchange"
             start = self.update_metric(msg, metric_key, True, True)
         url = f"http://{remote_ip}:8888/{path}/"
-        # msg = get_send_buff_msg(self.name, "http-post", {"url":url}, msg,retry_forever=True,response=False)
+        # msg = get_send_buff_msg(self.app_id, "http-post", {"url":url}, msg,retry_forever=True,response=False)
         # self.agent.send_buff.put(msg)
         retry_count = 0
         while True:
