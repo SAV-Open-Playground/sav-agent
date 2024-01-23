@@ -131,16 +131,22 @@ class SavAgent():
         """
         all major data should be initialized here
         """
-        self.data = {}
+        self.data = {
+            "pkt_id": 0,
+            "msg_count": 0,
+            "active_app": None,
+            "fib_for_apps": {},
+            "apps": {},
+            "aspa_info": {}, # roa is stored in bird_man
+            "roa_info": {},
+            "links": {}, # link manager"s data
+            "fib": [],  # system"s fib table
+        }
         self.data["metric"] = init_protocol_metric()
         self.data["metric"]["first_dt"] = first_dt
         self.data["metric"]["initial_fib_stable"] = False
         self.data["metric"]["is_fib_stable"] = False
         self.data["metric"]["skipped_bgp_update"] = 0
-        self.data["pkt_id"] = 0
-        self.data["msg_count"] = 0
-        self.data["links"] = {}  # link manager"s data
-        self.data["fib"] = []  # system"s fib table
         # key is prefix (str), value is as paths in csv
         self._init_sav_table()
         # node key is as number, value is None; link key is as number,
@@ -148,14 +154,11 @@ class SavAgent():
         self.data["sav_graph"] = {"nodes": {}, "links": {}}
         self.link_man = LinkManager(
             self.data["links"], self, logger=self.logger)
-        self.data["apps"] = {}
         self.data["kernel_fib"] = {"data": parse_kernel_fib(),
                                    "update_time": time.time(),
                                    "check_time": time.time()}
-        self.data["fib_for_apps"] = {}
         self.rpdp_app = None
         self.passport_app = None
-        self.data["active_app"] = None
 
     def add_sav_nodes(self, nodes):
         data = self.data["sav_graph"]["nodes"]
@@ -187,7 +190,7 @@ class SavAgent():
             data_dict["links"][key_asn].append(value_asn)
             self.logger.info(f"SAV GRAPH LINK ADDED :{key_asn}-{value_asn}")
 
-    def _init_apps(self, ca_host, ca_port):
+    def _init_apps(self):
         """
         init all app instances
         """
@@ -195,7 +198,7 @@ class SavAgent():
         # self.logger.debug(self.config["apps"])
         if len(self.config["apps"]) == 0:
             self.logger.warning("no sav app given")
-        all_instances = sav_app_init(self, self.logger, ca_host, ca_port)
+        all_instances = sav_app_init(self, self.logger)
         # self.logger.debug(all_instances)
         sav_apps = {}
         for app_id in self.config["apps"]:
@@ -208,11 +211,6 @@ class SavAgent():
                 self.rpdp_app = sav_apps[app_id]
         self.data["apps"] = sav_apps
         self.data["active_app"] = self.data["apps"][self.config["enabled_sav_app"]]
-        #     self.add_app(app_instance)
-        # elif app_id.startswith("EFP-uRPF"):
-        #     app_instance = EfpUrpfApp(
-        #         self, app_id, self.logger, self.config.get("ca_host"), self.config.get("ca_port", 3000))
-        #     self.add_app(app_instance)
         # elif app_id == "BAR":
         #     app_instance = BarApp(self, logger=self.logger)
         #     self.add_app(app_instance)
@@ -227,7 +225,56 @@ class SavAgent():
 
         self.logger.debug(
             msg=f"initialized apps: {list(self.data['apps'].keys())},using {self.data['active_app']}")
-
+    def get_aspa_info(self):
+        """
+        TODO: when to refresh aspa_info,
+        in our current design, we only refresh aspa_info once is enough
+        """
+        if self.data["aspa_info"] == {}:
+            self._refresh_aspa_info()
+        return copy.deepcopy(self.data["aspa_info"] )
+    def _get_rpki_info(self,uri):
+        host = "savopkrill.com"
+        port = 3000
+        pwd = "krill"
+        url = f"https://{host}:{port}/api/v1/cas/testbed/{uri}"
+        headers = {"Authorization": f"Bearer {pwd}",
+                            "Content-Type": "application/json"}
+        while True:
+            try:
+                response = requests.request(
+                        "GET", url, headers=headers, verify=False, timeout=15)
+                response.raise_for_status()  # Raises an exception for any HTTP error status codes
+                ret = response.json()
+                return ret
+            except Exception as err:
+                self.logger.debug(err)
+                self.logger.error(f"get {url} failed")
+                time.sleep(0.1)
+    def _refresh_aspa_info(self):
+        """
+        update aspa_info: {customer_asn:[provider_asn]}
+        """
+        ret_json = self._get_rpki_info("aspas")
+        ret = {}
+        for item in ret_json:
+            customer_asn = item["customer"]
+            provider_asns = item["providers"]
+            ret[customer_asn] = list(map(lambda x: int(x.replace("AS", "").replace("(v4)", "")), provider_asns))
+        self.data["aspa_info"] = ret
+               
+    def _refresh_roa_info(self,hostname="savopkrill.com", port_number=3000, pwd="krill"):
+        ret = self._get_rpki_info("routes")
+        for r in ret:
+            if not r["asn"] in self.data["roa_info"]:
+                self.data["roa_info"][r["asn"]] = []
+            p = netaddr.IPNetwork(r["prefix"])
+            self.data["roa_info"][r["asn"]].append(p)
+    def get_roa_info(self):
+        """
+        return a dict,key is customer_asn,value is list of providers
+        """
+        return copy.deepcopy(self.data["roa_info"])
     def _refresh_kernel_fib(self, filter_base=True):
         """
         update kernel fib using cmd
@@ -296,23 +343,35 @@ class SavAgent():
                     self.data["metric"]["initial_fib_stable_dt"] = fib_update_dt
         if self.data["metric"]["is_fib_stable"]:
             # pass
-            self.bird_man.update_fib(self.config["local_as"],self.ignore_prefixes)
+            self.bird_man.update_fib(self.config["local_as"])
         return adds, dels
 
-    def _initial_wait(self, check_span=0.1):
+    def _initial_wait(self):
         """
         1. wait for bird to be ready
         2. wait for fib to be stable
         """
         t0 = time.time()
         while not self.bird_man.is_bird_ready():
-            time.sleep(check_span)
+            time.sleep(0.1)
             # self.logger.debug("waiting for bird to be ready")
+        self.logger.debug("bird ready")
         while not self.data["metric"]["initial_fib_stable"]:
             # wait for fib to first fib stable
-            self._refresh_kernel_fib()
-            time.sleep(check_span)
-        self._init_apps(self.config["ca_host"], self.config["ca_port"])
+            self._refresh_both_fib()
+            time.sleep(3)
+        self.logger.debug("fib stable")
+        if self.config["enable_rpki"]:
+            while self.data["aspa_info"] == {}:
+                time.sleep(5)
+                self._refresh_aspa_info()
+            self.logger.debug("got aspa")
+            while self.data["roa_info"] == {}:
+                time.sleep(5)
+                self._refresh_roa_info()
+            self.logger.debug("got roa")
+            
+        self._init_apps()
         self.logger.debug(f"initial wait: {time.time()-t0:.4f} seconds")
         return
 
@@ -433,6 +492,10 @@ class SavAgent():
         keys_types_check(msg, key_types)
         new_state = msg["msg"]
         link_name = msg["source_link"]
+        if link_name.startswith("rpki"):
+            # TODO: handle rpki link state change
+            # currently, we don't do anything
+            return 
         if not new_state == self.link_man.get_link_state(link_name):
             self.link_man.update_link_kv(link_name, "state", new_state)
             self.logger.info(f"link {link_name} state changed to {new_state}")
@@ -477,7 +540,8 @@ class SavAgent():
             f"GOT INTRA-MSG ON [{link_meta['protocol_name']}]:{msg}, time_stamp: [{time.time()}]")
         if link_meta["is_interior"]:
             self.logger.error("intra-msg received on inter-link!")
-
+    def get_fib(self,source="kernel"):
+        raise NotImplementedError
     def get_kernel_fib(self):
         """return the cached fib"""
         return self.data["kernel_fib"]["data"]
@@ -487,11 +551,10 @@ class SavAgent():
         refresh both kernel fib and bird fib
         """
         fib_adds, fib_dels = self._refresh_kernel_fib()
-        is_bird_fib_changed, bird_fib_change_dict = self.bird_man.update_fib(
-            self.config["local_as"],self.ignore_prefixes)
+        is_bird_fib_changed, bird_fib_change_dict = self.bird_man.update_fib(self.config["local_as"])
         is_kernel_fib_change = ((len(fib_adds) != 0) or (len(fib_dels) != 0))
         return is_bird_fib_changed, is_kernel_fib_change, fib_adds, fib_dels, bird_fib_change_dict
-
+    
     def _process_native_bgp_update(self):
         """
         notify apps about native bgp update
@@ -539,7 +602,18 @@ class SavAgent():
                     # app_type in [UrpfApp, EfpUrpfApp, FpUrpfApp]:
                     add_dict, del_list = app.generate_sav_rules(
                         fib_adds, fib_dels, bird_fib_change_dict, self.get_sav_rules_by_app(app_id))
-
+                    # TODO filter
+                    if self.config["use_ignore_nets"]:
+                        temp = {}
+                        for r_k,r in add_dict.items():
+                            found = False
+                            for p in self.ignore_prefixes:
+                                if r['prefix'] in p:
+                                    found = True
+                                    break
+                            if not found:
+                                temp[r_k] = r
+                        add_dict = temp
                     self.logger.debug(f"add_dict:{add_dict}")
                     self.logger.debug(f"dels:{del_list}")
                     self.update_sav_table_by_app_id(add_dict, del_list, app_id)
@@ -770,7 +844,7 @@ class SavAgent():
         """
         func_start = time.time()
         if self.rpdp_app is None:
-            self.logger.debug("rpdp_app missing,unable to send origin")
+            self.logger.debug("rpdp_app missing, unable to send origin")
             return True
         sent = False
         try:
@@ -967,7 +1041,7 @@ class SavAgent():
         my_asn = self.config["local_as"]
         # self.logger.debug("sending spd")
         if self.rpdp_app is None:
-            self.logger.debug("rpdp_app missing,unable to send spd")
+            self.logger.debug("rpdp_app missing, unable to send spd")
             return False
         # here the remote refers to prefixes that are not originated by this router
         possible_prefixes = self.bird_man.get_remote_fib()

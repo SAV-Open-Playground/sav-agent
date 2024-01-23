@@ -665,7 +665,9 @@ def parse_prefix(data,my_asn):
                       "\tBGP.next_hop: ": "next_hop",
                       "\tBGP.local_pref: ": "metric",
                       "\tBGP.otc: ": "only_to_customer",
-                      "\tBGP.community: ": "community"}
+                      "\tBGP.community: ": "community",
+                      "\tKernel.source: ": "kernel_source",
+                      "\tKernel.metric: ": "Kernel_metric"}
     for prefix, lines in ret.items():
         srcs = {}
         cur_key = None
@@ -695,6 +697,7 @@ def parse_prefix(data,my_asn):
                         found = True
                         break
                 if not found:
+                    print(data)
                     raise ValueError(f"unknown key {[l]}")
         new_srcs = []
         for k, v in srcs.items():
@@ -731,7 +734,26 @@ def parse_prefix(data,my_asn):
         # ret[prefix] = temp
     return ret
 
-
+def parse_r4(data):
+    """
+    parse bird roa table
+    return a dict of {asn:[prefix]}
+    """
+    lines = my_split(data, "\n")
+    ret = {}
+    i = 0
+    while i <len(lines):
+        l = lines[i]
+        temp = my_split(l, " ")
+        prefix = temp[0].split("-")[0]
+        asn = int(temp[1][2:])
+        if not asn in ret:
+            ret[asn] = []
+        ret[asn].append(prefix)
+        if lines[i+1].startswith("\t"):
+            i += 1
+        i+=1
+    return ret
 def parse_bird_show_route_all(data, my_asn):
     """parse the out put of bird show route all cmd"""
     tables = my_split(data, "Table")
@@ -740,12 +762,12 @@ def parse_bird_show_route_all(data, my_asn):
         lines = my_split(i, "\n")
         table_heading = lines.pop(0)
         table_name = table_heading.strip().split(":")[0]
+        
         table_data = i.split(table_heading)[1][1:]
-        ret[table_name] = parse_prefix(table_data,my_asn)
+        if table_name =="r4":
+             ret[table_name] = parse_r4(table_data)
+        elif table_name == "r6":
+            raise NotImplementedError
+        else:
+            ret[table_name] = parse_prefix(table_data,my_asn)
     return ret
-
-
-# test_op = """'Table master4:\n1.1.7.0/24           blackhole [static1 09:20:53.065] * (200)\n\tType: static univ\n1.1.1.0/24           unicast [direct1 09:20:53.066] * (240)\n\tdev eth_r1\n\tType: device univ\n                     unicast [savbgp_3_1 09:20:56.966] (100) [i]\n\tvia 1.1.1.1 on eth_r1\n\tType: BGP univ\n\tBGP.origin: IGP\n\tBGP.as_path: \n\tBGP.next_hop: 1.1.1.1\n\tBGP.local_pref: 100\n1.1.2.0/24           unicast [savbgp_3_1 09:20:56.966] * (100) [i]\n\tvia 1.1.1.1 on eth_r1\n\tType: BGP univ\n\tBGP.origin: IGP\n\tBGP.as_path: \n\tBGP.next_hop: 1.1.1.1\n\tBGP.local_pref: 100\n                     unicast [savbgp_3_2 09:20:53.924] (100) [i]\n\tvia 1.1.3.1 on eth_r2\n\tType: BGP univ\n\tBGP.origin: IGP\n\tBGP.as_path: \n\tBGP.next_hop: 1.1.3.1\n\tBGP.local_pref: 100\n1.1.3.0/24           unicast [direct1 09:20:53.066] * (240)\n\tdev eth_r2\n\tType: device univ\n                     unicast [savbgp_3_2 09:20:53.924] (100) [i]\n\tvia 1.1.3.1 on eth_r2\n\tType: BGP univ\n\tBGP.origin: IGP\n\tBGP.as_path: \n\tBGP.next_hop: 1.1.3.1\n\tBGP.local_pref: 100\n1.1.4.0/24           blackhole [static1 09:20:53.065] * (200)\n\tType: static univ\n"""
-# test_output = """Table master4:\n1.1.1.0/24           unicast [direct1 17:17:00.183] * (240)\n\tdev eth_r3\n\tType: device univ\n                     unicast [savbgp_1_3 17:17:01.084] (100) [AS65503i]\n\tvia 1.1.1.2 on eth_r3\n\tType: BGP univ\n\tBGP.origin: IGP\n\tBGP.as_path: 65503\n\tBGP.next_hop: 1.1.1.2\n\tBGP.local_pref: 100\n1.1.2.0/24           unicast [direct1 17:17:00.183] * (240)\n\tdev eth_r2\n\tType: device univ\n                     unicast [savbgp_1_2 17:17:01.031] (100) [AS65502i]\n\tvia 1.1.2.2 on eth_r2\n\tType: BGP univ\n\tBGP.origin: IGP\n\tBGP.as_path: 65502\n\tBGP.next_hop: 1.1.2.2\n\tBGP.local_pref: 100\n\tBGP.otc: 65502\n1.1.3.0/24           unicast [savbgp_1_2 17:17:01.031] * (100) [AS65502i]\n\tvia 1.1.2.2 on eth_r2\n\tType: BGP univ\n\tBGP.origin: IGP\n\tBGP.as_path: 65502\n\tBGP.next_hop: 1.1.2.2\n\tBGP.local_pref: 100\n\tBGP.otc: 65502\n                     unicast [savbgp_1_3 17:17:01.084] (100) [AS65503i]\n\tvia 1.1.1.2 on eth_r3\n\tType: BGP univ\n\tBGP.origin: IGP\n\tBGP.as_path: 65503\n\tBGP.next_hop: 1.1.1.2\n\tBGP.local_pref: 100\n111.192.7.0/24       unicast [savbgp_1_3 17:17:01.084] * (100) [AS65503i]\n\tvia 1.1.1.2 on eth_r3\n\tType: BGP univ\n\tBGP.origin: IGP\n\tBGP.as_path: 65503\n\tBGP.next_hop: 1.1.1.2\n\tBGP.local_pref: 100\n111.192.1.0/24       blackhole [static1 17:17:00.181] * (200)\n\tType: static univ\n111.192.3.0/24       unicast [savbgp_1_2 17:17:01.031] * (100) [AS65502i]\n\tvia 1.1.2.2 on eth_r2\n\tType: BGP univ\n\tBGP.origin: IGP\n\tBGP.as_path: 65502\n\tBGP.next_hop: 1.1.2.2\n\tBGP.local_pref: 100\n\tBGP.otc: 65502\n111.192.4.0/24       unicast [savbgp_1_3 17:17:01.084] * (100) [AS65503i]\n\tvia 1.1.1.2 on eth_r3\n\tType: BGP univ\n\tBGP.origin: IGP\n\tBGP.as_path: 65503\n\tBGP.next_hop: 1.1.1.2\n\tBGP.local_pref: 100\n"""
-# ret = parse_bird_show_route_all(test_output, 65501)
-# print(ret)

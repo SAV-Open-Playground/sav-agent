@@ -20,7 +20,6 @@ class BirdCMDManager():
         self.is_running = False
         self.bird_fib = {"check_time": None, "update_time": None, "local_route": {},
                          "remote_route": {}, "default_route": {}}
-
     def is_bird_ready(self):
         """
         return True if bird is ready
@@ -195,12 +194,12 @@ class BirdCMDManager():
     #             result[p] = d
     #     return result
 
-    def update_fib(self, my_asn, ignore_nets,log_err=True):
+    def update_fib(self, my_asn,log_err=True):
         """
         return if changed and a dict of changes
         """
         self.bird_fib["check_time"] = time.time()
-        default, local, remote = self._parse_bird_fib(log_err, my_asn,ignore_nets)
+        default, local, remote = self._parse_bird_fib(log_err, my_asn)
         # self.logger.debug(f"_parse_bird_fib finished")
         something_updated = False
         local_adds, local_dels = self._diff_fib(
@@ -337,12 +336,7 @@ class BirdCMDManager():
         self.logger.error("unable to tell")
         self.logger.error(src)
         self.logger.error(prefix)
-    def _ignore_prefix(self, prefix, ignore_nets):
-        for net in ignore_nets:
-            if prefix in net:
-                return True
-        return False
-    def _parse_bird_fib(self, log_err, my_asn,ignore_nets = []):
+    def _parse_bird_fib(self, log_err, my_asn):
         """
         using birdc show all to get bird fib,
         """
@@ -374,8 +368,6 @@ class BirdCMDManager():
 
         for table_name, table_value in data.items():
             for prefix, data in table_value.items():
-                if self._ignore_prefix(prefix,ignore_nets):
-                    continue
                 t = self._tell_prefix(prefix, data, my_asn)
                 if t == "default":
                     default[prefix] = data
@@ -609,7 +601,7 @@ class LinkManager(InfoManager):
         will return response
         """
         raise NotImplementedError
-
+    
     def read_brd_cfg(self, my_asn):
         """
         read link meta from bird config, call if needed
@@ -633,8 +625,10 @@ class LinkManager(InfoManager):
                     "initial_broadcast": False,
                     "as4_session": True,
                     "protocol_name": proto_name,
-                    "status": True  # faster
+                    "status": True,  # faster
+                    "interface_name":f"eth_{proto_name.split('_')[2]}"
                 }
+                
                 if "sav_inter" in l:
                     meta["link_type"] = "dsav"
                 elif "basic" in l:
@@ -662,9 +656,6 @@ class LinkManager(InfoManager):
             elif l.startswith("source address"):
                 l = l.split(" ")
                 temp[proto_name]["local_ip"] = netaddr.IPAddress(l[-1][:-1])
-            elif l.startswith("interface"):
-                self.logger.debug(l)
-                temp[proto_name]["interface_name"] = l.split(" ")[1][:-1]
         self.data["check_time"] = time.time()
         self.data["links"] = temp
         self.data["update_time"] = self.data["check_time"]

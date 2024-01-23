@@ -7,7 +7,7 @@
 """
 
 from common.sav_common import *
-FPURPF_ID = "fp_urpf"
+FP_URPF_ID = "fp_urpf"
 
 class FpUrpfApp(SavApp):
     """
@@ -40,7 +40,9 @@ class FpUrpfApp(SavApp):
         """
         origin_interfaces_table = {}
         origin_prefix_table = {}
+        self.logger.debug(self.agent.bird_man.get_remote_fib())
         for prefix, rows in self.agent.bird_man.get_remote_fib().items():
+            self.logger.debug(f"{prefix}:{rows}")
             if prefix.version == 4:
                 for line in rows:
                     if "origin_asn" in line:
@@ -51,6 +53,7 @@ class FpUrpfApp(SavApp):
                         origin_prefix_table[origin].add(prefix)
                     else:
                         self.logger.error(f"no origin_asn in {prefix}:{line}")
+                    self.logger.debug(line)
                     interface = line.get("interface_name", None)
                     if interface:
                         origin_interfaces_table[origin].add(interface)
@@ -78,6 +81,8 @@ class FpUrpfApp(SavApp):
         only implement the inter-as mode
         """
         origin_interfaces_table,origin_prefix_table = self._get_prefix_interface_table()
+        self.logger.debug(f"origin_interfaces_table={origin_interfaces_table}")
+        self.logger.debug(f"origin_prefix_table={origin_prefix_table}")
         add_dict = {}
         del_set = set()
         new_rules = {}
@@ -93,6 +98,7 @@ class FpUrpfApp(SavApp):
             if not r_k in new_rules:
                 del_set.add(r_k)
         self.rules = new_rules
+        self.logger.debug(f"new_rules={new_rules}")
         # self.logger.debug(f"{self.app_id}: add_rules={add_dict}")
         # self.logger.debug(f"{self.app_id}: del_rules={del_set}")
         return add_dict, del_set

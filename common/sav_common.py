@@ -145,10 +145,14 @@ def get_host_interface_list():
     return a list of 'clean' interface names
     """
     command = "ip link|grep -v 'link' | grep -v -E 'docker0|lo' | awk -F: '{ print $2 }' | sed 's/ //g'"
-    std_out = run_cmd(command=command)
+    std_out = run_cmd(command)
     result = std_out.split("\n")[:-1]
     result = list(map(lambda x: x.split('@')[0], result))
-    return [i for i in result if len(i) != 0]
+    result = [i for i in result if len(i) != 0]
+    # TODO demo filter
+    # only include interfaces start with eth_, for demo
+    result = [i for i in result if i.startswith("eth_")]
+    return result
 
 
 def diff_sav_rules(old_rules, new_rules):
@@ -348,8 +352,6 @@ class SavApp():
     # def _bird_cmd(self, cmd):
     #     return birdc_cmd(self.logger, cmd)
 
-    def _parse_roa_table(self, t_name='r4'):
-        return get_roa(self.logger, t_name)
 
 
 def birdc_cmd(logger, cmd, log_err=True):
@@ -461,6 +463,13 @@ def parse_kernel_fib():
             else:
                 prefix = netaddr.IPNetwork(row["Destination"])
                 ret[prefix] = row
+     #filter remove the default route
+    r4_default = netaddr.IPNetwork("0.0.0.0/0") 
+    r6_default = netaddr.IPNetwork("::/0")
+    if r4_default in ret:
+        del ret[r4_default]
+    if r6_default in ret:
+        del ret[r6_default]
     return ret
 
 
@@ -474,6 +483,7 @@ def birdc_get_import(logger, protocol_name, channel_name="ipv4"):
     data = birdc_cmd(logger, cmd)
     if data.startswith("No import table in channel"):
         logger.warning(data[:-1])
+        logger.debug(cmd)
         return default
     if data is None:
         return default
@@ -485,51 +495,6 @@ def birdc_get_import(logger, protocol_name, channel_name="ipv4"):
         if table_name == "import":
             return table_data
     return default
-
-
-def get_roa(logger, t_name='r4', ns_scope=None):
-    """
-    get ROA info from bird table
-    """
-    cmd = "show route table " + t_name
-    row_str = []
-    # detect if roa table have rows and stale
-    last_len = -1
-    for _ in range(30):
-        data = birdc_cmd(logger, cmd)
-        if data is None:
-            logger.warning('empty roa')
-            return {}
-        row_str = data.split("\n")[1:]
-        while "" in row_str:
-            row_str.remove("")
-        this_len = len(row_str)
-        if this_len > 0:
-            if this_len == last_len:
-                break
-            else:
-                last_len = this_len
-        time.sleep(0.1)
-    if len(row_str) == 0:
-        logger.warning("no roa info detected")
-        return {}
-    else:
-        result = {}
-        for row in row_str:
-            d = row.split(" ")
-            as_number = int(d[1][2:])
-            temp = d[0]
-            temp = temp.split("/")
-            if "-" in temp[1]:
-                temp[1] = temp[1].split("-")[0]
-            prefix = temp[0] + '/' + temp[1]
-            if ns_scope:
-                if as_number not in ns_scope:
-                    continue
-            if as_number not in result:
-                result[as_number] = []
-            result[as_number].append(netaddr.IPNetwork(prefix))
-    return result
 
 
 def get_p_by_asn(asn, roa, aspa):
@@ -616,48 +581,6 @@ def str_to_scope(input_str):
                 path.append(temp.pop(0))
             result.append(path)
     return result
-
-
-def get_aspa(logger, hostname="savopkrill.com", port_number=3000, pwd="krill"):
-    while True:
-        try:
-            headers = {"Authorization": f"Bearer {pwd}",
-                       "Content-Type": "application/json"}
-            url = f"https://{hostname}:{port_number}/api/v1/cas/testbed/aspas"
-            response = requests.request(
-                "GET", url, headers=headers, verify=False, timeout=15)
-            response.raise_for_status()  # Raises an exception for any HTTP error status codes
-            # Return the response as a dictionary
-            temp = response.json()
-            # TODO ipv6
-            result = {}
-            for row in temp:
-                temp2 = []
-                for s in row["providers"]:
-                    s = s.replace("AS", "")
-                    s = s.replace("(v4)", "")
-                    s = int(s)
-                    if s not in temp2:
-                        temp2.append(s)
-                result[row["customer"]] = temp2
-            return result
-        except Exception as err:
-            logger.error(err)
-            time.sleep(0.1)
-
-
-def aspa_check(meta, aspa_info):
-    """
-    return True if the meta is in the aspa_info
-    """
-    # TODO: ipv6
-    adj_provider_as = f"AS{meta['meta']['local_as']}(v4)"
-    adj_customer_as = meta["remote_as"]
-    for data in aspa_info:
-        if data["customer"] == adj_customer_as:
-            return adj_provider_as in data["providers"]
-    return False
-
 
 
 

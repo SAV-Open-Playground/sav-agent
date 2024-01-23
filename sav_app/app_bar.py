@@ -24,7 +24,7 @@ class BarApp(SavApp):
         TODO will wait until we have roa and aspa info
         """
         while True:
-            self.roa_cache = get_roa(self.logger)
+            self.roa_cache = self.agent.get_roa_info()
             self.aspa_cache = get_aspa(self.logger)
             good = True
             if len(self.roa_cache) == 0:

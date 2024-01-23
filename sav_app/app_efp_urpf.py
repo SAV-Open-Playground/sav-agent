@@ -20,9 +20,10 @@ EFP_URPF_B_ROA_ASPA_ID = "efp_urpf_b_roa_aspa"
 class EfpUrpfApp(SavApp):
     """
     a SAV App implementation based on reference router (BIRD)
+    only works for interior links
     """
 
-    def __init__(self, agent, name, logger=None, ca_host="", ca_port=""):
+    def __init__(self, agent, name, logger=None):
         self.pp_v4_dict = {}
         # pp represents prefix-(AS)path
         raw_name = name
@@ -39,7 +40,6 @@ class EfpUrpfApp(SavApp):
             self.roa = False
         if "ASPA" in name:
             self.aspa = True
-            self.aspa_info = get_aspa(logger, ca_host, ca_port)
         else:
             self.aspa = False
         super(EfpUrpfApp, self).__init__(agent, raw_name, logger)
@@ -87,20 +87,34 @@ class EfpUrpfApp(SavApp):
         elif self.type == "B":
             return self.algorithm_b(old_rules)
         # TODO update self.rules
-
+        
+    def _aspa_check(self,meta, aspa_info,my_as):
+        """
+        return True if the adj-customer-as is in the aspa_info and the adj-provider-as is in the aspa_info
+        otherwise return False
+        """
+        # self.logger.debug(meta)
+        # self.logger.debug(aspa_info)
+        # self.logger.debug(my_as)
+        adj_customer_as = meta["remote_as"]
+        self.logger.debug(adj_customer_as)
+        if not adj_customer_as in aspa_info:
+            return False
+        return my_as in aspa_info[adj_customer_as]
     def algorithm_a(self, old_rules):
         """
         RFC 8704
         """
         X = {}
         all_int_in = {}
-        roa_info = {}
         if self.roa:
-            roa_info = self._parse_roa_table(t_name="r4")
-            self.logger.debug(f"roa_info: {roa_info}")
-        
+            roa_info = self.agent.get_roa_info()
         for meta in self.protocol_metas:
+            if not meta["is_interior"]:
+                 # only works for interior links
+                continue
             protocol_name = meta["protocol_name"]
+            # only works for interior links
             all_int_in[protocol_name] = {"meta": meta}
             all_int_in[protocol_name]["adj-in"] = self._parse_import_table(
                 protocol_name)
@@ -108,24 +122,22 @@ class EfpUrpfApp(SavApp):
             # filter out the adj-in that does not match the roa
             if self.roa:
                 temp = {}
-                for k, v in all_int_in[protocol_name]['adj-in'].items():
-                    this_prefix = str(k)
+                for this_prefix, v in all_int_in[protocol_name]['adj-in'].items():
                     this_asn = v[0]['origin_as']
                     if this_asn in roa_info:
                         if this_prefix in roa_info[this_asn]:
-                            temp[k] = v
+                            temp[this_prefix] = v
                         else:
-                            self.logger.warning(f"roa mismatch for {k}:{v}")
+                            self.logger.warning(f"roa mismatch: adj-in info:  {this_asn}:{this_prefix}\nroa info:{roa_info[this_asn]}")
                 all_int_in[protocol_name]["adj-in"] = temp
         # self.logger.debug(f"EFP-A all_int_in:{all_int_in}")
         for protocol_name, data in all_int_in.items():
             self.logger.debug(data)
             if data["meta"]["remote_role"] == "customer":
+                self.logger.debug(self.aspa)
                 if self.aspa:
-                    # self.logger.debug(data)
-                    # self.logger.debug(self.aspa_info)
-                    # self.logger.debug(aspa_check(data, self.aspa_info))
-                    if not aspa_check(data, self.aspa_info):
+                    aspa_info = self.agent.get_aspa_info()
+                    if not self._aspa_check(data["meta"],aspa_info,self.agent.config["local_as"]):
                         continue
                 for prefix, paths in data["adj-in"].items():
                     # self.logger.debug(f"{prefix}, {paths}")

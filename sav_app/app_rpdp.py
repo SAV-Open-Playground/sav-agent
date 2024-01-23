@@ -1134,7 +1134,6 @@ class RPDPApp(SavApp):
                 need_to_relay = False
             else:
                 need_to_relay = True
-                self.logger.debug("need to relay, we are not ready for this")
             new_ases = [spd_msg["source_asn"]]
             new_ases.extend(spd_msg["peer_neighor_asns"])
             for asn in new_ases:
@@ -1159,7 +1158,11 @@ class RPDPApp(SavApp):
         else:
             self.logger.debug(msg)
             self.logger.error(f"unknown subtype: {spd_msg['subtype']}")
-
+        if need_to_relay:
+            if sub_type == 1:
+                self.logger.error("intra spd relay todo")
+            elif sub_type == 2:
+                self.logger.error("inter spd relay todo")
         # self.logger.debug(self.spd_data)
         self._refresh_sav_rules()
 
