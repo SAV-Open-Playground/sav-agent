@@ -284,7 +284,7 @@ def perf_test():
 
 @api_blueprint.route('/refresh_proto/<string:active_app>/', methods=["POST", "GET"])
 def refresh_proto(active_app):
-    tool = request.args.get('tool')
+    tool = request.args.get('tool', "iptables")
     if tool in ["iptables", "acl"]:
         interceptor.enable(active_app=active_app, tool=tool)
     else:
