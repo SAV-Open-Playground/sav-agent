@@ -10,8 +10,15 @@ import netaddr
 import time
 import json
 # for RPDP SPA msg
+
 DEFAULT_MIIG_TYPE = 0
 DEFAULT_MIIG_TAG = 0
+ASN_TYPE = int
+IP_ADDR_TYPE = netaddr.IPAddress
+PREFIX_TYPE = netaddr.IPNetwork
+TIMEIT_THRESHOLD = 0.5
+LOG_FOR_FRONT_KEY_WORD = "LOG_FOR_FRONT"
+BGP_UPDATE_DATA_MAX_LEN = 65516
 
 def int2hex(input_int, zfill_length=4):
     temp = hex(input_int)[2:]
@@ -44,10 +51,6 @@ def prefix_len2len(prefix_len):
     return int((prefix_len + 7) / 8)
 
 # AS
-
-
-BGP_UPDATE_DATA_MAX_LEN = 65516
-
 
 def is_asn(in_put):
     if isinstance(in_put, int):

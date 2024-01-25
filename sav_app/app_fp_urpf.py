@@ -40,11 +40,9 @@ class FpUrpfApp(SavApp):
         """
         origin_interfaces_table = {}
         origin_prefix_table = {}
-        self.logger.debug(self.agent.bird_man.get_remote_fib())
-        for prefix, rows in self.agent.bird_man.get_remote_fib().items():
-            self.logger.debug(f"{prefix}:{rows}")
+        for prefix, srcs in self.agent.get_fib("bird",["remote"]).items():
             if prefix.version == 4:
-                for line in rows:
+                for line in srcs:
                     if "origin_asn" in line:
                         origin = line["origin_asn"]
                         if not origin in origin_prefix_table:
@@ -65,9 +63,9 @@ class FpUrpfApp(SavApp):
         if not my_asn in origin_prefix_table:
             origin_prefix_table[my_asn] = set()
             origin_interfaces_table[my_asn] = set()
-        for prefix,rows in self.agent.bird_man.get_local_fib().items():
+        for prefix, srcs in self.agent.get_fib("bird",["local"]).items():
             if prefix.version == 4:
-                for line in rows:
+                for line in srcs:
                     origin_prefix_table[my_asn].add(prefix)
                     interface = line.get("interface_name", None)
                     if interface:
@@ -76,7 +74,7 @@ class FpUrpfApp(SavApp):
                 raise ValueError(f"unknown ip version {prefix.version}")
         return origin_interfaces_table,origin_prefix_table
 
-    def generate_sav_rules(self, fib_adds, fib_dels, bird_fib_change_dict, old_rules):
+    def generate_sav_rules(self, fib_adds, fib_dels, bird_add,bird_dels, old_rules):
         """
         only implement the inter-as mode
         """

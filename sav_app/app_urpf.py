@@ -27,12 +27,11 @@ class UrpfApp(SavApp):
         self.mode = mode
         super(UrpfApp, self).__init__(agent, name, logger)
 
-    def generate_sav_rules(self, fib_adds, fib_dels, bird_fib_change_dict, old_rules):
+    def generate_sav_rules(self, fib_adds, fib_dels, bird_add,bird_dels, old_rules):
         """
         generate sav rule based on the latest fib,
         only add is implemented
         """
-        # new_fib = self._get_cur_kernel_fib()
         if self.mode == "strict":
             return self._gen_rules(fib_adds, fib_dels, is_loose=False)
         elif self.mode == "loose":

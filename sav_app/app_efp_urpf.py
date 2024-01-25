@@ -77,7 +77,7 @@ class EfpUrpfApp(SavApp):
             ret = birdc_get_import(self.logger, protocol_name, "rpdp4")
         return ret
 
-    def generate_sav_rules(self, fib_adds, fib_dels, bird_fib_change_dict, old_rules):
+    def generate_sav_rules(self, fib_adds, fib_dels, bird_add,bird_dels, old_rules):
         """
         fib change detected
         """
@@ -109,6 +109,8 @@ class EfpUrpfApp(SavApp):
         all_int_in = {}
         if self.roa:
             roa_info = self.agent.get_roa_info()
+        if self.aspa:
+            aspa_info = self.agent.get_aspa_info()
         for meta in self.protocol_metas:
             if not meta["is_interior"]:
                  # only works for interior links
@@ -132,12 +134,13 @@ class EfpUrpfApp(SavApp):
                 all_int_in[protocol_name]["adj-in"] = temp
         # self.logger.debug(f"EFP-A all_int_in:{all_int_in}")
         for protocol_name, data in all_int_in.items():
-            self.logger.debug(data)
             if data["meta"]["remote_role"] == "customer":
                 self.logger.debug(self.aspa)
                 if self.aspa:
-                    aspa_info = self.agent.get_aspa_info()
                     if not self._aspa_check(data["meta"],aspa_info,self.agent.config["local_as"]):
+                        self.logger.debug(f"aspa check failed: {data['meta']}")
+                        self.logger.debug(f"aspa check failed: {aspa_info}")
+                        self.logger.debug(f"aspa check failed: {self.agent.config['local_as']}")
                         continue
                 for prefix, paths in data["adj-in"].items():
                     # self.logger.debug(f"{prefix}, {paths}")

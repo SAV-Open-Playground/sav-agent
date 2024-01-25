@@ -15,10 +15,8 @@ import requests
 import netifaces
 from common.sav_data_structure import *
 
-
 def subprocess_run(command):
     return subprocess.run(command, shell=True, capture_output=True, encoding='utf-8')
-
 
 class RPDPPeer:
     def __init__(self, asn, port, ip, is_as4) -> None:
@@ -31,11 +29,8 @@ class RPDPPeer:
         return f"{self.asn},{self.ip}:{self.ip}"
 
 
-ASN_TYPE = int
-IP_ADDR_TYPE = netaddr.IPAddress
-PREFIX_TYPE = netaddr.IPNetwork
 RPDP_PEER_TYPE = RPDPPeer
-TIMEIT_THRESHOLD = 0.5
+
 
 def parse_bird_table(table, logger=None):
     """
@@ -290,14 +285,6 @@ class SavApp():
         self.app_id = app_id
         self.agent = agent
 
-    def _get_cur_kernel_fib(self):
-        return self.agent.get_kernel_fib()
-
-    def _get_bird_local_fib(self):
-        return self.agent.bird_man.get_local_fib()
-
-    def _get_bird_remote_fib(self):
-        return self.agent.bird_man.get_remote_fib()
     def is_up(self):
         return self.status is True
 
@@ -310,7 +297,7 @@ class SavApp():
     def check_status(self):
         raise NotImplementedError
 
-    def generate_sav_rules(self, fib_adds, fib_dels, bird_fib_change_dict, old_rules):
+    def generate_sav_rules(self, fib_adds, fib_dels, bird_add,bird_dels, old_rules):
         """
         generate sav rules based on the current information
         """
