@@ -412,7 +412,9 @@ class SavAgent():
         """
         self._initial_wait()
         # generate initial sav rules
+        # self.logger.debug(f"before initial fib")
         fib_adds = self.get_fib("kernel",["remote","local"])
+        self.logger.debug(f"initial fib:{fib_adds}")
         bird_adds = self.get_fib("bird",["remote","local"])
         self._notify_apps(True, fib_adds, {}, bird_adds, {})
         self.logger.debug("starting main loop")
@@ -531,25 +533,39 @@ class SavAgent():
         @param source: one of ["kernel","bird"]
         @param f_types: a list of data you want to include, data can be one of ["remote","local","default"]
         """
-        # self.logger.debug(f"getting fib from {source}")
         if not source in ["kernel","bird"]:
-            raise ValueError(f"invalid source:{source}, should be one of [kernel,bird]")
+            self.logger.error(f"invalid source:{source}, should be one of [kernel,bird]")
+            return {}
         for t in f_types:
             if not t in ["remote","local","default"]:
-                raise ValueError(f"invalid element:{t}, should be one of [remote,local,default]")
+                self.logger.error(f"invalid element:{t}, should be one of [remote,local,default]")
+                return {}
         r_flag = "remote" in f_types
         l_flag = "local" in f_types
         d_flag = "default" in f_types
         data = {}
         if source == "kernel":
             temp = self._get_kernel_fib()
+            # self.logger.debug(temp)
+            # self.logger.debug(source)
+            # self.logger.debug(f_types)
             for p,p_d in temp.items():
-                if p_d["Gateway"] == "0.0.0.0":
-                    if l_flag:
-                        data[p] = p_d
+                if p.version == 4:
+                    if p_d["Gateway"] == "0.0.0.0":
+                        if l_flag:
+                            data[p] = p_d
+                    else:
+                        if r_flag:
+                            data[p] = p_d
+                elif p.version == 6:
+                    if p_d["Next"] == "::":
+                        if l_flag:
+                            data[p] = p_d
+                    else:
+                        if r_flag:
+                            data[p] = p_d
                 else:
-                    if r_flag:
-                        data[p] = p_d
+                    self.logger.error(f"invalid ip version:{p.version}")
         else:
             temp = self.bird_man.get_fib()
             for p,p_d in temp.items():
@@ -577,8 +593,9 @@ class SavAgent():
                 else:
                     self.logger.error("no type found")
                     self.logger.error(f"{p}:{p_d}")
-            
+        # self.logger.debug(data)
         data = self._prefix_filter(data)
+        # self.logger.debug(data)
         ret = {}
         default_routes = [netaddr.IPNetwork("0.0.0.0/0"),netaddr.IPNetwork("::/0")]
         for p in data:
@@ -587,6 +604,7 @@ class SavAgent():
                     ret[p] = data[p]
             else:
                 ret[p] = data[p]
+        # self.logger.debug(ret)
         return ret
     def _get_kernel_fib(self):
         """return the cached fib"""
@@ -655,12 +673,13 @@ class SavAgent():
                 add_dict = {}
                 del_list = []
                 if app_type in [RPDPApp]:
-                    adds, dels = self.rpdp_app.diff_pp_v4(reset)
-                    self.logger.debug(f"adds:{len(adds)}")
-                    changed_routes = []
-                    for prefix, path in adds:
-                        changed_routes.append({prefix: path})
-                    self.logger.debug(f"changed_routes:{changed_routes}")
+                    self.rpdp_app.diff_pp_v4(reset)
+                    # adds, dels = 
+                    # self.logger.debug(f"adds:{len(adds)}")
+                    # changed_routes = []
+                    # for prefix, path in adds:
+                    #     changed_routes.append({prefix: path})
+                    # self.logger.debug(f"changed_routes:{changed_routes}")
                     # self._send_origin(None, changed_routes)
                 else:
                     # app_type in [UrpfApp, EfpUrpfApp, FpUrpfApp]:
@@ -757,6 +776,7 @@ class SavAgent():
                     self.logger.error(
                         f"conflict in sav_table (old):{old_r}")
                     self.logger.error(f"conflict in sav_table (new):{r}")
+                    self.logger.error(f"app_id:{app_id}")
                 else:
                     r["update_time"] = cur_t
                 new_table[str_key] = r
@@ -980,7 +1000,7 @@ class SavAgent():
             case "bgp_update":
                 self._process_native_bgp_update()
             case "rpdp_update":
-                self.logger.debug(f"rpdp_update:{msg}")
+                # self.logger.debug(f"rpdp_update:{msg}")
                 link_name = input_msg["source_link"]
                 link_meta = self.link_man.get_by_name(link_name)
                 self.rpdp_app.process_spa(input_msg, link_meta)

@@ -83,7 +83,7 @@ def hex2ip(data, ip_version):
     while len(data) < full_len:
         data.append(0)
     ip_value = hex2int(data)
-    return netaddr.IPAddress(ip_value)
+    return netaddr.IPAddress(ip_value,ip_version)
 
 
 def ip2hex(ip):
@@ -243,7 +243,19 @@ def path2hex(asn_path, as4_session=True):
             result += path
     return result
 
-
+def path2as_path(path,as4_session):
+    """
+    convert path to as_path
+    """
+    result = []
+    for asn in path:
+        result.append(2)
+        result.append(1)
+        if as4_session:
+            result += int2hex(asn, 4)
+        else:
+            result += int2hex(asn, 2)
+    return result
 
 
 def get_intra_spd_nlri_dict():
@@ -335,6 +347,7 @@ def read_inter_spa_nlri_hex(data, ip_version):
     """
     read inter spa data from hex
     """
+    
     result = []
     cur_pos = 0
     while cur_pos < len(data):
@@ -344,16 +357,13 @@ def read_inter_spa_nlri_hex(data, ip_version):
         cur_pos += 1
         length = data[cur_pos]
         cur_pos += 1
-        # router id is ipv4,len is 4
+        # router idlen is 4
         nlri["origin_asn"] = hex2int(data[cur_pos:cur_pos+4])
-        # print(nlri)
+        # input(nlri)
         cur_pos += 4
-        # input(data[cur_pos])
         mask_len = prefix_len2len(data[cur_pos])
-        # input(mask_len)
         prefix_hex = data[cur_pos:cur_pos+mask_len+1]
         cur_pos += mask_len+1
-        # input(prefix_hex)
         prefix = hex2prefix(prefix_hex, ip_version)
         nlri["prefix"] = prefix
         flag = data[cur_pos]
@@ -518,7 +528,10 @@ def get_bird_spa_data(adds, dels, protocol_name, channel, rpdp_version, next_hop
     }
     if is_interior:
         ret["origin"] = path2hex([as_path[0]], is_as4)
-        ret["as_path"] = [2, len(as_path)] + path2hex(as_path, is_as4)
+        # ret["as_path"] = [2, len(as_path)] + path2hex(as_path, is_as4)
+        ret["as_path"] = path2as_path(as_path,is_as4)
+        ret["sav_path"] = path2hex(as_path, is_as4)
+        ret["sav_path_len"] = len(ret["sav_path"])
         ret["as_path_len"] = len(ret["as_path"])
         ret["is_interior"] = 1
     return ret
@@ -572,8 +585,16 @@ def test_prefix2hex():
     assert test_p == hex2prefix(a, 4)
 
 
-def test_gisnh():
-    a = get_inter_spa_nlri_hex(65501, netaddr.IPNetwork("192.168.1.0/24"), 0)
+def test_spa():
+    
+    # a = get_inter_spa_nlri_hex(65501, netaddr.IPNetwork("192.168.1.0/24"), 0)
+    # print(a)
+    # print(read_inter_spa_nlri_hex(a, 4))
+    b = get_inter_spa_nlri_hex(65501, netaddr.IPNetwork("feb::1:1/128"), 0)
+    print(b)
+    # print(read_inter_spa_nlri_hex(b, 6))
+    testing_spa_v6= [2, 21, 0, 0, 255, 222, 120, 15, 235, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, 0, 0, 2, 14, 0, 0, 255, 222, 64, 254, 128, 0, 0, 0, 0, 0, 0, 0, 2, 22, 0, 0, 255, 222, 128, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 2, 22, 0, 0, 255, 222, 128, 254, 128, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 22, 0, 0, 255, 222, 128, 254, 128, 0, 0, 0, 0, 0, 0, 48, 67, 87, 255, 254, 125, 94, 33, 0, 2, 22, 0, 0, 255, 222, 128, 254, 128, 0, 0, 0, 0, 0, 0, 148, 220, 175, 255, 254, 246, 14, 53, 0, 2, 7, 0, 0, 255, 222, 8, 255, 0]
+    print(read_inter_spa_nlri_hex(testing_spa_v6,6))
 # print(read_spa_sav_nlri([1, 14, 192, 168, 3, 1, 24, 192, 168, 2, 1, 0, 0, 0,
 #       0, 1, 1, 14, 192, 168, 3, 1, 24, 192, 168, 3, 1, 0, 0, 0, 0, 1], 4))
 
@@ -774,3 +795,5 @@ def parse_bird_show_route_all(data, my_asn):
         else:
             ret[table_name] = parse_prefix(table_data,my_asn)
     return ret
+
+# test_spa()

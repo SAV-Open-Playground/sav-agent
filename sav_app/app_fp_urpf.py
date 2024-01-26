@@ -41,7 +41,7 @@ class FpUrpfApp(SavApp):
         origin_interfaces_table = {}
         origin_prefix_table = {}
         for prefix, srcs in self.agent.get_fib("bird",["remote"]).items():
-            if prefix.version == 4:
+            if prefix.version in [4,6]:
                 for line in srcs:
                     if "origin_asn" in line:
                         origin = line["origin_asn"]
@@ -55,8 +55,6 @@ class FpUrpfApp(SavApp):
                     interface = line.get("interface_name", None)
                     if interface:
                         origin_interfaces_table[origin].add(interface)
-            # elif prefix.version == 6:
-                # temp[prefix].append(row["Use"])
             else:
                 raise ValueError(f"unknown ip version {prefix.version}")
         my_asn = self.agent.config["local_as"]
@@ -64,7 +62,7 @@ class FpUrpfApp(SavApp):
             origin_prefix_table[my_asn] = set()
             origin_interfaces_table[my_asn] = set()
         for prefix, srcs in self.agent.get_fib("bird",["local"]).items():
-            if prefix.version == 4:
+            if prefix.version in [4,6]:
                 for line in srcs:
                     origin_prefix_table[my_asn].add(prefix)
                     interface = line.get("interface_name", None)

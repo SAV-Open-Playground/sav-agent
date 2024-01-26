@@ -128,9 +128,9 @@ def metric():
         SA.data["metric"]["is_processing"] = SA._in_msgs.unfinished_tasks > 0 or SA.link_man._send_buff.unfinished_tasks > 0
         rep = {"agent": SA.data["metric"]}
         if SA.rpdp_app:
-            rep[SA.rpdp_app.name] = SA.rpdp_app.metric
+            rep[SA.rpdp_app.app_id] = SA.rpdp_app.metric
         if SA.passport_app:
-            rep[SA.passport_app.name] = SA.passport_app.metric
+            rep[SA.passport_app.app_id] = SA.passport_app.metric
         return json.dumps(rep, indent=2)
     except Exception as e:
         LOGGER.exception(e)
@@ -146,16 +146,10 @@ def sav_table():
 @api_blueprint.route('/save_sav_table/', methods=["POST", "GET"])
 def save_sav_table():
     p = "/root/savop/logs/sav_table.json"
-    st = copy.deepcopy(SA.data["sav_table"])
     ret = {}
     for app_id in SA.data["apps"]:
         ret[app_id] = list(SA.get_sav_rules_by_app(
-            app_id, ip_version=4).keys())
-        # for rule_k, rule in rules.items():
-        #     rule["prefix"] = str(rule["prefix"])
-        #     rule["origin"] = str(rule["origin"])
-
-        #     st[app_id][rule_k] = rule
+            app_id, ip_version=None).keys())
     LOGGER.debug(f"{ret}")
     save_json(p, ret)
     return p
@@ -168,7 +162,7 @@ def savop_quic():
         msg = json.loads(request.data.decode())
         msg = {
             "msg": msg,
-            "source_app": SA.rpdp_app.name,
+            "source_app": SA.rpdp_app.app_id,
             "link_type": "quic",
             "msg_type": "quic_msg",
             "source_link": msg["dummy_link"],
