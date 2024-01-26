@@ -294,7 +294,7 @@ class RPDPApp(SavApp):
 
     def __init__(self, agent, name, logger=None):
         super(RPDPApp, self).__init__(agent, name, logger)
-        self.prefix_as_path_dict = {} # key is prefix,value is AS path
+        self.prefix_as_path_dict = {}  # key is prefix,value is AS path
         self.connect_objs = {}
         self.metric = self.get_init_metric_dict()
         self.quic_config = QuicConfiguration(
@@ -340,7 +340,7 @@ class RPDPApp(SavApp):
         return add_dict and del_set,
         if reset is True, will use empty dict as old_
         """
-        
+
         t0 = time.time()
         if reset:
             self.prefix_as_path_dict = {}
@@ -1033,7 +1033,8 @@ class RPDPApp(SavApp):
             log_dict["src_asn"] = link_meta["remote_as"]
         else:
             log_dict["dst_device_id"] = self.agent.config["router_id"]
-            log_dict["src_device_id"] = rpdp_msg["origin_router_id"]
+            # TODO find src device_id
+            log_dict["src_device_id"] = "N/A"
 
         self._log_for_front(log_dict, "receive", link_meta)
         self._log_for_front({"pkt_id": msg["pkt_id"]}, "terminate", link_meta)
@@ -1114,7 +1115,7 @@ class RPDPApp(SavApp):
             link_meta = link_data["link_meta"]
             addresses = link_data["addresses"]
             try:
-                data = get_bird_spd_data(protocol_name=link_meta["protocol_name"], channel=f"rpdp{ip_version}", rpdp_version=ip_version, sn=self._get_spd_sn(
+                data = get_bird_spd_data(protocol_name=link_meta["protocol_name"], channel=RPDP_ID, rpdp_version=ip_version, sn=self._get_spd_sn(
                     self._get_spd_key(dst_ip, is_interior)), origin_router_id=my_router_id, opt_data=[], is_interior=is_interior, addresses=addresses)
                 msg = get_agent_bird_msg(
                     data, link_meta["link_type"], self.app_id, timeout, False)
@@ -1172,6 +1173,7 @@ class RPDPApp(SavApp):
                 data[asn].add(proto_name)
             self.spd_data["inter"] = data
         elif sub_type == 1:
+            need_to_relay = False
             data = self.spd_data["intra"]
             spd_msg["addresses"] = addresses2ips(
                 spd_msg["addresses"], spd_msg["ip_version"])
@@ -1269,11 +1271,10 @@ class RPDPApp(SavApp):
                 p_data["miig_type"],
                 p_data["miig_tag"]))
             prefix_version = p.version
-
+        self.logger.debug(f"spa_add: {spa_add}")
         next_hop = link_meta["remote_ip"]
         ip_version = next_hop.version
-        next_hop = [ip_version] + list(next_hop.packed)
-        next_hop = [len(next_hop)] + next_hop
+        next_hop = list(next_hop.packed)
         as_path = [self.agent.config["local_as"]]
         # self.logger.debug(f"spa_add: {spa_add}")
         try:

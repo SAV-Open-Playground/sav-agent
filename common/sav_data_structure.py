@@ -309,15 +309,17 @@ def get_inter_spa_nlri_hex(origin_asn, prefix, flag):
 def read_intra_spa_nlri_hex(data, ip_version):
     result = []
     cur_pos = 0
+    # input(data)
     while cur_pos < len(data):
         nlri = {}
         route_type = data[cur_pos]
         nlri["route_type"] = route_type
         cur_pos += 1
         length = data[cur_pos]
+        # input(data[cur_pos:cur_pos+length])
         cur_pos += 1
         # router id is ipv4,len is 4
-        origin_router_id = netaddr.IPAddress(hex2int(data[cur_pos:cur_pos+4]))
+        origin_router_id = netaddr.IPAddress(hex2int(data[cur_pos:cur_pos+4]),4)
         nlri["origin_router_id"] = origin_router_id
         # print(nlri)
         cur_pos += 4
@@ -357,9 +359,10 @@ def read_inter_spa_nlri_hex(data, ip_version):
         cur_pos += 1
         length = data[cur_pos]
         cur_pos += 1
-        # router idlen is 4
+        # router_id len is 4
         nlri["origin_asn"] = hex2int(data[cur_pos:cur_pos+4])
-        # input(nlri)
+        print(data[cur_pos:cur_pos+4])
+        input(nlri)
         cur_pos += 4
         mask_len = prefix_len2len(data[cur_pos])
         prefix_hex = data[cur_pos:cur_pos+mask_len+1]
@@ -590,11 +593,13 @@ def test_spa():
     # a = get_inter_spa_nlri_hex(65501, netaddr.IPNetwork("192.168.1.0/24"), 0)
     # print(a)
     # print(read_inter_spa_nlri_hex(a, 4))
-    b = get_inter_spa_nlri_hex(65501, netaddr.IPNetwork("feb::1:1/128"), 0)
-    print(b)
+    # b = get_inter_spa_nlri_hex(65501, netaddr.IPNetwork("feb::1:1/128"), 0)
+    # print(b)
     # print(read_inter_spa_nlri_hex(b, 6))
-    testing_spa_v6= [2, 21, 0, 0, 255, 222, 120, 15, 235, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, 0, 0, 2, 14, 0, 0, 255, 222, 64, 254, 128, 0, 0, 0, 0, 0, 0, 0, 2, 22, 0, 0, 255, 222, 128, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 2, 22, 0, 0, 255, 222, 128, 254, 128, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 22, 0, 0, 255, 222, 128, 254, 128, 0, 0, 0, 0, 0, 0, 48, 67, 87, 255, 254, 125, 94, 33, 0, 2, 22, 0, 0, 255, 222, 128, 254, 128, 0, 0, 0, 0, 0, 0, 148, 220, 175, 255, 254, 246, 14, 53, 0, 2, 7, 0, 0, 255, 222, 8, 255, 0]
-    print(read_inter_spa_nlri_hex(testing_spa_v6,6))
+    # testing_tiner_spa_v6= [2, 21, 0, 0, 255, 222, 120, 15, 235, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, 0, 0, 2, 14, 0, 0, 255, 222, 64, 254, 128, 0, 0, 0, 0, 0, 0, 0, 2, 22, 0, 0, 255, 222, 128, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 2, 22, 0, 0, 255, 222, 128, 254, 128, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 22, 0, 0, 255, 222, 128, 254, 128, 0, 0, 0, 0, 0, 0, 48, 67, 87, 255, 254, 125, 94, 33, 0, 2, 22, 0, 0, 255, 222, 128, 254, 128, 0, 0, 0, 0, 0, 0, 148, 220, 175, 255, 254, 246, 14, 53, 0, 2, 7, 0, 0, 255, 222, 8, 255, 0]
+    # input(get_intra_spa_nlri_hex(netaddr.IPAddress("1.1.1.1",4),netaddr.IPNetwork("feb::1:1/128"),0,0,0))
+    testing_intra_spa_v6 = [1, 0, 1, 26, 0, 3, 0, 1, 120, 15, 235, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, 0, 1, 0, 0, 0, 0, 0, 1, 19, 0, 3, 0, 1, 64, 254, 128, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 27, 0, 3, 0, 1, 128, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 27, 0, 3, 0, 1, 128, 254, 128, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 27, 0, 3, 0, 1, 128, 254, 128, 0, 0, 0, 0, 0, 0, 20, 182, 164, 255, 254, 113, 18, 247, 0, 0, 0, 0, 0, 0, 1, 27, 0, 3, 0, 1, 128, 254, 128, 0, 0, 0, 0, 0, 0, 48, 67, 87, 255, 254, 125, 94, 33, 0, 0, 0, 0, 0, 0, 1, 12, 0, 3, 0, 1, 8, 255, 0, 0, 0, 0, 0, 0]
+    print(read_intra_spa_nlri_hex(testing_intra_spa_v6,6))
 # print(read_spa_sav_nlri([1, 14, 192, 168, 3, 1, 24, 192, 168, 2, 1, 0, 0, 0,
 #       0, 1, 1, 14, 192, 168, 3, 1, 24, 192, 168, 3, 1, 0, 0, 0, 0, 1], 4))
 

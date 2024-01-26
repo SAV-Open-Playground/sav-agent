@@ -720,7 +720,7 @@ class SavAgent():
                     f"key missing in sav_table (old):{r}/{str_key}")
             else:
                 del new_table[r["source_app"]][str_key]
-                self.logger.info(f"SAV RULE DELETED:{r}")
+                self.logger.info(f"SAV_RULE - :{r}")
         for r in adds:
             # self.logger.debug(r)
             if not r["source_app"] in new_table:
@@ -731,7 +731,7 @@ class SavAgent():
                 r["create_time"] = cur_t
                 r["update_time"] = cur_t
                 new_table[r["source_app"]][str_key] = r
-                self.logger.info(f"SAV RULE ADDED:{r}")
+                self.logger.info(f"SAV_RULE + :{r}")
             else:
                 old_value = new_table[r["source_app"]][str_key]
                 r["create_time"] = old_value['create_time']
@@ -742,7 +742,7 @@ class SavAgent():
                     self.logger.error(f"conflict in sav_table (new):{r}")
                 r["update_time"] = cur_t
                 new_table[r["source_app"]][str_key] = r
-                self.logger.info(f"SAV RULE REFRESHED:{r}")
+                self.logger.info(f"SAV_RULE REFRESHED:{r}")
         self.data["sav_table"] = new_table
 
     def update_sav_table_by_app_id(self, add_dict, del_set, app_id):
@@ -761,13 +761,13 @@ class SavAgent():
             else:
                 r = new_table[str_key]
                 del new_table[str_key]
-                self.logger.info(f"SAV RULE DELETED:{r}")
+                self.logger.info(f"SAV_RULE - :{r}")
         for str_key, r in add_dict.items():
             if not str_key in new_table:
                 r["create_time"] = cur_t
                 r["update_time"] = cur_t
                 new_table[str_key] = r
-                self.logger.info(f"SAV RULE ADDED:{r}")
+                self.logger.info(f"SAV_RULE + :{r}")
             else:
                 old_r = new_table[str_key]
                 r["create_time"] = old_r['create_time']
@@ -780,7 +780,7 @@ class SavAgent():
                 else:
                     r["update_time"] = cur_t
                 new_table[str_key] = r
-                self.logger.info(f"SAV RULE REFRESHED:{r}")
+                self.logger.info(f"SAV_RULE REFRESHED:{r}")
         self.data["sav_table"][app_id] = new_table
 
     def _get_sav_rules_by_app(self, app_name, is_interior=None):
@@ -1083,7 +1083,7 @@ class SavAgent():
             for k, v in metric.items():
                 if k.endswith("_rule_num"):
                     metric["total"] += v
-            self.logger.debug(f"SAV RULE NUMS: {metric['total']}")
+            self.logger.debug(f"SAV_RULE NUMS: {metric['total']}")
 
     def _get_spd_id(self, remote_as, remote_router_id):
         return f"{remote_as}-{remote_router_id.value}"
