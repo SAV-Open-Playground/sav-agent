@@ -335,44 +335,11 @@ class RPDPApp(SavApp):
                 ret[prefix].append(src['as_path'])
         return ret
 
-    def diff_pp_v4(self, reset=False):
+    def generate_sav_rules(self,reset= True):
         """
-        return add_dict and del_set,
         if reset is True, will use empty dict as old_
         """
-
-        t0 = time.time()
-        if reset:
-            self.prefix_as_path_dict = {}
-        old_ = self.prefix_as_path_dict
-        new_ = self._get_prefix_as_paths()
-        # self.logger.debug(f"new_ {new_}")
-        dels = []
-        adds = []
-        # self.logger.debug(new_)
-        # self.logger.debug(old_)
-        for prefix, paths in new_.items():
-            if prefix not in old_:
-                # self.logger.debug(paths)
-                for path in paths:
-                    adds.append((prefix, path))
-            else:
-                if paths != old_[prefix]:
-                    for path in old_[prefix]:
-                        if not path in paths:
-                            dels.append((prefix, path))
-                    for path in new_[prefix]:
-                        if not path in old_[prefix]:
-                            adds.append((prefix, path))
-        for prefix in old_:
-            if prefix not in new_:
-                for path in old_[prefix]:
-                    dels.append((prefix, path))
-        self.prefix_as_path_dict = new_
-        t = time.time()-t0
-        if t > TIMEIT_THRESHOLD:
-            self.logger.warning(f"TIMEIT {time.time()-t0:.4f} seconds")
-        self._refresh_sav_rules()
+        self._refresh_sav_rules(reset)
 
     def reset_metric(self):
         self.metric = self.get_init_metric_dict()
@@ -934,7 +901,7 @@ class RPDPApp(SavApp):
                         f"unable to find interior link for as: {next_as}, no SAV ?")
 
     def process_spa(self, msg, link_meta):
-        self.logger.debug(msg)
+        # self.logger.debug(msg)
         is_inter = link_meta["is_interior"]
         if msg["link_type"] == "dsav":
             rpdp_msg = msg["msg"]
@@ -966,8 +933,8 @@ class RPDPApp(SavApp):
         regarding the nlri part, the processing procedure is the same
         """
         # t0 = time.time()
-        self.logger.debug(msg)
-        self.logger.debug(link_meta)
+        # self.logger.debug(msg)
+        # self.logger.debug(link_meta)
         rpdp_msg = msg["msg"]
         is_inter = link_meta["is_interior"]
         if is_inter:
@@ -976,7 +943,7 @@ class RPDPApp(SavApp):
             data = self.spa_data["intra"]
         log_spa_changes = {"add": [], "del": []}
         for add_nlri in rpdp_msg['spa_add']:
-            self.logger.debug(add_nlri)
+            # self.logger.debug(add_nlri)
             if is_inter:
                 origin_key = add_nlri["origin_asn"]
             else:
@@ -1018,7 +985,7 @@ class RPDPApp(SavApp):
             self.logger.debug(f"+{i}")
         for i in log_spa_changes['del']:
             self.logger.debug(f"-{i}")
-        self.logger.debug(msg)
+        # self.logger.debug(msg)
         log_add = rpdp_msg['spa_add']
         log_del = rpdp_msg['spa_del']
         for i in log_add:
@@ -1224,12 +1191,10 @@ class RPDPApp(SavApp):
             # self.logger.debug(hex_data)
             spa_add.extend(hex_data)
             prefix_version = p.version
-        # self.logger.debug(f"spa_add: {spa_add}")
         next_hop = link_meta["local_ip"]
         ip_version = next_hop.version
         next_hop = list(next_hop.packed)
         as_path = [self.agent.config["local_as"]]
-        # self.logger.debug(f"spa_add: {spa_add}")
         data = get_bird_spa_data(spa_add,
                                  spa_del,
                                  link_name,
@@ -1271,12 +1236,10 @@ class RPDPApp(SavApp):
                 p_data["miig_type"],
                 p_data["miig_tag"]))
             prefix_version = p.version
-        self.logger.debug(f"spa_add: {spa_add}")
         next_hop = link_meta["remote_ip"]
         ip_version = next_hop.version
         next_hop = list(next_hop.packed)
         as_path = [self.agent.config["local_as"]]
-        # self.logger.debug(f"spa_add: {spa_add}")
         try:
             data = get_bird_spa_data(spa_add,
                                      spa_del,
@@ -1361,11 +1324,14 @@ class RPDPApp(SavApp):
                         pass
         return new_rules
 
-    def _refresh_sav_rules(self):
+    def _refresh_sav_rules(self,reset=False):
         """
         based on current spd and spa data, generate new sav rules
         and update the sav table in agent
         """
+        # if reset:
+        #     self.spa_data = {"intra": {}, "inter": {}}
+        #     self.spd_data = {"intra": {}, "inter": {}}
         old_rules = self.agent._get_sav_rules_by_app(self.app_id, None)
         # self.logger.debug(f"old_rules: {old_rules}")
 

@@ -520,14 +520,6 @@ class SavAgent():
             f"GOT INTRA-MSG ON [{link_meta['protocol_name']}]:{msg}, time_stamp: [{time.time()}]")
         if link_meta["is_interior"]:
             self.logger.error("intra-msg received on inter-link!")
-    def _tell_prefix(self,prefixes):
-        """
-        split prefixes into local and remote and default
-        """
-        default = {}
-        local = {}
-        remote = {}
-        return default,local,remote
     def get_fib(self,source="kernel",f_types=["remote"]):
         """
         @param source: one of ["kernel","bird"]
@@ -558,6 +550,7 @@ class SavAgent():
                         if r_flag:
                             data[p] = p_d
                 elif p.version == 6:
+                    # self.logger.debug(p_d)
                     if p_d["Next"] == "::":
                         if l_flag:
                             data[p] = p_d
@@ -611,11 +604,16 @@ class SavAgent():
         return self.data["kernel_fib"]["data"]
     def _prefix_filter(self,prefixes):
         """
-        only valid for 
         """
         if not self.config["use_ignore_nets"]:
             return prefixes
         ret = {}
+        if self.config["ignore_private"]:
+            temp = {}
+            for p in prefixes:
+                if not p.is_private():
+                    temp[p] = prefixes[p]
+            prefixes = temp        
         for p in prefixes:
             ignore = False
             for p1 in self.ignore_prefixes:
@@ -624,6 +622,17 @@ class SavAgent():
                     break
             if not ignore:
                 ret[p] = prefixes[p]
+        # TODO special filter in ipv6 
+        temp = {}
+        for p in ret:
+            if p.version == 4:
+                temp[p] = ret[p]
+            elif p.version == 6:
+                if 'Hop' in ret[p]:
+                    if ret[p]['Hop'] in ["Un","U"]:
+                        continue
+                temp[p] = ret[p]
+        ret = temp
         return ret
     def _refresh_both_fib(self):
         """
@@ -673,14 +682,9 @@ class SavAgent():
                 add_dict = {}
                 del_list = []
                 if app_type in [RPDPApp]:
-                    self.rpdp_app.diff_pp_v4(reset)
-                    # adds, dels = 
-                    # self.logger.debug(f"adds:{len(adds)}")
-                    # changed_routes = []
-                    # for prefix, path in adds:
-                    #     changed_routes.append({prefix: path})
-                    # self.logger.debug(f"changed_routes:{changed_routes}")
-                    # self._send_origin(None, changed_routes)
+                    # although the normal bgp update will not trigger rpdp, we still need to notify rpdp
+                    # rpdp's generate_sav_rules will handle the rule modifications
+                    self.rpdp_app.generate_sav_rules(reset)
                 else:
                     # app_type in [UrpfApp, EfpUrpfApp, FpUrpfApp]:
                     add_dict, del_list = app.generate_sav_rules(
@@ -697,8 +701,8 @@ class SavAgent():
                             if not found:
                                 temp[r_k] = r
                         add_dict = temp
-                    self.logger.debug(f"add_dict:{add_dict}")
-                    self.logger.debug(f"dels:{del_list}")
+                    # self.logger.debug(f"add_dict:{add_dict}")
+                    # self.logger.debug(f"dels:{del_list}")
                     self.update_sav_table_by_app_id(add_dict, del_list, app_id)
             except Exception as e:
                 self.logger.exception(e)

@@ -263,10 +263,9 @@ def read_json(path_to_json):
     with open(path_to_json, "r", encoding="utf-8") as json_file:
         return json.loads(json_file.read())
 
-
-def save_json(path_to_json, json_obj):
+def json_w(path_to_json, json_obj):
     with open(path_to_json, "w", encoding="utf-8") as json_file:
-        json_file.write(json.dumps(json_obj, indent=4))
+        json_file.write(json.dumps(json_obj, indent=4, sort_keys=True))
 
 class SavApp():
     """
