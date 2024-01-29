@@ -754,8 +754,8 @@ class RPDPApp(SavApp):
             log_dict["src_device_id"] = "N/A"
         log_dict["src_ip"] = str(link_meta["remote_ip"])
         log_dict["dst_ip"] = str(link_meta["local_ip"])
-        if msg_type == "origin":
-            # log_dict["src_ip"], log_dict["dst_ip"] = log_dict["dst_ip"], log_dict["src_ip"]
+        if msg_cause == "origin":
+            log_dict["src_ip"], log_dict["dst_ip"] = log_dict["dst_ip"], log_dict["src_ip"]
             log_dict["src_asn"], log_dict["dst_asn"] = log_dict["dst_asn"], log_dict["src_asn"]
             if msg_type == "SPA":
                 log_dict["add"] = msg['data']['add']
