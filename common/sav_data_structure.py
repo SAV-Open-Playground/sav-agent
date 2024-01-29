@@ -20,6 +20,7 @@ TIMEIT_THRESHOLD = 0.5
 LOG_FOR_FRONT_KEY_WORD = "LOG_FOR_FRONT"
 BGP_UPDATE_DATA_MAX_LEN = 65516
 
+
 def int2hex(input_int, zfill_length=4):
     temp = hex(input_int)[2:]
     ret = []
@@ -52,6 +53,7 @@ def prefix_len2len(prefix_len):
 
 # AS
 
+
 def is_asn(in_put):
     if isinstance(in_put, int):
         if in_put > 0 and in_put < 65535:
@@ -83,7 +85,7 @@ def hex2ip(data, ip_version):
     while len(data) < full_len:
         data.append(0)
     ip_value = hex2int(data)
-    return netaddr.IPAddress(ip_value,ip_version)
+    return netaddr.IPAddress(ip_value, ip_version)
 
 
 def ip2hex(ip):
@@ -243,7 +245,8 @@ def path2hex(asn_path, as4_session=True):
             result += path
     return result
 
-def path2as_path(path,as4_session):
+
+def path2as_path(path, as4_session):
     """
     convert path to as_path
     """
@@ -319,7 +322,8 @@ def read_intra_spa_nlri_hex(data, ip_version):
         # input(data[cur_pos:cur_pos+length])
         cur_pos += 1
         # router id is ipv4,len is 4
-        origin_router_id = netaddr.IPAddress(hex2int(data[cur_pos:cur_pos+4]),4)
+        origin_router_id = netaddr.IPAddress(
+            hex2int(data[cur_pos:cur_pos+4]), 4)
         nlri["origin_router_id"] = origin_router_id
         # print(nlri)
         cur_pos += 4
@@ -349,7 +353,7 @@ def read_inter_spa_nlri_hex(data, ip_version):
     """
     read inter spa data from hex
     """
-    
+
     result = []
     cur_pos = 0
     while cur_pos < len(data):
@@ -362,7 +366,6 @@ def read_inter_spa_nlri_hex(data, ip_version):
         # router_id len is 4
         nlri["origin_asn"] = hex2int(data[cur_pos:cur_pos+4])
         print(data[cur_pos:cur_pos+4])
-        input(nlri)
         cur_pos += 4
         mask_len = prefix_len2len(data[cur_pos])
         prefix_hex = data[cur_pos:cur_pos+mask_len+1]
@@ -390,6 +393,7 @@ def get_send_buff_msg(src_app, type, argv, msg, retry_forever, response):
     ret = {"source_app": src_app, "type": type, "argv": argv, "msg": msg}
     check_send_buff_msg(ret)
     return ret
+
 
 def check_send_buff_msg(msg):
     """
@@ -526,13 +530,13 @@ def get_bird_spa_data(adds, dels, protocol_name, channel, rpdp_version, next_hop
         "channel": channel,
         "rpdp_version": rpdp_version,
         "next_hop": next_hop,
-        "origin": [1, 0],# intra value
+        "origin": [1, 0],  # intra value
         "is_interior": 0
     }
     if is_interior:
         ret["origin"] = path2hex([as_path[0]], is_as4)
         # ret["as_path"] = [2, len(as_path)] + path2hex(as_path, is_as4)
-        ret["as_path"] = path2as_path(as_path,is_as4)
+        ret["as_path"] = path2as_path(as_path, is_as4)
         ret["sav_path"] = path2hex(as_path, is_as4)
         ret["sav_path_len"] = len(ret["sav_path"])
         ret["as_path_len"] = len(ret["as_path"])
@@ -540,7 +544,7 @@ def get_bird_spa_data(adds, dels, protocol_name, channel, rpdp_version, next_hop
     return ret
 
 
-def get_bird_spd_data(protocol_name, channel, rpdp_version, sn, origin_router_id, opt_data,  is_interior,addresses=[], my_as=-1, peer_as=-1, peer_neighbor_as_list=None):
+def get_bird_spd_data(protocol_name, channel, rpdp_version, sn, origin_router_id, opt_data,  is_interior, addresses=[], my_as=-1, peer_as=-1, peer_neighbor_as_list=None):
     """
     return a dict of spd data for bird
     all optional parameters are for special for inter spd or intar spd.
@@ -564,8 +568,7 @@ def get_bird_spd_data(protocol_name, channel, rpdp_version, sn, origin_router_id
         "origin_router_id": ip2hex(netaddr.IPAddress(origin_router_id)),
         "opt_data_len": len(opt_data),
         "opt_data": opt_data,
-        "addresses": addresses
-        ,"is_interior": 0
+        "addresses": addresses, "is_interior": 0
     }
     if is_interior:
         ret["is_interior"] = 1
@@ -589,7 +592,7 @@ def test_prefix2hex():
 
 
 def test_spa():
-    
+
     # a = get_inter_spa_nlri_hex(65501, netaddr.IPNetwork("192.168.1.0/24"), 0)
     # print(a)
     # print(read_inter_spa_nlri_hex(a, 4))
@@ -598,8 +601,9 @@ def test_spa():
     # print(read_inter_spa_nlri_hex(b, 6))
     # testing_tiner_spa_v6= [2, 21, 0, 0, 255, 222, 120, 15, 235, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, 0, 0, 2, 14, 0, 0, 255, 222, 64, 254, 128, 0, 0, 0, 0, 0, 0, 0, 2, 22, 0, 0, 255, 222, 128, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 2, 22, 0, 0, 255, 222, 128, 254, 128, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 22, 0, 0, 255, 222, 128, 254, 128, 0, 0, 0, 0, 0, 0, 48, 67, 87, 255, 254, 125, 94, 33, 0, 2, 22, 0, 0, 255, 222, 128, 254, 128, 0, 0, 0, 0, 0, 0, 148, 220, 175, 255, 254, 246, 14, 53, 0, 2, 7, 0, 0, 255, 222, 8, 255, 0]
     # input(get_intra_spa_nlri_hex(netaddr.IPAddress("1.1.1.1",4),netaddr.IPNetwork("feb::1:1/128"),0,0,0))
-    testing_intra_spa_v6 = [1, 0, 1, 26, 0, 3, 0, 1, 120, 15, 235, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, 0, 1, 0, 0, 0, 0, 0, 1, 19, 0, 3, 0, 1, 64, 254, 128, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 27, 0, 3, 0, 1, 128, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 27, 0, 3, 0, 1, 128, 254, 128, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 27, 0, 3, 0, 1, 128, 254, 128, 0, 0, 0, 0, 0, 0, 20, 182, 164, 255, 254, 113, 18, 247, 0, 0, 0, 0, 0, 0, 1, 27, 0, 3, 0, 1, 128, 254, 128, 0, 0, 0, 0, 0, 0, 48, 67, 87, 255, 254, 125, 94, 33, 0, 0, 0, 0, 0, 0, 1, 12, 0, 3, 0, 1, 8, 255, 0, 0, 0, 0, 0, 0]
-    print(read_intra_spa_nlri_hex(testing_intra_spa_v6,6))
+    testing_intra_spa_v6 = [1, 0, 1, 26, 0, 3, 0, 1, 120, 15, 235, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 3, 0, 1, 0, 0, 0, 0, 0, 1, 19, 0, 3, 0, 1, 64, 254, 128, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 27, 0, 3, 0, 1, 128, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 1, 27, 0, 3, 0, 1, 128, 254, 128, 0,
+                            0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 27, 0, 3, 0, 1, 128, 254, 128, 0, 0, 0, 0, 0, 0, 20, 182, 164, 255, 254, 113, 18, 247, 0, 0, 0, 0, 0, 0, 1, 27, 0, 3, 0, 1, 128, 254, 128, 0, 0, 0, 0, 0, 0, 48, 67, 87, 255, 254, 125, 94, 33, 0, 0, 0, 0, 0, 0, 1, 12, 0, 3, 0, 1, 8, 255, 0, 0, 0, 0, 0, 0]
+    print(read_intra_spa_nlri_hex(testing_intra_spa_v6, 6))
 # print(read_spa_sav_nlri([1, 14, 192, 168, 3, 1, 24, 192, 168, 2, 1, 0, 0, 0,
 #       0, 1, 1, 14, 192, 168, 3, 1, 24, 192, 168, 3, 1, 0, 0, 0, 0, 1], 4))
 
@@ -617,7 +621,7 @@ def my_split(str_data, split_char):
     return ret
 
 
-def process_src_kv(k, v,my_asn):
+def process_src_kv(k, v, my_asn):
     """
     add values to each source identified
     """
@@ -648,11 +652,11 @@ def process_src_kv(k, v,my_asn):
     if k_l == 4:
         return v
     elif k_l == 5:
-        if k_temp[4]=="[i]":
+        if k_temp[4] == "[i]":
             v["origin_asn"] = my_asn
             return v
         if not (k_temp[4].startswith("[AS") and k_temp[4].endswith("i]")):
-            
+
             raise ValueError(f"unknown AS :{k_temp}")
 
         v["origin_asn"] = int(k_temp[4][3:-2])
@@ -662,8 +666,7 @@ def process_src_kv(k, v,my_asn):
     return 1
 
 
-
-def parse_prefix(data,my_asn):
+def parse_prefix(data, my_asn):
     """
     special parsing for bird show route all cmd,
     not fully tested
@@ -730,7 +733,7 @@ def parse_prefix(data,my_asn):
                     raise ValueError(f"unknown key {[l]}")
         new_srcs = []
         for k, v in srcs.items():
-            new_v = process_src_kv(k, v,my_asn)
+            new_v = process_src_kv(k, v, my_asn)
             if new_v is None:
                 print(k)
                 print(v)
@@ -763,6 +766,7 @@ def parse_prefix(data,my_asn):
         # ret[prefix] = temp
     return ret
 
+
 def parse_r4(data):
     """
     parse bird roa table
@@ -771,7 +775,7 @@ def parse_r4(data):
     lines = my_split(data, "\n")
     ret = {}
     i = 0
-    while i <len(lines):
+    while i < len(lines):
         l = lines[i]
         temp = my_split(l, " ")
         prefix = temp[0].split("-")[0]
@@ -781,8 +785,10 @@ def parse_r4(data):
         ret[asn].append(prefix)
         if lines[i+1].startswith("\t"):
             i += 1
-        i+=1
+        i += 1
     return ret
+
+
 def parse_bird_show_route_all(data, my_asn):
     """parse the out put of bird show route all cmd"""
     tables = my_split(data, "Table")
@@ -791,14 +797,14 @@ def parse_bird_show_route_all(data, my_asn):
         lines = my_split(i, "\n")
         table_heading = lines.pop(0)
         table_name = table_heading.strip().split(":")[0]
-        
+
         table_data = i.split(table_heading)[1][1:]
-        if table_name =="r4":
-             ret[table_name] = parse_r4(table_data)
+        if table_name == "r4":
+            ret[table_name] = parse_r4(table_data)
         elif table_name == "r6":
             raise NotImplementedError
         else:
-            ret[table_name] = parse_prefix(table_data,my_asn)
+            ret[table_name] = parse_prefix(table_data, my_asn)
     return ret
 
 # test_spa()
