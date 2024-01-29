@@ -77,7 +77,7 @@ class SavAgent():
         Otherwise, raise ValueError
         we should ALWAYS check self.config for latest values
         """
-        for _ in range(3):
+        for i in range(3):
             try:
                 config = read_json(path_to_config)
                 required_keys = [
@@ -103,14 +103,17 @@ class SavAgent():
                         f"invalid location {config['location']}, should be one of {valid_location}")
                 self.config = config
                 if config["use_ignore_nets"]:
-                    self.ignore_prefixes = list(set(map(netaddr.IPNetwork,self.config["ignore_nets"])))
+                    self.ignore_prefixes = list(
+                        set(map(netaddr.IPNetwork, self.config["ignore_nets"])))
                 else:
                     self.ignore_prefixes = []
+                if not config["enabled_sav_app"] in config["apps"]:
+                    raise ValueError(
+                        f"enabled_sav_app {config['enabled_sav_app']} not in apps:{config['apps']}")
                 return
             except Exception as e:
-                self.logger.debug(e)
                 self.logger.exception(e)
-                self.logger.error("invalid config file ,retry {i}")
+                self.logger.error(f"invalid config file ,retry {i+1}")
                 time.sleep(0.1)
         raise ValueError("invalid config file")
 
@@ -137,9 +140,9 @@ class SavAgent():
             "active_app": None,
             "fib_for_apps": {},
             "apps": {},
-            "aspa_info": {}, # roa is stored in bird_man
+            "aspa_info": {},  # roa is stored in bird_man
             "roa_info": {},
-            "links": {}, # link manager"s data
+            "links": {},  # link manager"s data
             "fib": [],  # system"s fib table
         }
         self.data["metric"] = init_protocol_metric()
@@ -225,6 +228,7 @@ class SavAgent():
 
         self.logger.debug(
             msg=f"initialized apps: {list(self.data['apps'].keys())},using {self.data['active_app'].app_id}")
+
     def get_aspa_info(self):
         """
         TODO: when to refresh aspa_info,
@@ -232,18 +236,19 @@ class SavAgent():
         """
         if self.data["aspa_info"] == {}:
             self._refresh_aspa_info()
-        return copy.deepcopy(self.data["aspa_info"] )
-    def _get_rpki_info(self,uri):
+        return copy.deepcopy(self.data["aspa_info"])
+
+    def _get_rpki_info(self, uri):
         host = "savopkrill.com"
         port = 3000
         pwd = "krill"
         url = f"https://{host}:{port}/api/v1/cas/testbed/{uri}"
         headers = {"Authorization": f"Bearer {pwd}",
-                            "Content-Type": "application/json"}
+                   "Content-Type": "application/json"}
         while True:
             try:
                 response = requests.request(
-                        "GET", url, headers=headers, verify=False, timeout=15)
+                    "GET", url, headers=headers, verify=False, timeout=15)
                 response.raise_for_status()  # Raises an exception for any HTTP error status codes
                 ret = response.json()
                 return ret
@@ -251,6 +256,7 @@ class SavAgent():
                 self.logger.debug(err)
                 self.logger.error(f"get {url} failed")
                 time.sleep(0.1)
+
     def _refresh_aspa_info(self):
         """
         update aspa_info: {customer_asn:[provider_asn]}
@@ -260,21 +266,24 @@ class SavAgent():
         for item in ret_json:
             customer_asn = item["customer"]
             provider_asns = item["providers"]
-            ret[customer_asn] = list(map(lambda x: int(x.replace("AS", "").replace("(v4)", "")), provider_asns))
+            ret[customer_asn] = list(
+                map(lambda x: int(x.replace("AS", "").replace("(v4)", "")), provider_asns))
         self.data["aspa_info"] = ret
-               
-    def _refresh_roa_info(self,hostname="savopkrill.com", port_number=3000, pwd="krill"):
+
+    def _refresh_roa_info(self, hostname="savopkrill.com", port_number=3000, pwd="krill"):
         ret = self._get_rpki_info("routes")
         for r in ret:
             if not r["asn"] in self.data["roa_info"]:
                 self.data["roa_info"][r["asn"]] = []
             p = netaddr.IPNetwork(r["prefix"])
             self.data["roa_info"][r["asn"]].append(p)
+
     def get_roa_info(self):
         """
         return a dict,key is customer_asn,value is list of providers
         """
         return copy.deepcopy(self.data["roa_info"])
+
     def _refresh_kernel_fib(self, filter_base=True):
         """
         update kernel fib using cmd
@@ -373,7 +382,7 @@ class SavAgent():
                 time.sleep(5)
                 self._refresh_roa_info()
             self.logger.debug("got roa")
-            
+
         self._init_apps()
         self.logger.debug(f"initial wait: {time.time()-t0:.4f} seconds")
 
@@ -412,10 +421,10 @@ class SavAgent():
         """
         self._initial_wait()
         # generate initial sav rules
-        # self.logger.debug(f"before initial fib")
-        fib_adds = self.get_fib("kernel",["remote","local"])
+        self.logger.debug(f"before initial fib")
+        fib_adds = self.get_fib("kernel", ["remote", "local"])
         self.logger.debug(f"initial fib:{fib_adds}")
-        bird_adds = self.get_fib("bird",["remote","local"])
+        bird_adds = self.get_fib("bird", ["remote", "local"])
         self._notify_apps(True, fib_adds, {}, bird_adds, {})
         self.logger.debug("starting main loop")
         while True:
@@ -471,7 +480,7 @@ class SavAgent():
         """
         return a list of local prefixes
         """
-        local_prefixes = list(self.get_fib("kernel",["local"]).keys())
+        local_prefixes = list(self.get_fib("kernel", ["local"]).keys())
         return local_prefixes
 
     def perf_test_send(self, ratio, nlri_num, total_pkt_num):
@@ -500,7 +509,7 @@ class SavAgent():
         if link_name.startswith("rpki"):
             # TODO: handle rpki link state change
             # currently, we don't do anything
-            return 
+            return
         if not new_state == self.link_man.get_link_state(link_name):
             self.link_man.update_link_kv(link_name, "state", new_state)
             self.logger.info(f"link {link_name} state changed to {new_state}")
@@ -511,7 +520,6 @@ class SavAgent():
         if self.passport_app:
             self.passport_app.init_key_publish()
 
-
     def _process_sav_intra(self, msg, link_meta):
         """
         doing nothing but logging
@@ -520,17 +528,20 @@ class SavAgent():
             f"GOT INTRA-MSG ON [{link_meta['protocol_name']}]:{msg}, time_stamp: [{time.time()}]")
         if link_meta["is_interior"]:
             self.logger.error("intra-msg received on inter-link!")
-    def get_fib(self,source="kernel",f_types=["remote"]):
+
+    def get_fib(self, source="kernel", f_types=["remote"]):
         """
         @param source: one of ["kernel","bird"]
         @param f_types: a list of data you want to include, data can be one of ["remote","local","default"]
         """
-        if not source in ["kernel","bird"]:
-            self.logger.error(f"invalid source:{source}, should be one of [kernel,bird]")
+        if not source in ["kernel", "bird"]:
+            self.logger.error(
+                f"invalid source:{source}, should be one of [kernel,bird]")
             return {}
         for t in f_types:
-            if not t in ["remote","local","default"]:
-                self.logger.error(f"invalid element:{t}, should be one of [remote,local,default]")
+            if not t in ["remote", "local", "default"]:
+                self.logger.error(
+                    f"invalid element:{t}, should be one of [remote,local,default]")
                 return {}
         r_flag = "remote" in f_types
         l_flag = "local" in f_types
@@ -541,7 +552,7 @@ class SavAgent():
             # self.logger.debug(temp)
             # self.logger.debug(source)
             # self.logger.debug(f_types)
-            for p,p_d in temp.items():
+            for p, p_d in temp.items():
                 if p.version == 4:
                     if p_d["Gateway"] == "0.0.0.0":
                         if l_flag:
@@ -561,7 +572,7 @@ class SavAgent():
                     self.logger.error(f"invalid ip version:{p.version}")
         else:
             temp = self.bird_man.get_fib()
-            for p,p_d in temp.items():
+            for p, p_d in temp.items():
                 device_flag = False
                 bgp_flag = False
                 static_flag = False
@@ -578,11 +589,11 @@ class SavAgent():
                         static_flag = True
                 if static_flag or device_flag:
                     if l_flag:
-                        data[p] = [i for i in p_d if i["type"]!="BGP univ"]
+                        data[p] = [i for i in p_d if i["type"] != "BGP univ"]
                 elif bgp_flag:
                     if r_flag:
-                        # leave only bgp 
-                        data[p] = [i for i in p_d if i["type"]=="BGP univ"]
+                        # leave only bgp
+                        data[p] = [i for i in p_d if i["type"] == "BGP univ"]
                 else:
                     self.logger.error("no type found")
                     self.logger.error(f"{p}:{p_d}")
@@ -590,7 +601,8 @@ class SavAgent():
         data = self._prefix_filter(data)
         # self.logger.debug(data)
         ret = {}
-        default_routes = [netaddr.IPNetwork("0.0.0.0/0"),netaddr.IPNetwork("::/0")]
+        default_routes = [netaddr.IPNetwork(
+            "0.0.0.0/0"), netaddr.IPNetwork("::/0")]
         for p in data:
             if p in default_routes:
                 if d_flag:
@@ -599,10 +611,12 @@ class SavAgent():
                 ret[p] = data[p]
         # self.logger.debug(ret)
         return ret
+
     def _get_kernel_fib(self):
         """return the cached fib"""
         return self.data["kernel_fib"]["data"]
-    def _prefix_filter(self,prefixes):
+
+    def _prefix_filter(self, prefixes):
         """
         """
         if not self.config["use_ignore_nets"]:
@@ -613,7 +627,7 @@ class SavAgent():
             for p in prefixes:
                 if not p.is_private():
                     temp[p] = prefixes[p]
-            prefixes = temp        
+            prefixes = temp
         for p in prefixes:
             ignore = False
             for p1 in self.ignore_prefixes:
@@ -622,34 +636,36 @@ class SavAgent():
                     break
             if not ignore:
                 ret[p] = prefixes[p]
-        # TODO special filter in ipv6 
+        # TODO special filter in ipv6
         temp = {}
         for p in ret:
             if p.version == 4:
                 temp[p] = ret[p]
             elif p.version == 6:
                 if 'Hop' in ret[p]:
-                    if ret[p]['Hop'] in ["Un","U"]:
+                    if ret[p]['Hop'] in ["Un", "U"]:
                         continue
                 temp[p] = ret[p]
         ret = temp
         return ret
+
     def _refresh_both_fib(self):
         """
         refresh both kernel fib and bird fib
         return is_bird_fib_changed, is_kernel_fib_change, fib_adds, fib_dels, bird_adds,bird_dels
         """
         fib_adds, fib_dels = self._refresh_kernel_fib()
-        is_bird_fib_changed, bird_adds,bird_dels = self.bird_man.update_fib(self.config["local_as"])
+        is_bird_fib_changed, bird_adds, bird_dels = self.bird_man.update_fib(
+            self.config["local_as"])
         is_kernel_fib_change = ((len(fib_adds) != 0) or (len(fib_dels) != 0))
-        
-        return is_bird_fib_changed, is_kernel_fib_change, fib_adds, fib_dels, bird_adds,bird_dels
-    
+
+        return is_bird_fib_changed, is_kernel_fib_change, fib_adds, fib_dels, bird_adds, bird_dels
+
     def _process_native_bgp_update(self):
         """
         notify apps about native bgp update
         """
-        bird_changed, kernel_changed, fib_adds, fib_dels, bird_adds,bird_dels = self._refresh_both_fib()
+        bird_changed, kernel_changed, fib_adds, fib_dels, bird_adds, bird_dels = self._refresh_both_fib()
         # now we have the latest fib in kernel and bird
         if bird_changed != kernel_changed:
             self.logger.warning("bird fib and kernel fib change inconsistent")
@@ -660,9 +676,9 @@ class SavAgent():
             self.logger.debug(bird_changed)
             self.logger.debug(kernel_changed)
         if bird_changed or kernel_changed:
-            self._notify_apps(False, fib_adds, fib_dels, bird_adds,bird_dels)
+            self._notify_apps(False, fib_adds, fib_dels, bird_adds, bird_dels)
 
-    def _notify_apps(self, reset, fib_adds, fib_dels, bird_adds,bird_dels, app_list=None):
+    def _notify_apps(self, reset, fib_adds, fib_dels, bird_adds, bird_dels, app_list=None):
         """
         notify sav_apps to generate sav rules
         if reset is True, it will clear all existing rules and re-generate all rules(the fib_adds and fib_dels will be ignored)
@@ -688,11 +704,11 @@ class SavAgent():
                 else:
                     # app_type in [UrpfApp, EfpUrpfApp, FpUrpfApp]:
                     add_dict, del_list = app.generate_sav_rules(
-                        fib_adds, fib_dels, bird_adds,bird_dels, self.get_sav_rules_by_app(app_id))
+                        fib_adds, fib_dels, bird_adds, bird_dels, self.get_sav_rules_by_app(app_id))
                     # TODO filter
                     if self.config["use_ignore_nets"]:
                         temp = {}
-                        for r_k,r in add_dict.items():
+                        for r_k, r in add_dict.items():
                             found = False
                             for p in self.ignore_prefixes:
                                 if r['prefix'] in p:
@@ -871,7 +887,7 @@ class SavAgent():
         intra_paths = []
         inter_paths = []
         if input_paths is None:
-            pp = self.get_fib("bird",["remote"])
+            pp = self.get_fib("bird", ["remote"])
             self.logger.debug(f"pp:{pp}")
             for prefix in pp:
                 for path in pp[prefix]["as_path"]:
@@ -1132,7 +1148,7 @@ class SavAgent():
             self.logger.debug("rpdp_app missing, unable to send spd")
             return False
         # here the remote refers to prefixes that are not originated by this router
-        possible_prefixes = self.get_fib("bird",["remote"])
+        possible_prefixes = self.get_fib("bird", ["remote"])
         inter_as_links = {}
         for link_name in self.link_man.get_all_up_type(True, False):
             inter_as_links[link_name] = self.link_man.get_by_name(link_name)
@@ -1202,7 +1218,7 @@ class SavAgent():
                             # self.logger.debug("triggering spd")
                             if not self.data["metric"]["initial_fib_stable"]:
                                 # self.logger.debug(
-                                    # "fib not stable, not sending spd")
+                                # "fib not stable, not sending spd")
                                 continue
                             self._send_spd()
                         else:
