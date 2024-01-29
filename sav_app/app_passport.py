@@ -135,12 +135,8 @@ class PassportApp(SavApp):
         while True:
             try:
                 rep = requests.post(url, json=msg, timeout=timeout)
-                if not rep.status_code == 200:
-                    self.logger.error(
-                        f"send packet failed with {rep.status_code}")
-                    raise ValueError(
-                        f"send packet failed with {rep.status_code}")
-                return rep
+                if rep.status_code == 200:
+                    return rep
             except Exception as e:
                 retry_count += 1
                 time.sleep(0.01)

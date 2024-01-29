@@ -9,6 +9,7 @@
 from common.sav_common import *
 FP_URPF_ID = "fp_urpf"
 
+
 class FpUrpfApp(SavApp):
     """
     fp-uRPF:
@@ -26,8 +27,8 @@ class FpUrpfApp(SavApp):
     P2          I1
     P1          I2
     P2          I2
-    
-    
+
+
     however, the sav rule is still prefix based. we expand a origin to all prefixes it has using fib table.
     """
 
@@ -40,8 +41,8 @@ class FpUrpfApp(SavApp):
         """
         origin_interfaces_table = {}
         origin_prefix_table = {}
-        for prefix, srcs in self.agent.get_fib("bird",["remote"]).items():
-            if prefix.version in [4,6]:
+        for prefix, srcs in self.agent.get_fib("bird", ["remote"]).items():
+            if prefix.version in [4, 6]:
                 for line in srcs:
                     if "origin_asn" in line:
                         origin = line["origin_asn"]
@@ -51,7 +52,7 @@ class FpUrpfApp(SavApp):
                         origin_prefix_table[origin].add(prefix)
                     else:
                         self.logger.error(f"no origin_asn in {prefix}:{line}")
-                    self.logger.debug(line)
+                    # self.logger.debug(line)
                     interface = line.get("interface_name", None)
                     if interface:
                         origin_interfaces_table[origin].add(interface)
@@ -61,8 +62,8 @@ class FpUrpfApp(SavApp):
         if not my_asn in origin_prefix_table:
             origin_prefix_table[my_asn] = set()
             origin_interfaces_table[my_asn] = set()
-        for prefix, srcs in self.agent.get_fib("bird",["local"]).items():
-            if prefix.version in [4,6]:
+        for prefix, srcs in self.agent.get_fib("bird", ["local"]).items():
+            if prefix.version in [4, 6]:
                 for line in srcs:
                     origin_prefix_table[my_asn].add(prefix)
                     interface = line.get("interface_name", None)
@@ -70,13 +71,13 @@ class FpUrpfApp(SavApp):
                         origin_interfaces_table[my_asn].add(interface)
             else:
                 raise ValueError(f"unknown ip version {prefix.version}")
-        return origin_interfaces_table,origin_prefix_table
+        return origin_interfaces_table, origin_prefix_table
 
-    def generate_sav_rules(self, fib_adds, fib_dels, bird_add,bird_dels, old_rules):
+    def generate_sav_rules(self, fib_adds, fib_dels, bird_add, bird_dels, old_rules):
         """
         only implement the inter-as mode
         """
-        origin_interfaces_table,origin_prefix_table = self._get_prefix_interface_table()
+        origin_interfaces_table, origin_prefix_table = self._get_prefix_interface_table()
         self.logger.debug(f"origin_interfaces_table={origin_interfaces_table}")
         self.logger.debug(f"origin_prefix_table={origin_prefix_table}")
         add_dict = {}

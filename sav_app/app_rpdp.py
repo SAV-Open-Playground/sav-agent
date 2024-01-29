@@ -735,8 +735,8 @@ class RPDPApp(SavApp):
             return
         if not msg_type in ["SPA", "SPD"]:
             self.logger.error(f"unknown msg_type {msg_type}")
-        # self.logger.debug(link_meta)
-        # self.logger.debug(msg)
+        self.logger.debug(link_meta)
+        self.logger.debug(msg)
         log_dict = {"msg_cause": msg_cause,
                     "link_type": link_meta["link_type"],
                     "link_name": link_meta["protocol_name"],
@@ -758,8 +758,6 @@ class RPDPApp(SavApp):
             log_dict["src_ip"], log_dict["dst_ip"] = log_dict["dst_ip"], log_dict["src_ip"]
             log_dict["src_asn"], log_dict["dst_asn"] = log_dict["dst_asn"], log_dict["src_asn"]
             if msg_type == "SPA":
-                log_dict["add"] = msg['data']['add']
-                log_dict["del"] = msg['data']['del']
                 log_dict['dt'] = msg["created_dt"]
                 # for i in log_add:
                 # i["prefix"] = str(i["prefix"])
@@ -769,6 +767,7 @@ class RPDPApp(SavApp):
                 pass
         else:
             log_dict["pkt_id"] = msg["pkt_id"]
+            log_dict['dt'] = msg["pkt_rec_dt"]
 
         log_str = f"{LOG_FOR_FRONT_KEY_WORD} {log_dict}"
 
