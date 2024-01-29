@@ -595,8 +595,8 @@ class SavAgent():
                         # leave only bgp
                         data[p] = [i for i in p_d if i["type"] == "BGP univ"]
                 else:
-                    self.logger.error("no type found")
-                    self.logger.error(f"{p}:{p_d}")
+                    self.logger.warning("no type found")
+                    self.logger.warning(f"{p}:{p_d}")
         # self.logger.debug(data)
         data = self._prefix_filter(data)
         # self.logger.debug(data)
