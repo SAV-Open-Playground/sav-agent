@@ -212,6 +212,8 @@ class SavAgent():
             sav_apps[app_id] = all_instances[app_id]
             if app_id == RPDP_ID:
                 self.rpdp_app = sav_apps[app_id]
+            if app_id == PASSPORT_ID:
+                self.passport_app = sav_apps[app_id]
         self.data["apps"] = sav_apps
         self.data["active_app"] = self.data["apps"][self.config["enabled_sav_app"]]
         # elif app_id == "BAR":

@@ -15,8 +15,10 @@ import requests
 import netifaces
 from common.sav_data_structure import *
 
+
 def subprocess_run(command):
     return subprocess.run(command, shell=True, capture_output=True, encoding='utf-8')
+
 
 class RPDPPeer:
     def __init__(self, asn, port, ip, is_as4) -> None:
@@ -110,10 +112,10 @@ def rule_list_diff(old_rules, new_rules):
     """
     add_dict = {}
     del_set = ()
-    for r_k,r in new_rules.items():
+    for r_k, r in new_rules.items():
         if r_k not in old_rules:
-            add_dict[r_k]=r
-    for r_k,r in old_rules.items():
+            add_dict[r_k] = r
+    for r_k, r in old_rules.items():
         if r_k not in new_rules:
             del_set.add(r_k)
     return add_dict, del_set
@@ -163,6 +165,8 @@ def diff_sav_rules(old_rules, new_rules):
         if item not in new_rules:
             dels_.append(item)
     return adds_, dels_
+
+
 def get_next_hop(target_ip):
     """
     find next hop for the given ip using ip route get
@@ -263,9 +267,11 @@ def read_json(path_to_json):
     with open(path_to_json, "r", encoding="utf-8") as json_file:
         return json.loads(json_file.read())
 
+
 def json_w(path_to_json, json_obj):
     with open(path_to_json, "w", encoding="utf-8") as json_file:
         json_file.write(json.dumps(json_obj, indent=4, sort_keys=True))
+
 
 class SavApp():
     """
@@ -276,9 +282,7 @@ class SavApp():
     app manage the links status by inserting update msg
     """
 
-    def __init__(self, agent, app_id, logger=None):
-        if not logger:
-            logger = get_logger(app_id)
+    def __init__(self, agent, app_id, logger):
         self.logger = logger
         self.status = True
         self.app_id = app_id
@@ -296,7 +300,7 @@ class SavApp():
     def check_status(self):
         raise NotImplementedError
 
-    def generate_sav_rules(self, fib_adds, fib_dels, bird_add,bird_dels, old_rules):
+    def generate_sav_rules(self, fib_adds, fib_dels, bird_add, bird_dels, old_rules):
         """
         generate sav rules based on the current information
         """
@@ -337,7 +341,6 @@ class SavApp():
 
     # def _bird_cmd(self, cmd):
     #     return birdc_cmd(self.logger, cmd)
-
 
 
 def birdc_cmd(logger, cmd, log_err=True):
@@ -449,8 +452,8 @@ def parse_kernel_fib():
             else:
                 prefix = netaddr.IPNetwork(row["Destination"])
                 ret[prefix] = row
-     #filter remove the default route
-    r4_default = netaddr.IPNetwork("0.0.0.0/0") 
+     # filter remove the default route
+    r4_default = netaddr.IPNetwork("0.0.0.0/0")
     r6_default = netaddr.IPNetwork("::/0")
     if r4_default in ret:
         del ret[r4_default]
@@ -567,8 +570,6 @@ def str_to_scope(input_str):
                 path.append(temp.pop(0))
             result.append(path)
     return result
-
-
 
 
 def sav_timer(logger):

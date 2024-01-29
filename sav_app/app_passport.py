@@ -15,6 +15,7 @@ import hmac
 from common.sav_common import *
 PASSPORT_ID = "passport"
 
+
 class PassportApp(SavApp):
     """
     SAV-APP Passport Implementation
@@ -24,16 +25,13 @@ class PassportApp(SavApp):
     it will use HTTP to warp the packet and handle the filtering logic by itself
     """
 
-    def __init__(self, agent, asn, router_id, name="passport_app", logger=None):
+    def __init__(self, agent, name="passport_app", logger=None):
         super(PassportApp, self).__init__(agent, name, logger)
-        self.pp_v4_dict = {}
         self.p = 10007
         self.g = 5
         self._private_key = random.randint(1, self.p - 1)
         self.public_key = (self.g ** self._private_key) % self.p
         self.initialized_peers = {}
-        self.asn = asn
-        self.router_id = router_id
         self.test_pkt_id = 0
         self._init_metric()
         self.relay_history = {}
@@ -45,7 +43,7 @@ class PassportApp(SavApp):
         }
 
     def get_public_key_dict(self, source_ip=""):
-        return {"asn": self.asn, "router_id": self.router_id,
+        return {"asn": self.agent.config['local_as'], "router_id": self.agent.config['router_id'],
                 "public_key": self.public_key}
 
     def update_metric(self, msg, key1, is_send, is_start, start_time=None):
@@ -85,7 +83,8 @@ class PassportApp(SavApp):
     def get_publish_msg(self):
         """get standard public key message"""
         my_key = self.get_public_key_dict()
-        msg = {"data": my_key, "origin": (self.asn, self.router_id)}
+        msg = {"data": my_key, "origin": (
+            self.agent.config['local_as'], self.agent.config['router_id'])}
         msg["path"] = [msg["origin"]]
         return msg
 
@@ -154,7 +153,7 @@ class PassportApp(SavApp):
         msg = input_msg["msg"]
         # self.logger.debug(msg)
         origin_asn, origin_ip = msg["origin"]
-        if origin_asn == self.asn:
+        if origin_asn == self.agent.config['local_as']:
             return
         if not origin_asn in self.initialized_peers:
             shared_key = (msg["data"]["public_key"] **
@@ -163,7 +162,7 @@ class PassportApp(SavApp):
                 "shared_key": shared_key, "ip": origin_ip}
             self.logger.debug(
                 f"initialize key success with {origin_asn} {len(self.initialized_peers.keys())} at {time.time()} {origin_ip}")
-        if [self.asn, self.router_id] in msg["path"]:
+        if [self.agent.config['local_as'], self.agent.config['router_id']] in msg["path"]:
             # terminate if already processed
             return
 
@@ -173,7 +172,8 @@ class PassportApp(SavApp):
                 continue
             relay_scope[peer_asn] = peer_ip
 
-        msg["path"].append([self.asn, self.router_id])
+        msg["path"].append([self.agent.config['local_as'],
+                           self.agent.config['router_id']])
         for peer_asn, peer_ip in relay_scope.items():
             if not peer_asn in self.relay_history:
                 self.relay_history[peer_asn] = {}
@@ -182,10 +182,10 @@ class PassportApp(SavApp):
                 # self.logger.debug(f"relaying to {peer_ip}")
                 self._send_to_remote(peer_ip, msg)
 
-    def fib_changed(self):
-        # always return empty list,since the passport needs to modify the packet directly
+    def generate_sav_rules(self, *args, **kwargs):
+        # always return empty list,since the passport needs to modify the packet directly instead of generating savrules
         self.init_key_publish()
-        return [], []
+        return {}, set()
 
     def _get_next_hop(self, target_ip):
         target_ip = netaddr.IPAddress(target_ip)
@@ -229,18 +229,19 @@ class PassportApp(SavApp):
         key = self.initialized_peers[next_hop_asn]["shared_key"]
         self.test_pkt_id += 1
         if msg is None:
-            msg = f"testing packet_{self.test_pkt_id} from asn: {self.asn}"
+            msg = f"testing packet_{self.test_pkt_id} from asn: {self.agent.config['local_as']}"
         # self.logger.debug(f"send packet {msg}")
-        data_for_mac = f"{self.router_id}{target_ip}{len(msg)}ipv4{msg}".encode(
+        data_for_mac = f"{self.agent.config['router_id']}{target_ip}{len(msg)}ipv4{msg}".encode(
         )
         mac = self.calculate_mac(data_for_mac, key)
         pkt = {
             "data": msg,
             "target_ip": target_ip,
-            "origin_ip": self.router_id,
+            "origin_ip": self.agent.config['router_id'],
             "dst_ip": next_hop_ip,
-            "src_ip": self.router_id,  # maybe incorrect,but we don't care
-            "src_asn": self.asn,
+            # maybe incorrect,but we don't care
+            "src_ip": self.agent.config['router_id'],
+            "src_asn": self.agent.config['local_as'],
             "mac": mac
         }
 

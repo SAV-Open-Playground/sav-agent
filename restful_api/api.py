@@ -23,7 +23,6 @@ from sav_app import RPDP_ID
 api_blueprint = Blueprint("api", __name__)
 
 
-
 @api_blueprint.route("/bird_bgp_upload/", methods=["POST", "GET"])
 def index():
     """
@@ -154,6 +153,7 @@ def save_sav_table():
     json_w(p, ret)
     return p
 
+
 @api_blueprint.route('/savop_quic/', methods=["POST"])
 def savop_quic():
     LOGGER.debug("enter savop_quic")
@@ -214,7 +214,6 @@ def long_nlri_test():
 
 @api_blueprint.route('/passport_key_exchange/', methods=['GET', 'POST'])
 def passport_key_exchange():
-    LOGGER.debug("enter passport_key_exchange")
     if SA.passport_app is None:
         LOGGER.error("passport app not detected")
         return None
@@ -273,7 +272,6 @@ def perf_test():
     except Exception as err:
         LOGGER.error(err)
     return {"code": "0000", "message": "msg received"}
-
 
 
 @api_blueprint.route('/refresh_proto/<string:active_app>/', methods=["POST", "GET"])

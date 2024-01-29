@@ -3,11 +3,11 @@
 @File    :   app_bar.py
 @Time    :   2023/07/24
 @Version :   0.1
-
 @Desc    :   the app_bar.py is responsible for BAR-SAV rule generation (when ROA and ASPA are available)
 """
 from common.sav_common import *
 BAR_ID = "bar"
+
 
 class BarApp(SavApp):
     """
@@ -23,20 +23,22 @@ class BarApp(SavApp):
         """
         TODO will wait until we have roa and aspa info
         """
-        while True:
-            self.roa_cache = self.agent.get_roa_info()
-            self.aspa_cache = get_aspa(self.logger)
+        for i in range(50):
+            roa_cache = self.agent.get_roa_info()
+            aspa_cache = self.agent.get_aspa_info()
             good = True
-            if len(self.roa_cache) == 0:
+            if len(roa_cache) == 0:
                 self.logger.warning("empty roa")
                 good = False
-            if len(self.aspa_cache) == 0:
+            if len(aspa_cache) == 0:
                 self.logger.warning("empty aspa")
                 good = False
             if good:
-                return
+                return roa_cache, aspa_cache
             else:
                 time.sleep(0.1)
+                self.logger.warning(
+                    f"{self.app_id} getting rkpi cache failed {i+1}, retrying")
 
     def _get_peer_as(self):
         """
@@ -52,12 +54,12 @@ class BarApp(SavApp):
                 result.add(meta["remote_as"])
         return result
 
-    def fib_changed(self):
+    def generate_sav_rules(self, fib_adds, fib_dels, bird_add, bird_dels, old_rules):
         """
-        Althgough ASPA and ROA is included, only BGP update(FIB change) will trigger BAR to generate rules
+        Although ASPA and ROA is included, only BGP update(FIB change) will trigger BAR to generate rules
         """
-        # get all custoer or lateral peer
-        return self.procedure_x()
+        # get all customer or lateral peer
+        return self.procedure_x(old_rules)
 
     def cal_cc_using_aspa(self):
         local_as = self.agent.config["local_as"]
@@ -75,32 +77,31 @@ class BarApp(SavApp):
         result = result[1:]  # remove loacal as
         return result
 
-    def procedure_x(self):
+    def procedure_x(self, old_rule_dict):
         """
         A description of Procedure X (one that makes use of only ASPA and ROA data):
         Step A: Compute the set of ASNs in the Customer's or Lateral Peer's customer cone using ASPA data.
         Step B: Compute from ROA data the set of prefixes authorized to be announced by the ASNs found in Step A. Keep only the unique prefixes. This set is the permissible prefix list for SAV for the interface in consideration.
         """
-        new_rules = set()
 
-        self._update_rpki_cache()
+        roa_cache, aspa_cache = self._update_rpki_cache()
         # find direct connected customer or peer
         links_data = self.agent.link_man.get_all_link_meta()
-        # self.logger.debug(links_data)
+        self.logger.debug(links_data)
         direct = {}
+        new_rules = {}
         # A:
         for link_name, link_meta in links_data.items():
-            if "bgp" in link_meta["link_type"]:
+            if link_meta["link_type"] in ["dsav", "bgp"]:  # dsav also implies as relationship
                 if link_meta["local_role"] in ["peer", "provider"]:
                     direct[link_meta["interface_name"]
                            ] = link_meta["remote_as"]
-            else:
-                # self.logger.debug(link_data)
-                pass
+        # self.logger.debug(f"direct:{direct}")
         # B:
         for interface, asn in direct.items():
-            allowed_prefix = get_p_by_asn(asn, self.roa_cache, self.aspa_cache)
+            allowed_prefix = get_p_by_asn(asn, roa_cache, aspa_cache)
             for p, origin_as in allowed_prefix.items():
                 rule = get_sav_rule(p, interface, self.app_id, origin_as)
-                new_rules.add(rule)
-        return rule_list_diff(self.rules, new_rules)
+                new_rules[get_key_from_sav_rule(rule)] = rule
+        self.logger.debug(f"new_rules:{new_rules}")
+        return rule_list_diff(old_rule_dict, new_rules)
