@@ -739,6 +739,7 @@ class RPDPApp(SavApp):
         # self.logger.debug(msg)
         log_dict = {"msg_cause": msg_cause,
                     "link_type": link_meta["link_type"],
+                    "link_name": link_meta["protocol_name"],
                     "msg_type": msg_type,
                     "add": adds,
                     "del": dels, }
@@ -754,7 +755,7 @@ class RPDPApp(SavApp):
         log_dict["src_ip"] = str(link_meta["remote_ip"])
         log_dict["dst_ip"] = str(link_meta["local_ip"])
         if msg_type == "origin":
-            log_dict["src_ip"], log_dict["dst_ip"] = log_dict["dst_ip"], log_dict["src_ip"]
+            # log_dict["src_ip"], log_dict["dst_ip"] = log_dict["dst_ip"], log_dict["src_ip"]
             log_dict["src_asn"], log_dict["dst_asn"] = log_dict["dst_asn"], log_dict["src_asn"]
             if msg_type == "SPA":
                 log_dict["add"] = msg['data']['add']
