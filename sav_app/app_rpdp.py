@@ -756,21 +756,22 @@ class RPDPApp(SavApp):
         log_dict["dst_ip"] = str(link_meta["local_ip"])
         if msg_cause == "origin":
             log_dict["src_ip"], log_dict["dst_ip"] = log_dict["dst_ip"], log_dict["src_ip"]
-            log_dict["src_asn"], log_dict["dst_asn"] = log_dict["dst_asn"], log_dict["src_asn"]
-            if msg_type == "SPA":
-                log_dict['dt'] = msg["created_dt"]
-                # for i in log_add:
-                # i["prefix"] = str(i["prefix"])
-                # for i in log_del:
-                # i["prefix"] = str(i["prefix"])
-            elif msg_type == "SPD":
-                pass
+            log_dict['dt'] = msg["created_dt"]
+            if link_meta["is_interior"]:
+                log_dict["src_asn"], log_dict["dst_asn"] = log_dict["dst_asn"], log_dict["src_asn"]
+            if msg_type == "SPD":
+                log_dict["spd_sn"] = msg["data"]["SN"]
+                del log_dict["add"]
+                del log_dict["del"]
         else:
             log_dict["pkt_id"] = msg["pkt_id"]
             log_dict['dt'] = msg["pkt_rec_dt"]
+            if msg_type == "SPD":
+                log_dict["spd_sn"] = msg["msg"]["SN"]
+                del log_dict["add"]
+                del log_dict["del"]
 
         log_str = f"{LOG_FOR_FRONT_KEY_WORD} {log_dict}"
-
         self.logger.info(log_str)
     # def recv_http_msg(self, msg):
     #     adds = []
@@ -1082,6 +1083,8 @@ class RPDPApp(SavApp):
                     data, link_meta["link_type"], self.app_id, timeout, False)
                 # self.logger.debug(msg)
                 self.agent.link_man.put_send_async(msg)
+                self._log_for_front(
+                    msg, "origin", link_meta, "SPD", None, None)
             except Exception as e:
                 self.logger.exception(e)
                 self.logger.error(e)
@@ -1116,6 +1119,8 @@ class RPDPApp(SavApp):
                     data, link_meta["link_type"], self.app_id, timeout, False)
                 # self.logger.debug(msg)
                 self.agent.link_man.put_send_async(msg)
+                self._log_for_front(
+                    msg, "origin", link_meta, "SPD", None, None)
             except Exception as e:
                 self.logger.exception(e)
                 self.logger.error(e)
@@ -1194,6 +1199,8 @@ class RPDPApp(SavApp):
             # elif sub_type == 2:
             #     self.logger.error("inter spd relay todo")
         # self.logger.debug(self.spd_data)
+        self._log_for_front(msg, "receive", link_meta, "SPD", None, None)
+        self._log_for_front(msg, "terminate", link_meta, "SPD", None, None)
         self._refresh_sav_rules()
 
     def _send_spa_origin_inter(self, link_name, link_meta, prefixes):
@@ -1296,8 +1303,8 @@ class RPDPApp(SavApp):
         # self.logger.debug(f"sent spa on {link_name} : {msg}")
         self.agent.link_man.update_link_kv(
             link_name, "initial_broadcast", True)
-        log_add = read_inter_spa_nlri_hex(spa_add, ip_version)
-        log_del = read_inter_spa_nlri_hex(spa_del, ip_version)
+        log_add = read_intra_spa_nlri_hex(spa_add, ip_version)
+        log_del = read_intra_spa_nlri_hex(spa_del, ip_version)
         for i in log_add:
             i["prefix"] = str(i["prefix"])
         for i in log_del:

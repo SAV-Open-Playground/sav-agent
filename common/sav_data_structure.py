@@ -365,7 +365,6 @@ def read_inter_spa_nlri_hex(data, ip_version):
         cur_pos += 1
         # router_id len is 4
         nlri["origin_asn"] = hex2int(data[cur_pos:cur_pos+4])
-        print(data[cur_pos:cur_pos+4])
         cur_pos += 4
         mask_len = prefix_len2len(data[cur_pos])
         prefix_hex = data[cur_pos:cur_pos+mask_len+1]
@@ -633,9 +632,8 @@ def process_src_kv(k, v, my_asn):
         print(k_temp)
         raise ValueError("unknown key")
     v["protocol_name"] = k_temp[1][1:]
-    if not k_temp[2].endswith("]"):
-        print(k_temp)
-        raise ValueError("unknown key")
+    while not k_temp[2].endswith("]"):
+        k_temp.remove(k_temp[2])
     v["time"] = k_temp[2][:-1]
     k_l = len(k_temp)
 
@@ -807,4 +805,7 @@ def parse_bird_show_route_all(data, my_asn):
             ret[table_name] = parse_prefix(table_data, my_asn)
     return ret
 
+
 # test_spa()
+test_data = "Table master4:\n0.0.0.0/0            unicast [savbgp_3_1 17:34:16.240 from 1.1.1.1] * (100) [i]\n\tvia 10.10.0.1 on eth0\n\tType: BGP univ\n\tBGP.origin: IGP\n\tBGP.as_path: \n\tBGP.next_hop: 10.10.0.1\n\tBGP.local_pref: 100\n                     unicast [savbgp_3_2 17:34:16.247 from 1.1.2.1] (100) [i]\n\tvia 10.10.0.1 on eth0\n\tType: BGP univ\n\tBGP.origin: IGP\n\tBGP.as_path: \n\tBGP.next_hop: 10.10.0.1\n\tBGP.local_pref: 100\n                     unicast [savbgp_3_6 17:34:16.242] (100) [AS65502i]\n\tvia 1.1.7.2 on eth_6\n\tType: BGP univ\n\tBGP.origin: IGP\n\tBGP.as_path: 65502\n\tBGP.next_hop: 1.1.7.2\n\tBGP.local_pref: 100\n                     unicast [kernel1 17:34:15.378] (10)\n\tvia 10.10.0.1 on eth0\n\tType: inherit univ\n\tKernel.source: 3\n\tKernel.metric: 0\n1.1.7.0/24           unicast [direct1 17:34:15.378] * (240)\n\tdev eth_6\n\tType: device univ\n                     unicast [savbgp_3_6 17:34:16.220] (100) [AS65502i]\n\tvia 1.1.7.2 on eth_6\n\tType: BGP univ\n\tBGP.origin: IGP\n\tBGP.as_path: 65502\n\tBGP.next_hop: 1.1.7.2\n\tBGP.local_pref: 100\n1.1.1.0/24           unicast [direct1 17:34:15.378] * (240)\n\tdev eth_1\n\tType: device univ\n                     unicast [savbgp_3_1 17:34:16.242] (100) [i]\n\tvia 1.1.1.1 on eth_1\n\tType: BGP univ\n\tBGP.origin: IGP\n\tBGP.as_path: \n\tBGP.next_hop: 1.1.1.1\n\tBGP.local_pref: 100\n1.1.2.0/24           unicast [direct1 17:34:15.378] * (240)\n\tdev eth_2\n\tType: device univ\n                     unicast [savbgp_3_2 17:34:16.247] (100) [i]\n\tvia 1.1.2.1 on eth_2\n\tType: BGP univ\n\tBGP.origin: IGP\n\tBGP.as_path: \n\tBGP.next_hop: 1.1.2.1\n\tBGP.local_pref: 100\n1.1.3.0/24           unicast [savbgp_3_6 17:34:16.220] * (100) [AS65502i]\n\tvia 1.1.7.2 on eth_6\n\tType: BGP univ\n\tBGP.origin: IGP\n\tBGP.as_path: 65502\n\tBGP.next_hop: 1.1.7.2\n\tBGP.local_pref: 100\n1.1.4.0/24           unicast [savbgp_3_6 17:34:16.220] * (100) [AS65502i]\n\tvia 1.1.7.2 on eth_6\n\tType: BGP univ\n\tBGP.origin: IGP\n\tBGP.as_path: 65502\n\tBGP.next_hop: 1.1.7.2\n\tBGP.local_pref: 100\n111.192.6.0/24       unicast [savbgp_3_6 17:34:16.220] * (100) [AS65502i]\n\tvia 1.1.7.2 on eth_6\n\tType: BGP univ\n\tBGP.origin: IGP\n\tBGP.as_path: 65502\n\tBGP.next_hop: 1.1.7.2\n\tBGP.local_pref: 100\n111.192.1.0/24       unicast [savbgp_3_1 17:34:16.242] * (100) [i]\n\tvia 1.1.1.1 on eth_1\n\tType: BGP univ\n\tBGP.origin: IGP\n\tBGP.as_path: \n\tBGP.next_hop: 1.1.1.1\n\tBGP.local_pref: 100\n111.192.2.0/25       unicast [savbgp_3_2 17:34:16.247] * (100) [i]\n\tvia 1.1.2.1 on eth_2\n\tType: BGP univ\n\tBGP.origin: IGP\n\tBGP.as_path: \n\tBGP.next_hop: 1.1.2.1\n\tBGP.local_pref: 100\n111.192.3.0/24       blackhole [static1 17:34:15.377] * (200)\n\tType: static univ\n111.192.4.0/24       unicast [savbgp_3_6 17:34:16.226] * (100) [AS65502i]\n\tvia 1.1.7.2 on eth_6\n\tType: BGP univ\n\tBGP.origin: IGP\n\tBGP.as_path: 65502\n\tBGP.next_hop: 1.1.7.2\n\tBGP.local_pref: 100\n111.192.5.0/24       unicast [savbgp_3_6 17:34:16.249] * (100) [AS65502i]\n\tvia 1.1.7.2 on eth_6\n\tType: BGP univ\n\tBGP.origin: IGP\n\tBGP.as_path: 65502\n\tBGP.next_hop: 1.1.7.2\n\tBGP.local_pref: 100\n"
+parse_bird_show_route_all(test_data, 65503)

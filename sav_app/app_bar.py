@@ -87,11 +87,12 @@ class BarApp(SavApp):
         roa_cache, aspa_cache = self._update_rpki_cache()
         # find direct connected customer or peer
         links_data = self.agent.link_man.get_all_link_meta()
-        self.logger.debug(links_data)
         direct = {}
         new_rules = {}
         # A:
         for link_name, link_meta in links_data.items():
+            if not link_meta["is_interior"]:
+                continue
             if link_meta["link_type"] in ["dsav", "bgp"]:  # dsav also implies as relationship
                 if link_meta["local_role"] in ["peer", "provider"]:
                     direct[link_meta["interface_name"]

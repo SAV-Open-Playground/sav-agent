@@ -11,6 +11,7 @@ import copy
 from common.sav_common import *
 from sav_app import *
 
+
 class BirdCMDManager():
     """manage the execution of bird command, avoid concurrency issue"""
 
@@ -19,6 +20,7 @@ class BirdCMDManager():
         self.cmd_list = []
         self.is_running = False
         self.bird_fib = {"check_time": None, "update_time": None, "fib": {}}
+
     def is_bird_ready(self):
         """
         return True if bird is ready
@@ -116,7 +118,7 @@ class BirdCMDManager():
             # self.logger.debug(json.dumps({key1: raw_input[key1]}, indent=2))
         return raw_input
 
-    def update_fib(self, my_asn,log_err=True):
+    def update_fib(self, my_asn, log_err=True):
         """
         return if changed and a dict of changes
         """
@@ -124,7 +126,7 @@ class BirdCMDManager():
         new_data = self._parse_bird_fib(log_err, my_asn)
         # self.logger.debug(f"_parse_bird_fib finished")
         something_updated = False
-        adds,dels = self._diff_fib(self.bird_fib["fib"], new_data)
+        adds, dels = self._diff_fib(self.bird_fib["fib"], new_data)
         if len(adds) + len(dels) > 0:
             something_updated = True
             self.bird_fib["fib"] = new_data
@@ -132,10 +134,11 @@ class BirdCMDManager():
             self.logger.debug(f"BIRD something_updated")
             self.bird_fib["update_time"] = self.bird_fib["check_time"]
         return something_updated, adds, dels
+
     def _diff_fib(self, old_fib, new_fib):
         """
         return list of added and deleted rows in dict format
-        
+
         """
         # self.logger.debug(f"old fib:{old_fib}, new_fib:{new_fib}")
         dels = {}
@@ -149,6 +152,7 @@ class BirdCMDManager():
             if not (new_fib.get(prefix, None) == old_fib.get(prefix, None)):
                 dels[prefix] = old_fib[prefix]
         return adds, dels
+
     def get_fib(self):
         return copy.deepcopy(self.bird_fib["fib"])
 
@@ -226,6 +230,7 @@ class BirdCMDManager():
         self.logger.error("unable to tell")
         self.logger.error(src)
         self.logger.error(prefix)
+
     def _parse_bird_fib(self, log_err, my_asn):
         """
         using birdc show all to get bird fib,
@@ -491,7 +496,7 @@ class LinkManager(InfoManager):
         will return response
         """
         raise NotImplementedError
-    
+
     def read_brd_cfg(self, my_asn):
         """
         read link meta from bird config, call if needed
@@ -516,9 +521,9 @@ class LinkManager(InfoManager):
                     "as4_session": True,
                     "protocol_name": proto_name,
                     "status": True,  # faster
-                    "interface_name":f"eth_{proto_name.split('_')[2]}"
+                    "interface_name": f"eth_{proto_name.split('_')[2]}"
                 }
-                
+
                 if "sav_inter" in l:
                     meta["link_type"] = "dsav"
                 elif "basic" in l:
@@ -574,6 +579,7 @@ class LinkManager(InfoManager):
             case "dsav":
                 self.bird_cmd_buff.put(msg["data"])
                 try:
+                    msg["call_agent_msg_dt"] = time.time()
                     self.agent.bird_man.bird_cmd("call_agent")
                     sent = True
                 except Exception as e:
@@ -598,6 +604,9 @@ class LinkManager(InfoManager):
         if not sent:
             self.logger.warning(f"send failed {msg}")
             self.send_buff.append(msg)
+        else:
+            pass
+            # self.logger.debug(f"send success {msg}")
 
     def _send_http_post(self, msg):
         if msg["timeout"] == 0:
@@ -661,6 +670,7 @@ class LinkManager(InfoManager):
             else:
                 self.logger.debug(f"ignoring no sav link: {link_name}")
         return results
+
     def get_all_up(self, include_native_bgp=False):
         """
         return a list of all up link_names ,use get(link_name) to get link object

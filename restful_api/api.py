@@ -215,7 +215,7 @@ def long_nlri_test():
 @api_blueprint.route('/passport_key_exchange/', methods=['GET', 'POST'])
 def passport_key_exchange():
     if SA.passport_app is None:
-        LOGGER.error("passport app not detected")
+        LOGGER.warning("passport app not detected")
         return None
     msg = {
         "msg_type": "passport_key_exchange",

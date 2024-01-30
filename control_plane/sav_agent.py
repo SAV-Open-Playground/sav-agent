@@ -144,6 +144,7 @@ class SavAgent():
             "roa_info": {},
             "links": {},  # link manager"s data
             "fib": [],  # system"s fib table
+            "adj_in": {}  # bird"s adj-in table
         }
         self.data["metric"] = init_protocol_metric()
         self.data["metric"]["first_dt"] = first_dt
@@ -216,18 +217,6 @@ class SavAgent():
                 self.passport_app = sav_apps[app_id]
         self.data["apps"] = sav_apps
         self.data["active_app"] = self.data["apps"][self.config["enabled_sav_app"]]
-        # elif app_id == "BAR":
-        #     app_instance = BarApp(self, logger=self.logger)
-        #     self.add_app(app_instance)
-        # elif app_id == "Passport":
-        #     app_instance = PassportApp(
-        #         self, self.config["local_as"], self.config["router_id"], logger=self.logger)
-        #     self.passport_app = app_instance
-        #     self.add_app(app_instance)
-
-        # else:
-        #     self.logger.error(msg=f"unknown app name: {app_id}")
-
         self.logger.debug(
             msg=f"initialized apps: {list(self.data['apps'].keys())},using {self.data['active_app'].app_id}")
 
@@ -387,6 +376,18 @@ class SavAgent():
 
         self._init_apps()
         self.logger.debug(f"initial wait: {time.time()-t0:.4f} seconds")
+
+    def get_adj_in(self, protocol_name):
+        adj_info = copy.deepcopy(self.data["adj_in"][protocol_name])
+        return
+
+    def _refresh_adj_in(self):
+        for l_name, l_meta in self.link_man.get_all_link_meta().items():
+            if l_meta["link_type"] in ["dsav"]:
+                proto_name = l_meta["protocol_name"]
+                ret = birdc_get_import(
+                    self.logger, proto_name, f"ipv{self.config['auto_ip_version']}")
+                self.data["adj_in"][proto_name] = ret
 
     def is_all_msgs_finished(self):
         """
@@ -660,7 +661,7 @@ class SavAgent():
         is_bird_fib_changed, bird_adds, bird_dels = self.bird_man.update_fib(
             self.config["local_as"])
         is_kernel_fib_change = ((len(fib_adds) != 0) or (len(fib_dels) != 0))
-
+        self._refresh_adj_in()
         return is_bird_fib_changed, is_kernel_fib_change, fib_adds, fib_dels, bird_adds, bird_dels
 
     def _process_native_bgp_update(self):
