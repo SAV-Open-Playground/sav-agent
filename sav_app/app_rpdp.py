@@ -1372,7 +1372,7 @@ class RPDPApp(SavApp):
                         pass
         return new_rules
 
-    def _refresh_sav_rules(self, reset=False):
+    def _refresh_sav_rules(self, reset=False) -> None:
         """
         based on current spd and spa data, generate new sav rules
         and update the sav table in agent

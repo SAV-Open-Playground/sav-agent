@@ -14,6 +14,7 @@ from common.logger import LOGGER
 from control_plane.managers import *
 from sav_app import *
 from data_plane.data_plane_enable import interceptor
+from pyroute2 import IPRoute
 
 
 def add_path(given_asn_path, data_dict):
@@ -418,6 +419,25 @@ class SavAgent():
             msgs.append(msg)
         return bgp_update_msg, msgs
 
+    def _start_fib_monitor(self) -> None:
+        """
+        start a thread to monitor the fib change
+        """
+
+        with IPRoute() as ipr:
+            ipr.bind()
+            self.logger.debug("fib monitor started")
+            while True:
+                found = False
+                for event in ipr.get():
+                    if event["event"] in ["RTM_NEWROUTE", "RTM_DELROUTE", "RTM_NEWNEIGH"]:
+                        found = True
+                    else:
+                        self.logger.warning(event)
+                if found:
+                    self.logger.debug("fib changed")
+                    self._refresh_fibs_notify_apps()
+
     def _start_main(self):
         """
         start a thread to check the cmd queue and process each cmd
@@ -664,9 +684,16 @@ class SavAgent():
         self._refresh_adj_in()
         return is_bird_fib_changed, is_kernel_fib_change, fib_adds, fib_dels, bird_adds, bird_dels
 
-    def _process_native_bgp_update(self):
+    def _process_native_bgp_update(self) -> None:
         """
         notify apps about native bgp update
+        """
+        self.logger.debug("processing native bgp update")
+        self._refresh_fibs_notify_apps()
+
+    def _refresh_fibs_notify_apps(self) -> None:
+        """
+        refresh both fibs and notify apps if fibs changed
         """
         bird_changed, kernel_changed, fib_adds, fib_dels, bird_adds, bird_dels = self._refresh_both_fib()
         # now we have the latest fib in kernel and bird
@@ -687,6 +714,8 @@ class SavAgent():
         if reset is True, it will clear all existing rules and re-generate all rules(the fib_adds and fib_dels will be ignored)
         if app_list is None, all apps will be notified.
         """
+        self.logger.debug(f"fib_dels:{fib_dels}")
+        self.logger.debug(f"bird_dels:{bird_dels}")
         if app_list is None:
             app_list = self.get_all_app_ids()
         self.logger.debug(f"app list:{app_list}")
@@ -1006,7 +1035,7 @@ class SavAgent():
             self.logger.error(e)
             return sent
 
-    def _process_msg(self, input_msg):
+    def _process_msg(self, input_msg) -> None:
         input_msg["schedule_dt"] = time.time()
         t0 = input_msg["schedule_dt"]
         # self.logger.debug(input_msg)
@@ -1086,7 +1115,7 @@ class SavAgent():
         self._update_sav_rule_nums()
         # self.logger.debug(f"finished")
 
-    def _update_sav_rule_nums(self):
+    def _update_sav_rule_nums(self) -> None:
         """
         update sav rule nums and print to log
         """
@@ -1235,6 +1264,8 @@ class SavAgent():
         self._thread_pool.append(threading.Thread(target=self.link_man._run))
         self._thread_pool.append(threading.Thread(
             target=self._interval_trigger))
+        self._thread_pool.append(threading.Thread(
+            target=self._start_fib_monitor))
         for t in self._thread_pool:
             t.daemon = True
             t.start()
