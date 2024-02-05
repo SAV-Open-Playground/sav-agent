@@ -735,8 +735,8 @@ class RPDPApp(SavApp):
             return
         if not msg_type in ["SPA", "SPD"]:
             self.logger.error(f"unknown msg_type {msg_type}")
-        self.logger.debug(link_meta)
-        self.logger.debug(msg)
+        # self.logger.debug(link_meta)
+        # self.logger.debug(msg)
         log_dict = {"msg_cause": msg_cause,
                     "link_type": link_meta["link_type"],
                     "link_name": link_meta["protocol_name"],
@@ -1047,7 +1047,7 @@ class RPDPApp(SavApp):
             ret += f"{peer_asn}"
         return ret
 
-    def send_spd(self, remote_links, as_neighbors, my_as_prefixes, my_asn, my_router_id):
+    def send_spd(self, remote_links, as_neighbors, my_as_prefixes, my_asn, my_router_id) -> None:
         """
         send inter-as spds on remote_links
         send intra-as spds on my_as_prefixes
@@ -1063,7 +1063,6 @@ class RPDPApp(SavApp):
         is_interior = True
         for link_name, link_meta in remote_links.items():
             # self.logger.debug(link_meta)
-
             ip_version = link_meta["remote_ip"].version
             peer_as = link_meta["remote_as"]
             if not peer_as in as_neighbors:
@@ -1092,8 +1091,10 @@ class RPDPApp(SavApp):
         intra_to_go_data = {}
         # aggregate the dst ip by next hop ip
         for prefix, prefix_data in my_as_prefixes.items():
-            # self.logger.debug(f"prefix: {prefix}, prefix_data: {prefix_data}")
-            dst_ip = prefix.network + 1
+            self.logger.debug(f"prefix: {prefix}, prefix_data: {prefix_data}")
+            for i in prefix.iter_hosts():
+                dst_ip = i
+                break
             ip_version = dst_ip.version
             try:
                 self.agent.link_man.get_by_local_ip(dst_ip)
@@ -1385,8 +1386,8 @@ class RPDPApp(SavApp):
 
         spa_data = self.spa_data["intra"]
         spd_data = self.spd_data["intra"]
-        # self.logger.debug(f"spa_data: {spa_data}")
-        # self.logger.debug(f"spd_data: {spd_data}")
+        # self.logger.debug(f"INTRA spa_data: {spa_data}")
+        # self.logger.debug(f"INTRA spd_data: {spd_data}")
         new_intra_rules = self._gen_rules(spa_data, spd_data, False)
         spa_data = self.spa_data["inter"]
         spd_data = self.spd_data["inter"]
