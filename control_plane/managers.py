@@ -458,10 +458,10 @@ class LinkManager(InfoManager):
         # self.logger.debug(self.data["links"])
         raise ValueError(f"local_ip {local_ip} not found")
 
-    def update_config(self, config):
+    def update_config(self, config) -> None:
         self.config = config
 
-    def put_send_async(self, msg):
+    def put_send_async(self, msg) -> None:
         """
         supported type : ["http-post","grpc","quic","dsav"]
         timeout is in seconds, if set to 0, then will keep trying until sent
@@ -497,7 +497,7 @@ class LinkManager(InfoManager):
         """
         raise NotImplementedError
 
-    def read_brd_cfg(self, my_asn):
+    def read_brd_cfg(self, my_asn) -> None:
         """
         read link meta from bird config, call if needed
         """
@@ -570,7 +570,7 @@ class LinkManager(InfoManager):
         d["end"] = msg["finished_dt"]
         return d
 
-    def send_msg(self, msg):
+    def send_msg(self, msg) -> None:
         # self.logger.debug(msg)
         msg["schedule_dt"] = time.time()
         match msg["msg_type"]:
@@ -656,7 +656,7 @@ class LinkManager(InfoManager):
         self.data[link_name] = meta_dict
         self.logger.debug(f"link updated: {self.data[link_name]} ")
 
-    def rpdp_links(self, link_map):
+    def get_rpdp_links(self, link_map):
         """return a list of link_name and link_data tuple that are rpdp links
         """
         results = []
@@ -687,7 +687,7 @@ class LinkManager(InfoManager):
                     temp.append(link_name)
         return temp
 
-    def get_all_up_type(self, is_interior, include_native_bgp=False):
+    def get_all_up_type(self, is_interior, include_native_bgp=False) -> list:
         """
         return a list of all up link_names with the correct type (is_interior or not),
         use get(link_name) to get link object

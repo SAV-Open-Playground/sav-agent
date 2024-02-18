@@ -426,7 +426,7 @@ def birdc_get_protos_by(logger, key, value):
     return result
 
 
-def parse_kernel_fib():
+def parse_kernel_fib() -> dict:
     """
     execute and parse the output of "route -n -F" command
     """

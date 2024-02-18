@@ -14,7 +14,7 @@ from common.logger import LOGGER
 from control_plane.managers import *
 from sav_app import *
 from data_plane.data_plane_enable import interceptor
-from pyroute2 import IPRoute
+from pyroute2 import IPRoute, IPDB
 
 
 def add_path(given_asn_path, data_dict):
@@ -276,6 +276,45 @@ class SavAgent():
         """
         return copy.deepcopy(self.data["roa_info"])
 
+    def _get_route_pyroute(self, route, ifas):
+        dst = route.get_attr('RTA_DST')
+        oif = route.get_attr('RTA_OIF')
+        gateway = route.get_attr('RTA_GATEWAY')
+        if dst is None:
+            raise ValueError("dst is None")
+        p = f"{dst}/{route.get('dst_len')}"
+        p = netaddr.IPNetwork(p)
+        ret = {"Destination": f"{p.ip}",
+               "Genmask": f"{p.netmask}",
+               "Gateway": gateway,
+               'Metric': route.get_attr("RTA_PRIORITY"),
+               }
+        if oif is None:
+            ret["Iface"] = "None"
+        else:
+            ret["Iface"] = f"{ifas[oif].ifname}"
+        return p, ret
+
+    def parse_kernel_fib3(self) -> dict:
+        try:
+            routes = IPRoute().get_routes()
+            ifas = IPDB().interfaces
+            ret = {}
+            for route in routes:
+                # self.logger.debug(route)
+                # self.logger.debug(type(route))
+                # self.logger.debug(dir(route))
+                if route.get_attr('RTA_DST') is None:
+                    # or route.get_attr('RTA_GATEWAY') is None:
+                    continue
+                k, v = self._get_route_pyroute(route, ifas)
+                ret[k] = v
+
+            return ret
+        except Exception as e:
+            self.logger.exception(e)
+            self.logger.error(e)
+            return {}
     def _refresh_kernel_fib(self, filter_base=True):
         """
         update kernel fib using cmd
@@ -283,6 +322,11 @@ class SavAgent():
         return adds, dels
         """
         new_ = parse_kernel_fib()
+        # for k, v in new_.items():
+        #     self.logger.warn(f"{k}:{v}")
+        # for k, v in self.parse_kernel_fib3().items():
+        #     self.logger.warn(f"{k}:{v}")
+        # new_ = self.parse_kernel_fib3()
         if filter_base:
             remove_prefixes = self.ignore_prefixes
             temp = {}
@@ -345,6 +389,8 @@ class SavAgent():
         if self.data["metric"]["is_fib_stable"]:
             # pass
             self.bird_man.update_fib(self.config["local_as"])
+        self.logger.debug(f"adds:{adds}")
+        self.logger.debug(f"dels:{dels}")
         return adds, dels
 
     def _initial_wait(self):
@@ -423,7 +469,6 @@ class SavAgent():
         """
         start a thread to monitor the fib change
         """
-
         with IPRoute() as ipr:
             ipr.bind()
             self.logger.debug("fib monitor started")
@@ -432,6 +477,7 @@ class SavAgent():
                 for event in ipr.get():
                     if event["event"] in ["RTM_NEWROUTE", "RTM_DELROUTE", "RTM_NEWNEIGH"]:
                         found = True
+                        self.logger.debug(event)
                     else:
                         self.logger.warning(event)
                 if found:
@@ -1258,7 +1304,7 @@ class SavAgent():
                                 f"unknown event:{event}, skipping")
             time.sleep(0.5)
 
-    def _start(self):
+    def _start(self) -> None:
         self._thread_pool = []
         self._thread_pool.append(threading.Thread(target=self._start_main))
         self._thread_pool.append(threading.Thread(target=self.link_man._run))
@@ -1269,3 +1315,4 @@ class SavAgent():
         for t in self._thread_pool:
             t.daemon = True
             t.start()
+        # self._start_fib_monitor()
