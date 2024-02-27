@@ -16,7 +16,7 @@ from common.sav_common import get_host_interface_list
 from common.logger import LOGGER as logger
 
 SAV_CHAIN = "SAVAGENT"
-CURRENT_DIR = os.path.dirname(os.path.realpath(__file__))
+CURRENT_DIR = "/root/savop/logs"
 
 
 class IPTableManager():
@@ -78,12 +78,14 @@ class IPTableManager():
         store_init_filer_talbes_commmand = f"iptables-save -t filter > {CURRENT_DIR}/ip4tables_filter_rule.txt"
         command_status = self._command_executor(command=store_init_filer_talbes_commmand)
         filter_rules = ""
+        container_id = os.environ.get("HOSTNAME")
         if active_app not in ["EFP-uRPF-Algorithm-A_app", "EFP-uRPF-Algorithm-B_app"]:
             for r in list(rules.values()):
                 ip_addr, prefixlen, interface_name = str(r["prefix"].ip), r["prefix"].prefixlen, set((r["interface_name"],))
                 for interface in interface_set - interface_name:
+                    log_line = f'-A SAVAGENT -s {ip_addr}/{prefixlen} -i {interface} -j LOG --log-prefix \"IPTABLES {container_id} DROP: \" --log-level 7' + "\n"
                     line = f"-A SAVAGENT -s {ip_addr}/{prefixlen} -i {interface} -j DROP"
-                    filter_rules = filter_rules + line + "\n"
+                    filter_rules = filter_rules + log_line  + line + "\n"
             with open(f"{CURRENT_DIR}/ip4tables_filter_rule.txt", "r") as f:
                 lines = f.readlines()[:-2]
             content = ""
@@ -122,12 +124,14 @@ class IPTableManager():
         store_init_filer_talbes_commmand = f"ip6tables-save -t filter > {CURRENT_DIR}/ip6tables_filter_rule.txt"
         command_status = self._command_executor(command=store_init_filer_talbes_commmand)
         filter_rules = ""
+        container_id = os.environ.get("HOSTNAME")
         if active_app not in ["EFP-uRPF-Algorithm-A_app", "EFP-uRPF-Algorithm-B_app"]:
             for r in list(rules.values()):
                 ip_addr, prefixlen, interface_name = str(r["prefix"].ip), r["prefix"].prefixlen, set((r["interface_name"],))
                 for interface in interface_set - interface_name:
+                    log_line = f"-A SAVAGENT -s {ip_addr}/{prefixlen} -i {interface} -j LOG --log-prefix \"IPTABLES {container_id} DROP: \"" + "\n"
                     line = f"-A SAVAGENT -s {ip_addr}/{prefixlen} -i {interface} -j DROP"
-                    filter_rules = filter_rules + line + "\n"
+                    filter_rules = filter_rules + log_line  + line + "\n"
             with open(f"{CURRENT_DIR}/ip6tables_filter_rule.txt", "r") as f:
                 lines = f.readlines()[:-2]
             content = ""
