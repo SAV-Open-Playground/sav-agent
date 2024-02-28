@@ -153,6 +153,16 @@ class Bot:
             return {}
         return json.load(open(file_path, "r", encoding="utf-8"))
 
+    def _add_prefix(self, prefixes, interface="eth_veth") -> None:
+        run_cmd(f"ip link del {interface}")
+        run_cmd(f"ip link add {interface} type veth")
+        for p in prefixes:
+            p = netaddr.IPNetwork(p)
+            ip = p[1]
+            run_cmd(f"ip addr add {ip}/{p.prefixlen} dev {interface}")
+        run_cmd(f"ip link set {interface} up")
+
+
     def stop_server(self, action):
         signal = self._read_json(self.signal_path)
         exec_result = self.exec_result
@@ -200,6 +210,8 @@ class Bot:
         #     self.logger.error(f"unknown source {source}")
             # raise ValueError("unknown source")
         self._write_json(self.sa_config_path, sav_agent_config)
+        if sav_agent_config["prefix_method"] == "independent_interface":
+            self._add_prefix(sav_agent_config["prefixes"].keys())
         exec_result.update({"command": f'{signal["command"]}_{time.time()}',
                             "execute_start_time": f"{self._get_current_datetime_str()}",
                             "cmd_exe_dt": time.time(),
