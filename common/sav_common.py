@@ -452,7 +452,7 @@ def parse_kernel_fib() -> dict:
             else:
                 prefix = netaddr.IPNetwork(row["Destination"])
                 ret[prefix] = row
-     # filter remove the default route
+    # filter remove the default route
     r4_default = netaddr.IPNetwork("0.0.0.0/0")
     r6_default = netaddr.IPNetwork("::/0")
     if r4_default in ret:

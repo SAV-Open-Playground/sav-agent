@@ -16,7 +16,7 @@ from common.sav_common import get_host_interface_list
 from common.logger import LOGGER as logger
 
 SAV_CHAIN = "SAVAGENT"
-CURRENT_DIR = "/root/savop/logs"
+LOG_DIR = "/root/savop/logs"
 
 
 class IPTableManager():
@@ -75,7 +75,7 @@ class IPTableManager():
             logger.error(f"flush ip4tables failed")
         interface_set = set(get_host_interface_list())
         # store iptables
-        store_init_filer_talbes_commmand = f"iptables-save -t filter > {CURRENT_DIR}/ip4tables_filter_rule.txt"
+        store_init_filer_talbes_commmand = f"iptables-save -t filter > {LOG_DIR}/ip4tables_filter_rule.txt"
         command_status = self._command_executor(command=store_init_filer_talbes_commmand)
         filter_rules = ""
         container_id = os.environ.get("HOSTNAME")
@@ -86,15 +86,15 @@ class IPTableManager():
                     log_line = f'-A SAVAGENT -s {ip_addr}/{prefixlen} -i {interface} -j LOG --log-prefix \"IPTABLES {container_id} DROP: \" --log-level 7' + "\n"
                     line = f"-A SAVAGENT -s {ip_addr}/{prefixlen} -i {interface} -j DROP"
                     filter_rules = filter_rules + log_line  + line + "\n"
-            with open(f"{CURRENT_DIR}/ip4tables_filter_rule.txt", "r") as f:
+            with open(f"{LOG_DIR}/ip4tables_filter_rule.txt", "r") as f:
                 lines = f.readlines()[:-2]
             content = ""
             for line in lines:
                 content = content + line
             content = content + filter_rules + "COMMIT\n"
-            with open(f"{CURRENT_DIR}/ip4tables_filter_rule.txt", 'w') as f:
+            with open(f"{LOG_DIR}/ip4tables_filter_rule.txt", 'w') as f:
                 f.write(content)
-            apply_filer_talbes_commmand = f"iptables-restore < {CURRENT_DIR}/ip4tables_filter_rule.txt"
+            apply_filer_talbes_commmand = f"iptables-restore < {LOG_DIR}/ip4tables_filter_rule.txt"
             command_status = self._command_executor(command=apply_filer_talbes_commmand)
         # using white list mode for EFP-uRPF
         elif active_app in ["EFP-uRPF-Algorithm-A_app", "EFP-uRPF-Algorithm-B_app"]:
@@ -104,15 +104,15 @@ class IPTableManager():
                 filter_rules = filter_rules + line + "\n"
             line = f"-A SAVAGENT -p tcp -j DROP"
             filter_rules = filter_rules + line + "\n"
-            with open(f"{CURRENT_DIR}/ip4tables_filter_rule.txt", "r") as f:
+            with open(f"{LOG_DIR}/ip4tables_filter_rule.txt", "r") as f:
                 lines = f.readlines()[:-2]
             content = ""
             for line in lines:
                 content = content + line
             content = content + filter_rules + "COMMIT\n"
-            with open(f"{CURRENT_DIR}/ip4tables_filter_rule.txt", 'w') as f:
+            with open(f"{LOG_DIR}/ip4tables_filter_rule.txt", 'w') as f:
                 f.write(content)
-            apply_filer_talbes_commmand = f"iptables-restore < {CURRENT_DIR}/ip4tables_filter_rule.txt"
+            apply_filer_talbes_commmand = f"iptables-restore < {LOG_DIR}/ip4tables_filter_rule.txt"
             command_status = self._command_executor(command=apply_filer_talbes_commmand)
 
     def _enable_ipv6(self, rules, active_app):
@@ -121,7 +121,7 @@ class IPTableManager():
             logger.error(f"flush ip6tables failed")
         interface_set = set(get_host_interface_list())
         # store iptables
-        store_init_filer_talbes_commmand = f"ip6tables-save -t filter > {CURRENT_DIR}/ip6tables_filter_rule.txt"
+        store_init_filer_talbes_commmand = f"ip6tables-save -t filter > {LOG_DIR}/ip6tables_filter_rule.txt"
         command_status = self._command_executor(command=store_init_filer_talbes_commmand)
         filter_rules = ""
         container_id = os.environ.get("HOSTNAME")
@@ -132,15 +132,15 @@ class IPTableManager():
                     log_line = f"-A SAVAGENT -s {ip_addr}/{prefixlen} -i {interface} -j LOG --log-prefix \"IPTABLES {container_id} DROP: \"" + "\n"
                     line = f"-A SAVAGENT -s {ip_addr}/{prefixlen} -i {interface} -j DROP"
                     filter_rules = filter_rules + log_line  + line + "\n"
-            with open(f"{CURRENT_DIR}/ip6tables_filter_rule.txt", "r") as f:
+            with open(f"{LOG_DIR}/ip6tables_filter_rule.txt", "r") as f:
                 lines = f.readlines()[:-2]
             content = ""
             for line in lines:
                 content = content + line
             content = content + filter_rules + "COMMIT\n"
-            with open(f"{CURRENT_DIR}/ip6tables_filter_rule.txt", 'w') as f:
+            with open(f"{LOG_DIR}/ip6tables_filter_rule.txt", 'w') as f:
                 f.write(content)
-            apply_filer_talbes_commmand = f"ip6tables-restore < {CURRENT_DIR}/ip6tables_filter_rule.txt"
+            apply_filer_talbes_commmand = f"ip6tables-restore < {LOG_DIR}/ip6tables_filter_rule.txt"
             command_status = self._command_executor(command=apply_filer_talbes_commmand)
         # using white list mode for EFP-uRPF
         elif active_app in ["EFP-uRPF-Algorithm-A_app", "EFP-uRPF-Algorithm-B_app"]:
@@ -150,15 +150,15 @@ class IPTableManager():
                 filter_rules = filter_rules + line + "\n"
             line = f"-A SAVAGENT -p tcp -j DROP"
             filter_rules = filter_rules + line + "\n"
-            with open(f"{CURRENT_DIR}/ip6tables_filter_rule.txt", "r") as f:
+            with open(f"{LOG_DIR}/ip6tables_filter_rule.txt", "r") as f:
                 lines = f.readlines()[:-2]
             content = ""
             for line in lines:
                 content = content + line
             content = content + filter_rules + "COMMIT\n"
-            with open(f"{CURRENT_DIR}/ip6tables_filter_rule.txt", 'w') as f:
+            with open(f"{LOG_DIR}/ip6tables_filter_rule.txt", 'w') as f:
                 f.write(content)
-            apply_filer_talbes_commmand = f"ip6tables-restore < {CURRENT_DIR}/ip6tables_filter_rule.txt"
+            apply_filer_talbes_commmand = f"ip6tables-restore < {LOG_DIR}/ip6tables_filter_rule.txt"
             command_status = self._command_executor(command=apply_filer_talbes_commmand)
     def tc_enable(self, rules, active_app):
         ipv4_rules, ipv6_rules = self._separate_v4_and_v6_addr(rules=rules)
@@ -174,7 +174,7 @@ class IPTableManager():
             logger.error(f"flush ip4tables failed")
         interface_list = get_host_interface_list()
         # store iptables
-        store_init_filer_talbes_commmand = f"iptables-save -t filter > {CURRENT_DIR}/ip4tables_filter_rule.txt"
+        store_init_filer_talbes_commmand = f"iptables-save -t filter > {LOG_DIR}/ip4tables_filter_rule.txt"
         command_status = self._command_executor(command=store_init_filer_talbes_commmand)
         filter_rules = ""
         for r in list(rules.values()):
@@ -182,15 +182,15 @@ class IPTableManager():
             tc_handle = interface_list.index(interface_name) + 1
             line = f"-A SAVAGENT -s {ip_addr}/{prefixlen} -i {interface_name} -j MARK --set-mark {tc_handle}"
             filter_rules = filter_rules + line + "\n"
-        with open(f"{CURRENT_DIR}/ip4tables_filter_rule.txt", "r") as f:
+        with open(f"{LOG_DIR}/ip4tables_filter_rule.txt", "r") as f:
             lines = f.readlines()[:-2]
         content = ""
         for line in lines:
             content = content + line
         content = content + filter_rules + "COMMIT\n"
-        with open(f"{CURRENT_DIR}/ip4tables_filter_rule.txt", 'w') as f:
+        with open(f"{LOG_DIR}/ip4tables_filter_rule.txt", 'w') as f:
             f.write(content)
-        apply_filer_talbes_commmand = f"iptables-restore < {CURRENT_DIR}/ip4tables_filter_rule.txt"
+        apply_filer_talbes_commmand = f"iptables-restore < {LOG_DIR}/ip4tables_filter_rule.txt"
         command_status = self._command_executor(command=apply_filer_talbes_commmand)
 
     def _tc_enable_ipv6(self, rules, active_app):
@@ -199,7 +199,7 @@ class IPTableManager():
             logger.error(f"flush ip6tables failed")
         interface_list = get_host_interface_list()
         # store iptables
-        store_init_filer_talbes_commmand = f"ip6tables-save -t filter > {CURRENT_DIR}/ip6tables_filter_rule.txt"
+        store_init_filer_talbes_commmand = f"ip6tables-save -t filter > {LOG_DIR}/ip6tables_filter_rule.txt"
         command_status = self._command_executor(command=store_init_filer_talbes_commmand)
         filter_rules = ""
         for r in list(rules.values()):
@@ -207,13 +207,13 @@ class IPTableManager():
             tc_handle = interface_list.index(interface_name) + 1
             line = f"-A SAVAGENT -s {ip_addr}/{prefixlen} -i {interface_name} -j MARK --set-mark {tc_handle}"
             filter_rules = filter_rules + line + "\n"
-        with open(f"{CURRENT_DIR}/ip6tables_filter_rule.txt", "r") as f:
+        with open(f"{LOG_DIR}/ip6tables_filter_rule.txt", "r") as f:
             lines = f.readlines()[:-2]
         content = ""
         for line in lines:
             content = content + line
         content = content + filter_rules + "COMMIT\n"
-        with open(f"{CURRENT_DIR}/ip6tables_filter_rule.txt", 'w') as f:
+        with open(f"{LOG_DIR}/ip6tables_filter_rule.txt", 'w') as f:
             f.write(content)
-        apply_filer_talbes_commmand = f"ip6tables-restore < {CURRENT_DIR}/ip6tables_filter_rule.txt"
+        apply_filer_talbes_commmand = f"ip6tables-restore < {LOG_DIR}/ip6tables_filter_rule.txt"
         command_status = self._command_executor(command=apply_filer_talbes_commmand)
