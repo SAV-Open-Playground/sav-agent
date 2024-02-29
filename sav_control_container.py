@@ -158,7 +158,7 @@ class Bot:
         run_cmd(f"ip link add {interface} type veth")
         for p in prefixes:
             p = netaddr.IPNetwork(p)
-            ip = p[1]
+            ip = p[0]
             run_cmd(f"ip addr add {ip}/{p.prefixlen} dev {interface}")
         run_cmd(f"ip link set {interface} up")
 
