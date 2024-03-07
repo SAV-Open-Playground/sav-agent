@@ -49,6 +49,8 @@ def add_prefix(prefixes, interface="savop_dummy") -> None:
     for p in prefixes:
         ip = p[0]
         run_cmd(f"ip addr add {ip} dev {interface}")
+
+
 class SendAgent():
     def __init__(self, agent, config, logger) -> None:
         """
@@ -141,13 +143,12 @@ class SavAgent():
         raise NotImplementedError
 
     def _init_sav_table(self) -> None:
-        self.data["sav_table"] = {}
+        self.data["sav_table"] = {"default": {}}
 
     def _init_data(self, first_dt) -> None:
         """
         all major data should be initialized here
         """
-        self.default_rules = []
         self.data = {
             "pkt_id": 0,
             "msg_count": 0,
@@ -330,6 +331,7 @@ class SavAgent():
             self.logger.exception(e)
             self.logger.error(e)
             return {}
+
     def _refresh_kernel_fib(self, filter_base=True):
         """
         update kernel fib using cmd
@@ -421,10 +423,17 @@ class SavAgent():
     def _generate_default_sav_rules(self):
         local_prefixes = self.get_local_prefixes()
         local_device = "eth_veth"
-        self.default_rules = []
+        app_id = "default"
+        add_dict = {}
         for p in local_prefixes:
-            self.default_rules.append(get_sav_rule(p, local_device, "default"))
-
+            r = get_sav_rule(p, local_device, app_id, is_interior=False)
+            r_k = get_key_from_sav_rule(r)
+            add_dict[r_k] = r
+        dels = []
+        for r_k in self.data["sav_table"][app_id]:
+            if not r_k in add_dict:
+                dels.append(r_k)
+        self.update_sav_table_by_app_id(add_dict, dels, app_id)
     def _initial_wait(self) -> None:
         """
         1. wait for bird to be ready
@@ -925,10 +934,9 @@ class SavAgent():
             return {}
         all_rules = self.data["sav_table"][app_name]
         if include_default:
-            for r in self.default_rules:
-                str_key = get_key_from_sav_rule(r)
-                if not str_key in all_rules:
-                    all_rules[str_key] = r
+            default_rules = self.data["sav_table"]["default"]
+            for r_k, r in default_rules:
+                all_rules[r_k] = r
         if is_interior is None:
             return all_rules
         temp = {}
