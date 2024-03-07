@@ -1365,13 +1365,13 @@ class RPDPApp(SavApp):
                 for prefix, prefix_data in prefixes_data.items():
                     try:
                         rule = get_sav_rule(
-                            prefix, get_ifa_by_ip(local_ip), self.app_id, router_id, is_inter)
+                            prefix, get_ifa_by_ip(str(local_ip)), self.app_id, router_id, is_inter)
                         rule_key = get_key_from_sav_rule(rule)
                         if rule_key in new_rules:
                             raise KeyError("sav rule key conflict")
                         new_rules[rule_key] = rule
                     except Exception as e:
-                        # self.logger.exception(e)
+                        self.logger.exception(e)
                         pass
         return new_rules
 
