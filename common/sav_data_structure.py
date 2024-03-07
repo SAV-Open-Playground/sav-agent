@@ -479,7 +479,7 @@ def get_key_from_sav_rule(r):
     return f"{r['prefix']}_{r['origin']}_{r['interface_name']}"
 
 
-def rule_dict_diff(old_rules, new_rules):
+def rule_dict_diff(old_rules: dict, new_rules: dict):
     """
     return adds and dels for the given dicts
     remember to del first and then add (updates)

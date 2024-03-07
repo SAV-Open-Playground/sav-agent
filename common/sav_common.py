@@ -246,16 +246,18 @@ def scope_to_hex_str(scope, is_inter, is_as4=True):
     return ",".join(temp)
 
 
-def get_ifa_by_ip(ip):
+def get_ifa_by_ip(ip) -> str:
     """
     return interface name by ip,
     """
-    with IPDB() as ipdb:
-        for interface in ipdb.interfaces.values():
-            for ip_info in interface.ipaddr:
-                if ip_info[0] == ip_address:
-                    return interface.ifname
-    raise ValueError(f"unable to get interface for {ip}")
+    try:
+        with IPDB() as ipdb:
+            for interface in ipdb.interfaces.values():
+                for ip_info in interface.ipaddr:
+                    if ip_info[0] == ip:
+                        return interface.ifname
+    except Exception as e:
+        raise ValueError(f"unable to get interface for {ip}")
 
 
 def read_json(path_to_json):

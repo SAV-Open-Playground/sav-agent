@@ -876,9 +876,9 @@ class SavAgent():
                 r["create_time"] = old_value['create_time']
                 r["update_time"] = old_value['update_time']
                 if not r == old_value:
-                    self.logger.error(
+                    self.logger.warning(
                         f"conflict in sav_table (old):{old_value}")
-                    self.logger.error(f"conflict in sav_table (new):{r}")
+                    self.logger.warning(f"conflict in sav_table (new):{r}")
                 r["update_time"] = cur_t
                 new_table[r["source_app"]][str_key] = r
                 self.logger.info(f"SAV_RULE REFRESHED:{r}")
@@ -912,10 +912,10 @@ class SavAgent():
                 r["create_time"] = old_r['create_time']
                 r["update_time"] = old_r['update_time']
                 if r == old_r:
-                    self.logger.error(
+                    self.logger.warning(
                         f"conflict in sav_table (old):{old_r}")
-                    self.logger.error(f"conflict in sav_table (new):{r}")
-                    self.logger.error(f"app_id:{app_id}")
+                    self.logger.warning(f"conflict in sav_table (new):{r}")
+                    self.logger.warning(f"app_id:{app_id}")
                 else:
                     r["update_time"] = cur_t
                 new_table[str_key] = r
