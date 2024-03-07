@@ -1323,6 +1323,7 @@ class RPDPApp(SavApp):
                 p_d["miig_type"] = self.agent.config["prefixes"][p]["miig_type"]
                 p_d["miig_tag"] = self.agent.config["prefixes"][p]["miig_tag"]
             local_prefixes[p] = p_d
+            self.logger.debug(p)
         return local_prefixes
 
     def send_spa_init(self) -> None:
@@ -1382,8 +1383,9 @@ class RPDPApp(SavApp):
         # if reset:
         #     self.spa_data = {"intra": {}, "inter": {}}
         #     self.spd_data = {"intra": {}, "inter": {}}
-        old_rules = self.agent._get_sav_rules_by_app(self.app_id, None)
-        # self.logger.debug(f"old_rules: {old_rules}")
+        old_rules = self.agent._get_sav_rules_by_app(
+            self.app_id, include_default=False, is_interior=None)
+        self.logger.debug(f"old_rules: {old_rules}")
 
         spa_data = self.spa_data["intra"]
         spd_data = self.spd_data["intra"]
