@@ -42,10 +42,17 @@ def aggregate_asn_path(list_of_asn_path):
     return result
 
 
+def add_prefix(prefixes, interface="savop_dummy") -> None:
+
+    run_cmd(f"ip link add {interface} type dummy")
+    run_cmd(f"ip link set {interface} up")
+    for p in prefixes:
+        ip = p[0]
+        run_cmd(f"ip addr add {ip} dev {interface}")
 class SendAgent():
-    def __init__(self, agent, config, logger):
+    def __init__(self, agent, config, logger) -> None:
         """
-        currently we don't handle the reply ()ignore, don't use if you need reply
+        currently we don't handle the reply (ignore), don't use if you need reply
         """
 
 
@@ -111,6 +118,11 @@ class SavAgent():
                 if not config["enabled_sav_app"] in config["apps"]:
                     raise ValueError(
                         f"enabled_sav_app {config['enabled_sav_app']} not in apps:{config['apps']}")
+                # add ips to dummy interface
+                # self.logger.debug(config["prefix_method"])
+                # if config["prefix_method"] == "independent_interface":
+                #     add_prefix(config["prefixes"].keys())
+                #     self.logger.debug(f"added prefix to dummy interface")
                 return
             except Exception as e:
                 self.logger.exception(e)
@@ -128,13 +140,14 @@ class SavAgent():
         self.logger.error(link)
         raise NotImplementedError
 
-    def _init_sav_table(self):
+    def _init_sav_table(self) -> None:
         self.data["sav_table"] = {}
 
-    def _init_data(self, first_dt):
+    def _init_data(self, first_dt) -> None:
         """
         all major data should be initialized here
         """
+        self.default_rules = []
         self.data = {
             "pkt_id": 0,
             "msg_count": 0,
@@ -176,7 +189,7 @@ class SavAgent():
         if added:
             pass
 
-    def add_sav_link(self, asn_a, asn_b):
+    def add_sav_link(self, asn_a, asn_b) -> None:
         data_dict = self.data["sav_graph"]
         asn_a = int(asn_a)
         asn_b = int(asn_b)
@@ -195,7 +208,7 @@ class SavAgent():
             data_dict["links"][key_asn].append(value_asn)
             self.logger.info(f"SAV GRAPH LINK ADDED :{key_asn}-{value_asn}")
 
-    def _init_apps(self):
+    def _init_apps(self) -> None:
         """
         init all app instances
         """
@@ -249,7 +262,7 @@ class SavAgent():
                 self.logger.error(f"get {url} failed")
                 time.sleep(0.1)
 
-    def _refresh_aspa_info(self):
+    def _refresh_aspa_info(self) -> None:
         """
         update aspa_info: {customer_asn:[provider_asn]}
         """
@@ -290,7 +303,7 @@ class SavAgent():
                'Metric': route.get_attr("RTA_PRIORITY"),
                }
         if oif is None:
-            ret["Iface"] = "None"
+            ret["Iface"] = None
         else:
             ret["Iface"] = f"{ifas[oif].ifname}"
         return p, ret
@@ -308,6 +321,8 @@ class SavAgent():
                     # or route.get_attr('RTA_GATEWAY') is None:
                     continue
                 k, v = self._get_route_pyroute(route, ifas)
+                if k == netaddr.IPNetwork("0.0.0.0/0") or k == netaddr.IPNetwork("::/0"):
+                    continue
                 ret[k] = v
 
             return ret
@@ -321,12 +336,16 @@ class SavAgent():
         tell if kernel fib has changed
         return adds, dels
         """
+        # new_ = self.parse_kernel_fib3()
         new_ = parse_kernel_fib()
+        # for k in ["127.0.0.0/8", "127.0.0.1/32", "127.255.255.255/32"]:
+        #     if netaddr.IPNetwork(k) in new_:
+        #         del new_[netaddr.IPNetwork(k)]
         # for k, v in new_.items():
         #     self.logger.warn(f"{k}:{v}")
         # for k, v in self.parse_kernel_fib3().items():
         #     self.logger.warn(f"{k}:{v}")
-        # new_ = self.parse_kernel_fib3()
+        #
         if filter_base:
             remove_prefixes = self.ignore_prefixes
             temp = {}
@@ -374,6 +393,10 @@ class SavAgent():
             # self.logger.debug(f"adds:{adds}")
             # self.logger.debug(f"dels:{dels}")
             fib_changed = True
+        for k, v in new_.items():
+            self.logger.debug(f"{k}:{v}")
+        for k, v in self.parse_kernel_fib3().items():
+            self.logger.debug(f"{k}:{v}")
         fib_update_dt = self.data["kernel_fib"]["update_time"]
         if fib_changed:
             self.data["metric"]["is_fib_stable"] = False
@@ -389,11 +412,20 @@ class SavAgent():
         if self.data["metric"]["is_fib_stable"]:
             # pass
             self.bird_man.update_fib(self.config["local_as"])
+        self._generate_default_sav_rules()
         self.logger.debug(f"adds:{adds}")
         self.logger.debug(f"dels:{dels}")
+
         return adds, dels
 
-    def _initial_wait(self):
+    def _generate_default_sav_rules(self):
+        local_prefixes = self.get_local_prefixes()
+        local_device = "eth_veth"
+        self.default_rules = []
+        for p in local_prefixes:
+            self.default_rules.append(get_sav_rule(p, local_device, "default"))
+
+    def _initial_wait(self) -> None:
         """
         1. wait for bird to be ready
         2. wait for fib to be stable
@@ -601,7 +633,7 @@ class SavAgent():
     def get_fib(self, source="kernel", f_types=["remote"]):
         """
         @param source: one of ["kernel","bird"]
-        @param f_types: a list of data you want to include, data can be one of ["remote","local","default"]
+        @param f_types: a list of data you want to include, element can be one of ["remote","local","default"]
         """
         if not source in ["kernel", "bird"]:
             self.logger.error(
@@ -881,7 +913,7 @@ class SavAgent():
                 self.logger.info(f"SAV_RULE REFRESHED:{r}")
         self.data["sav_table"][app_id] = new_table
 
-    def _get_sav_rules_by_app(self, app_name, is_interior=None):
+    def _get_sav_rules_by_app(self, app_name, include_default, is_interior=None):
         """
         return all sav rules for given app
         if is_interior is None, return all rules
@@ -892,6 +924,11 @@ class SavAgent():
             self.data["sav_table"][app_name] = {}
             return {}
         all_rules = self.data["sav_table"][app_name]
+        if include_default:
+            for r in self.default_rules:
+                str_key = get_key_from_sav_rule(r)
+                if not str_key in all_rules:
+                    all_rules[str_key] = r
         if is_interior is None:
             return all_rules
         temp = {}
@@ -911,7 +948,7 @@ class SavAgent():
             ret[get_key_from_sav_rule(new_rule)] = new_rule
         return ret
 
-    def get_sav_rules_by_app(self, app_name, is_interior=None, ip_version=None):
+    def get_sav_rules_by_app(self, app_name, is_interior=None, ip_version=None, include_default=True):
         """
         return all sav rules for given app
         if is_interior is None, return all rules
@@ -921,7 +958,8 @@ class SavAgent():
         if ip_version is None(default), return all rules,otherwise return rules with given ip_version
         return a dict of sav rules
         """
-        temp = self._get_sav_rules_by_app(app_name, is_interior)
+        temp = self._get_sav_rules_by_app(
+            app_name, include_default, is_interior)
         all_interfaces = get_host_interface_list()
         ret = {}
         for k, v in temp.items():

@@ -12,8 +12,9 @@ import os
 import netaddr
 import subprocess
 import requests
-import netifaces
 from common.sav_data_structure import *
+from pyroute2 import IPDB
+
 
 
 def subprocess_run(command):
@@ -248,18 +249,12 @@ def scope_to_hex_str(scope, is_inter, is_as4=True):
 def get_ifa_by_ip(ip):
     """
     return interface name by ip,
-    using cmds
     """
-    for ifa in get_host_interface_list():
-        if ip.version == 6:
-            temp = netifaces.ifaddresses(ifa).get(netifaces.AF_INET6, [])
-        elif ip.version == 4:
-            temp = netifaces.ifaddresses(ifa).get(netifaces.AF_INET, [])
-        else:
-            raise ValueError(ip)
-        for link in temp:
-            if link["addr"] == str(ip):
-                return ifa
+    with IPDB() as ipdb:
+        for interface in ipdb.interfaces.values():
+            for ip_info in interface.ipaddr:
+                if ip_info[0] == ip_address:
+                    return interface.ifname
     raise ValueError(f"unable to get interface for {ip}")
 
 

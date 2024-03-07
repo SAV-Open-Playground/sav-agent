@@ -452,7 +452,7 @@ def hex_str_to_prefixes(input_bytes, t="ipv4"):
 # SAV Rule & Table
 
 
-def get_sav_rule(prefix, interface_name, source_app, origin=-1, is_interior=True):
+def get_sav_rule(prefix: netaddr.IPNetwork, interface_name: str, source_app: str, origin=-1, is_interior=True):
     """
     return a dict of sav rule elements
     if origin is not given, it will be set to -1
