@@ -118,8 +118,8 @@ class SavAgent():
                 else:
                     self.ignore_prefixes = []
                 if not config["enabled_sav_app"] in config["apps"]:
-                    raise ValueError(
-                        f"enabled_sav_app {config['enabled_sav_app']} not in apps:{config['apps']}")
+                    self.logger.warning(
+                        f"sav app {config['enabled_sav_app']} not in apps:{config['apps']}")
                 # add ips to dummy interface
                 # self.logger.debug(config["prefix_method"])
                 # if config["prefix_method"] == "independent_interface":
@@ -290,7 +290,7 @@ class SavAgent():
         """
         return copy.deepcopy(self.data["roa_info"])
 
-    def _get_route_pyroute(self, route, ifas):
+    def _get_route_pyroute(self, route, ifas) -> tuple[netaddr.IPNetwork, dict]:
         dst = route.get_attr('RTA_DST')
         oif = route.get_attr('RTA_OIF')
         gateway = route.get_attr('RTA_GATEWAY')
@@ -315,7 +315,7 @@ class SavAgent():
             ifas = IPDB().interfaces
             ret = {}
             for route in routes:
-                # self.logger.debug(route)
+                self.logger.debug(route)
                 # self.logger.debug(type(route))
                 # self.logger.debug(dir(route))
                 if route.get_attr('RTA_DST') is None:
@@ -343,10 +343,10 @@ class SavAgent():
         # for k in ["127.0.0.0/8", "127.0.0.1/32", "127.255.255.255/32"]:
         #     if netaddr.IPNetwork(k) in new_:
         #         del new_[netaddr.IPNetwork(k)]
-        # for k, v in new_.items():
-        #     self.logger.warn(f"{k}:{v}")
-        # for k, v in self.parse_kernel_fib3().items():
-        #     self.logger.warn(f"{k}:{v}")
+        for k, v in new_.items():
+            self.logger.warn(f"{k}:{v}")
+        for k, v in self.parse_kernel_fib3().items():
+            self.logger.warn(f"{k}:{v}")
         #
         if filter_base:
             remove_prefixes = self.ignore_prefixes
@@ -935,7 +935,7 @@ class SavAgent():
         all_rules = self.data["sav_table"][app_name]
         if include_default:
             default_rules = self.data["sav_table"]["default"]
-            for r_k, r in default_rules:
+            for r_k, r in default_rules.items():
                 all_rules[r_k] = r
         if is_interior is None:
             return all_rules
