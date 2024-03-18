@@ -10,7 +10,6 @@ This is a benchmark to test the performance of BIRD
 import copy
 import sys
 import threading
-from common.logger import LOGGER
 from control_plane.managers import *
 from sav_app import *
 from data_plane.data_plane_enable import interceptor
@@ -63,11 +62,12 @@ class SavAgent():
             os.path.dirname(os.path.abspath(__file__)), "SavAgent_config.json")):
         first_dt = time.time()
         if logger is None:
-            logger = LOGGER
+            logger = get_logger("sav-agent")
         self.logger = logger
         self.config = {}
         self.link_man = None
-        self.update_config(path_to_config)
+        self.cfg_path = path_to_config
+        self.update_config()
         self._init_data(first_dt)
         self._in_msgs = queue.Queue()
 
@@ -81,7 +81,7 @@ class SavAgent():
         # self.logger.debug(f"putting out msg {msg}")
         self.link_man.put_send_async(msg)
 
-    def update_config(self, path_to_config):
+    def update_config(self):
         """
         return dictionary object if is a valid config file (only check type not value). 
         Otherwise, raise ValueError
@@ -89,7 +89,8 @@ class SavAgent():
         """
         for i in range(3):
             try:
-                config = read_json(path_to_config)
+                config = read_json(self.cfg_path)
+
                 required_keys = [
                     ("apps", list), ("grpc_config", dict), ("location", str),
                     ("quic_config", dict), ("link_map", dict), ("local_as", int)]
@@ -111,6 +112,8 @@ class SavAgent():
                 if not config["location"] in valid_location:
                     raise ValueError(
                         f"invalid location {config['location']}, should be one of {valid_location}")
+                if str(self.config) == str(config):
+                    return
                 self.config = config
                 if config["use_ignore_nets"]:
                     self.ignore_prefixes = list(
@@ -125,6 +128,7 @@ class SavAgent():
                 # if config["prefix_method"] == "independent_interface":
                 #     add_prefix(config["prefixes"].keys())
                 #     self.logger.debug(f"added prefix to dummy interface")
+                self.logger.debug(f"config updated")
                 return
             except Exception as e:
                 self.logger.exception(e)
@@ -143,7 +147,7 @@ class SavAgent():
         raise NotImplementedError
 
     def _init_sav_table(self) -> None:
-        self.data["sav_table"] = {"default": {}}
+        self.data["sav_table"] = {}
 
     def _init_data(self, first_dt) -> None:
         """
@@ -173,7 +177,7 @@ class SavAgent():
         self.data["sav_graph"] = {"nodes": {}, "links": {}}
         self.link_man = LinkManager(
             self.data["links"], self, logger=self.logger)
-        self.data["kernel_fib"] = {"data": parse_kernel_fib(),
+        self.data["kernel_fib"] = {"data": self.parse_kernel_fib3(),
                                    "update_time": time.time(),
                                    "check_time": time.time()}
         self.rpdp_app = None
@@ -293,7 +297,7 @@ class SavAgent():
     def _get_route_pyroute(self, route, ifas) -> tuple[netaddr.IPNetwork, dict]:
         dst = route.get_attr('RTA_DST')
         oif = route.get_attr('RTA_OIF')
-        gateway = route.get_attr('RTA_GATEWAY')
+        gateway = route.get_attr('RTA_GATEWAY', "0.0.0.0")
         if dst is None:
             raise ValueError("dst is None")
         p = f"{dst}/{route.get('dst_len')}"
@@ -311,44 +315,48 @@ class SavAgent():
 
     def parse_kernel_fib3(self) -> dict:
         try:
-            routes = IPRoute().get_routes()
+            routes = IPRoute().get_routes(table=254)
             ifas = IPDB().interfaces
             ret = {}
             for route in routes:
-                self.logger.debug(route)
+                # self.logger.debug(route)
                 # self.logger.debug(type(route))
                 # self.logger.debug(dir(route))
                 if route.get_attr('RTA_DST') is None:
                     # or route.get_attr('RTA_GATEWAY') is None:
                     continue
                 k, v = self._get_route_pyroute(route, ifas)
-                if k == netaddr.IPNetwork("0.0.0.0/0") or k == netaddr.IPNetwork("::/0"):
-                    continue
+                # self.logger.debug([k, v])
+                # if str(k) in ["0.0.0.0/0", "::/0"]:
+                #     continue
+                # if v["Iface"] == "lo":
+                #     continue
                 ret[k] = v
-
             return ret
         except Exception as e:
             self.logger.exception(e)
             self.logger.error(e)
             return {}
 
-    def _refresh_kernel_fib(self, filter_base=True):
+    def _refresh_kernel_fib(self, use_ignore_prefix=True):
         """
         update kernel fib using cmd
         tell if kernel fib has changed
         return adds, dels
         """
-        # new_ = self.parse_kernel_fib3()
-        new_ = parse_kernel_fib()
+        new_ = self.parse_kernel_fib3()
+        # new_ = parse_kernel_fib()
         # for k in ["127.0.0.0/8", "127.0.0.1/32", "127.255.255.255/32"]:
         #     if netaddr.IPNetwork(k) in new_:
         #         del new_[netaddr.IPNetwork(k)]
-        for k, v in new_.items():
-            self.logger.warn(f"{k}:{v}")
-        for k, v in self.parse_kernel_fib3().items():
-            self.logger.warn(f"{k}:{v}")
+        # for k, v in new_.items():
+        #     self.logger.warn(f"{k}:{v}")
+        # for k, v in self.parse_kernel_fib3().items():
+        #     self.logger.warn(f"{k}:{v}")
         #
-        if filter_base:
+        if len(new_) == 0:
+            self.logger.warning("kernel fib empty")
+        if use_ignore_prefix:
             remove_prefixes = self.ignore_prefixes
             temp = {}
             for prefix in new_:
@@ -363,8 +371,7 @@ class SavAgent():
         # self.logger.debug(new_)
         # for prefix in new_:
         # self.logger.debug(f"{prefix}:{new_[prefix]}")
-        if len(new_) == 0:
-            self.logger.error("kernel fib empty")
+
         t0 = time.time()
         old_ = self._get_kernel_fib()
         # self.logger.debug(old_)
@@ -395,10 +402,6 @@ class SavAgent():
             # self.logger.debug(f"adds:{adds}")
             # self.logger.debug(f"dels:{dels}")
             fib_changed = True
-        for k, v in new_.items():
-            self.logger.debug(f"{k}:{v}")
-        for k, v in self.parse_kernel_fib3().items():
-            self.logger.debug(f"{k}:{v}")
         fib_update_dt = self.data["kernel_fib"]["update_time"]
         if fib_changed:
             self.data["metric"]["is_fib_stable"] = False
@@ -411,29 +414,14 @@ class SavAgent():
                 if not self.data["metric"]["initial_fib_stable"]:
                     self.data["metric"]["initial_fib_stable"] = True
                     self.data["metric"]["initial_fib_stable_dt"] = fib_update_dt
-        if self.data["metric"]["is_fib_stable"]:
-            # pass
-            self.bird_man.update_fib(self.config["local_as"])
-        self._generate_default_sav_rules()
-        self.logger.debug(f"adds:{adds}")
-        self.logger.debug(f"dels:{dels}")
+
+        if len(adds) > 0:
+            self.logger.debug(f"kernel fib adds:{adds}")
+        if len(dels) > 0:
+            self.logger.debug(f"kernel fib dels:{dels}")
 
         return adds, dels
 
-    def _generate_default_sav_rules(self):
-        local_prefixes = self.get_local_prefixes()
-        local_device = "eth_veth"
-        app_id = "default"
-        add_dict = {}
-        for p in local_prefixes:
-            r = get_sav_rule(p, local_device, app_id, is_interior=False)
-            r_k = get_key_from_sav_rule(r)
-            add_dict[r_k] = r
-        dels = []
-        for r_k in self.data["sav_table"][app_id]:
-            if not r_k in add_dict:
-                dels.append(r_k)
-        self.update_sav_table_by_app_id(add_dict, dels, app_id)
     def _initial_wait(self) -> None:
         """
         1. wait for bird to be ready
@@ -765,8 +753,14 @@ class SavAgent():
         return is_bird_fib_changed, is_kernel_fib_change, fib_adds, fib_dels, bird_adds,bird_dels
         """
         fib_adds, fib_dels = self._refresh_kernel_fib()
-        is_bird_fib_changed, bird_adds, bird_dels = self.bird_man.update_fib(
-            self.config["local_as"])
+        # if self.bird_man.is_bird_ready():
+        #     is_bird_fib_changed, bird_adds, bird_dels = self.bird_man.update_fib(
+        #         self.config["local_as"])
+        # else:
+        if True:
+            is_bird_fib_changed = False
+            bird_adds = {}
+            bird_dels = {}
         is_kernel_fib_change = ((len(fib_adds) != 0) or (len(fib_dels) != 0))
         self._refresh_adj_in()
         return is_bird_fib_changed, is_kernel_fib_change, fib_adds, fib_dels, bird_adds, bird_dels
@@ -843,46 +837,46 @@ class SavAgent():
                 self.logger.exception(e)
                 self.logger.error(f"error when notifying app {app_id}")
 
-    def update_sav_table(self, adds, dels):
-        """
-        update sav table, and notify apps
-        adds and dels are list of sav rules
-        """
-        cur_t = time.time()
-        new_table = copy.deepcopy(self.data["sav_table"])
-        for r in dels:
-            if not r["source_app"] in new_table:
-                continue
-            str_key = get_key_from_sav_rule(r)
-            if not str_key in new_table[r["source_app"]]:
-                self.logger.error(
-                    f"key missing in sav_table (old):{r}/{str_key}")
-            else:
-                del new_table[r["source_app"]][str_key]
-                self.logger.info(f"SAV_RULE - :{r}")
-        for r in adds:
-            # self.logger.debug(r)
-            if not r["source_app"] in new_table:
-                new_table[r["source_app"]] = {}
-            str_key = get_key_from_sav_rule(r)
-            # self.logger.debug(str_key)
-            if not str_key in new_table[r["source_app"]]:
-                r["create_time"] = cur_t
-                r["update_time"] = cur_t
-                new_table[r["source_app"]][str_key] = r
-                self.logger.info(f"SAV_RULE + :{r}")
-            else:
-                old_value = new_table[r["source_app"]][str_key]
-                r["create_time"] = old_value['create_time']
-                r["update_time"] = old_value['update_time']
-                if not r == old_value:
-                    self.logger.warning(
-                        f"conflict in sav_table (old):{old_value}")
-                    self.logger.warning(f"conflict in sav_table (new):{r}")
-                r["update_time"] = cur_t
-                new_table[r["source_app"]][str_key] = r
-                self.logger.info(f"SAV_RULE REFRESHED:{r}")
-        self.data["sav_table"] = new_table
+    # def update_sav_table(self, adds, dels):
+    #     """
+    #     update sav table, and notify apps
+    #     adds and dels are list of sav rules
+    #     """
+    #     cur_t = time.time()
+    #     new_table = copy.deepcopy(self.data["sav_table"])
+    #     for r in dels:
+    #         if not r["source_app"] in new_table:
+    #             continue
+    #         str_key = get_key_from_sav_rule(r)
+    #         if not str_key in new_table[r["source_app"]]:
+    #             self.logger.error(
+    #                 f"key missing in sav_table (old):{r}/{str_key}")
+    #         else:
+    #             del new_table[r["source_app"]][str_key]
+    #             self.logger.info(f"SAV_RULE - :{r}")
+    #     for r in adds:
+    #         # self.logger.debug(r)
+    #         if not r["source_app"] in new_table:
+    #             new_table[r["source_app"]] = {}
+    #         str_key = get_key_from_sav_rule(r)
+    #         # self.logger.debug(str_key)
+    #         if not str_key in new_table[r["source_app"]]:
+    #             r["create_time"] = cur_t
+    #             r["update_time"] = cur_t
+    #             new_table[r["source_app"]][str_key] = r
+    #             self.logger.info(f"SAV_RULE + :{r}")
+    #         else:
+    #             old_value = new_table[r["source_app"]][str_key]
+    #             r["create_time"] = old_value['create_time']
+    #             r["update_time"] = old_value['update_time']
+    #             if not r == old_value:
+    #                 self.logger.warning(
+    #                     f"conflict in sav_table (old):{old_value}")
+    #                 self.logger.warning(f"conflict in sav_table (new):{r}")
+    #             r["update_time"] = cur_t
+    #             new_table[r["source_app"]][str_key] = r
+    #             self.logger.info(f"SAV_RULE REFRESHED:{r}")
+    #     self.data["sav_table"] = new_table
 
     def update_sav_table_by_app_id(self, add_dict, del_set, app_id):
         """
@@ -912,17 +906,18 @@ class SavAgent():
                 r["create_time"] = old_r['create_time']
                 r["update_time"] = old_r['update_time']
                 if r == old_r:
-                    self.logger.warning(
-                        f"conflict in sav_table (old):{old_r}")
-                    self.logger.warning(f"conflict in sav_table (new):{r}")
-                    self.logger.warning(f"app_id:{app_id}")
+                    # self.logger.warning(
+                    #     f"conflict in sav_table (old):{old_r}")
+                    # self.logger.warning(f"conflict in sav_table (new):{r}")
+                    # self.logger.warning(f"app_id:{app_id}")
+                    continue
                 else:
                     r["update_time"] = cur_t
                 new_table[str_key] = r
                 self.logger.info(f"SAV_RULE REFRESHED:{r}")
         self.data["sav_table"][app_id] = new_table
 
-    def _get_sav_rules_by_app(self, app_name, include_default, is_interior=None):
+    def _get_sav_rules_by_app(self, app_name, is_interior=None):
         """
         return all sav rules for given app
         if is_interior is None, return all rules
@@ -933,10 +928,6 @@ class SavAgent():
             self.data["sav_table"][app_name] = {}
             return {}
         all_rules = self.data["sav_table"][app_name]
-        if include_default:
-            default_rules = self.data["sav_table"]["default"]
-            for r_k, r in default_rules.items():
-                all_rules[r_k] = r
         if is_interior is None:
             return all_rules
         temp = {}
@@ -956,7 +947,7 @@ class SavAgent():
             ret[get_key_from_sav_rule(new_rule)] = new_rule
         return ret
 
-    def get_sav_rules_by_app(self, app_name, is_interior=None, ip_version=None, include_default=True):
+    def get_sav_rules_by_app(self, app_name, is_interior=None, ip_version=None):
         """
         return all sav rules for given app
         if is_interior is None, return all rules
@@ -967,7 +958,7 @@ class SavAgent():
         return a dict of sav rules
         """
         temp = self._get_sav_rules_by_app(
-            app_name, include_default, is_interior)
+            app_name, is_interior)
         all_interfaces = get_host_interface_list()
         ret = {}
         for k, v in temp.items():
@@ -1325,7 +1316,8 @@ class SavAgent():
         data = {
             "last_trigger": t0,
             "events": {
-                "spd": {"last_trigger": t0, "interval": 5}
+                "spd": {"last_trigger": t0, "interval": 5},
+                "cfg_update": {"last_trigger": t0, "interval": 5}
                 # "spa_init": {"last_trigger": t0, "interval": 5}
             }
         }
@@ -1345,6 +1337,8 @@ class SavAgent():
                                 # "fib not stable, not sending spd")
                                 continue
                             self._send_spd()
+                        elif event == "cfg_update":
+                            self.update_config()
                         else:
                             self.logger.warning(
                                 f"unknown event:{event}, skipping")

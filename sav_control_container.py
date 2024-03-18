@@ -10,14 +10,11 @@ it should be run as main process inside the container.
 """
 
 import time
-import os
 import json
 import subprocess
 from datetime import datetime
 import requests
-from common.logger import get_logger
-from common.sav_common import *
-from sav_app import *
+from common import *
 import urllib3
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 class Bot:
@@ -110,7 +107,7 @@ class Bot:
 
     def modify_sav_config_file(self):
         """modify the configuration file for future testing of different sav protocols"""
-        pass
+        raise NotImplementedError
 
     def update_metric(self):
         """
@@ -188,8 +185,8 @@ class Bot:
         exec_result = {}
         # dynamically modify the configuration file of the SAV agent
         sav_agent_config = self._read_json(self.sa_config_path)
-        source = signal["source"]
-        sav_agent_config["enabled_sav_app"] = source
+        # source = signal["source"]
+        # sav_agent_config["enabled_sav_app"] = source
         # if source == "fpurpf_app":
         #     sav_agent_config["apps"] = [RPDP_ID, "FP-uRPF"]
         # elif source == "strict_urpf_app":
@@ -209,7 +206,7 @@ class Bot:
         # else:
         #     self.logger.error(f"unknown source {source}")
             # raise ValueError("unknown source")
-        self._write_json(self.sa_config_path, sav_agent_config)
+        # self._write_json(self.sa_config_path, sav_agent_config)
         if sav_agent_config["prefix_method"] == "independent_interface":
             self._add_prefix(sav_agent_config["prefixes"].keys())
         exec_result.update({"command": f'{signal["command"]}_{time.time()}',
@@ -230,6 +227,7 @@ class Bot:
 
     def run(self):
         # continuously monitor the status of the configuration file in a loop
+        self.logger.info("start main loop")
         while True:
             time.sleep(0.1)
             try:
@@ -245,7 +243,9 @@ class Bot:
                             self._wait_for_fib_first_stable()
                 else:
                     self.logger.error(f"unknown action {action}")
+                self.last_cmd = action
             except Exception as e:
+                self.logger.exception(e)
                 continue
 
 if __name__ == "__main__":

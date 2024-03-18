@@ -11,7 +11,7 @@
 -------------------------------------------------
 """
 import json
-from common.logger import LOGGER as logger
+from common.main_logger import LOGGER
 from data_plane.sav_rule_manager import SavRuleManager
 from data_plane.iptables import IPTableManager
 from data_plane.access_control_list import AccessControlListManager

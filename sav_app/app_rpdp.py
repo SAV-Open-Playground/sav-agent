@@ -396,7 +396,7 @@ class RPDPApp(SavApp):
 
     def _quic_msg_box(self, msg, bgp_meta):
         msg["sav_nlri"] = list(map(prefix2str, msg["sav_nlri"]))
-        msg["dummy_link"] = f"savbgp_{bgp_meta['remote_as']}_{bgp_meta['local_as']}"
+        # msg["dummy_link"] = f"savbgp_{bgp_meta['remote_as']}_{bgp_meta['local_as']}"
         return json.dumps(msg)
 
     def _quic_msg_unbox(self, msg):
@@ -538,7 +538,7 @@ class RPDPApp(SavApp):
     def perf_test_send(self, msgs):
         count = 0
         self.logger.debug("perf test send start")
-        using_link = "savbgp_34224_3356"
+        # using_link = "savbgp_34224_3356"
         self.metric["perf_test"] = self.get_init_metric_dict()
         self.metric["perf_test"]["bgp"] = init_protocol_metric()
         for msg in msgs:
@@ -957,7 +957,7 @@ class RPDPApp(SavApp):
         regarding the nlri part, the processing procedure is the same
         """
         # t0 = time.time()
-        self.logger.debug(msg)
+        # self.logger.debug(msg)
         # self.logger.debug(link_meta)
         rpdp_msg = msg["msg"]
         is_inter = link_meta["is_interior"]
@@ -1208,8 +1208,8 @@ class RPDPApp(SavApp):
         the prefixes must either be a ipv4 prefix or a ipv6 prefix
         """
         # send to all neighbors
-        self.logger.debug(
-            f"building spa origin on inter {link_name}:{prefixes}")
+        # self.logger.debug(
+        # f"building spa origin on inter {link_name}:{prefixes}")
         spa_add = []
         spa_del = []  # when broadcasting, we don't delete any prefix
         prefix_version = None
@@ -1237,9 +1237,12 @@ class RPDPApp(SavApp):
                                  as_path,
                                  link_meta["as4_session"],
                                  link_meta["is_interior"])
+        link_type = link_meta["link_type"]
+        if not link_type in ["dsav"]:
+            raise ValueError(f"unknown link type {link_type}")
         msg = get_agent_bird_msg(
-            data, "dsav", self.app_id, 0, False)
-        self.logger.debug(f"sending spa on {link_name} : {msg}")
+            data, link_type, self.app_id, 0, False)
+        # self.logger.debug(f"sending spa on {link_name} : {msg}")
         try:
             self.agent.link_man.put_send_async(msg)
             self.agent.link_man.update_link_kv(
@@ -1313,7 +1316,7 @@ class RPDPApp(SavApp):
 
     def get_local_prefixes(self):
         local_prefixes = self.agent.get_fib("kernel", ["local"])
-        self.logger.debug(f"raw_local_prefixes: {local_prefixes}")
+        # self.logger.debug(f"raw_local_prefixes: {local_prefixes}")
         for p, p_srcs in local_prefixes.items():
             # TODO: remove filter
             # currently we only send spa for prefixes that in our config
@@ -1323,7 +1326,7 @@ class RPDPApp(SavApp):
                 p_d["miig_type"] = self.agent.config["prefixes"][p]["miig_type"]
                 p_d["miig_tag"] = self.agent.config["prefixes"][p]["miig_tag"]
             local_prefixes[p] = p_d
-            self.logger.debug(p)
+            # self.logger.debug(p)
         return local_prefixes
 
     def send_spa_init(self) -> None:
@@ -1331,6 +1334,8 @@ class RPDPApp(SavApp):
         decide whether to send initial broadcast on each link
         """
         rpdp_links = self.agent.link_man.get_all_link_meta()
+        rpdp_links = {k: v for k, v in rpdp_links.items() if v["link_type"] in [
+            "dsav"]}
         local_prefixes = self.get_local_prefixes()
         # self.logger.debug(f"local_prefixes: {local_prefixes}")
         for link_name, link in rpdp_links.items():
@@ -1353,9 +1358,9 @@ class RPDPApp(SavApp):
         # TODO add logic for different policy, here we use the simplest one
         for router_id, prefixes_data in spa_data.items():
             if not router_id in spd_data:
-                self.logger.debug(spd_data)
-                self.logger.debug(spa_data)
-                self.logger.warning(f"no spd data for {router_id}")
+                # self.logger.debug(spd_data)
+                # self.logger.debug(spa_data)
+                # self.logger.warning(f"no spd data for {router_id}")
                 continue
             this_spd = spd_data[router_id]
             for allowed_link_name in this_spd:
@@ -1384,8 +1389,8 @@ class RPDPApp(SavApp):
         #     self.spa_data = {"intra": {}, "inter": {}}
         #     self.spd_data = {"intra": {}, "inter": {}}
         old_rules = self.agent._get_sav_rules_by_app(
-            self.app_id, include_default=False, is_interior=None)
-        self.logger.debug(f"old_rules: {old_rules}")
+            self.app_id, is_interior=None)
+        # self.logger.debug(f"old_rules: {old_rules}")
 
         spa_data = self.spa_data["intra"]
         spd_data = self.spd_data["intra"]
@@ -1397,8 +1402,14 @@ class RPDPApp(SavApp):
         # self.logger.debug(f"spa_data: {spa_data}")
         # self.logger.debug(f"spd_data: {spd_data}")
         new_inter_rules = self._gen_rules(spa_data, spd_data, True)
+        local_prefixes = self.get_local_prefixes()
         new_rules = {**new_intra_rules, **new_inter_rules}
+        for p, v in local_prefixes.items():
+            ifa = v["srcs"]["Iface"]
+            r = get_sav_rule(p, ifa, self.app_id, is_interior=False)
+            r_k = get_key_from_sav_rule(r)
+            new_rules[r_k] = r
         add_dict, del_set = rule_dict_diff(old_rules, new_rules)
-        self.logger.debug(f"new rules: {add_dict}")
-        self.logger.debug(f"del rules: {del_set}")
+        # self.logger.debug(f"new rules: {add_dict}")
+        # self.logger.debug(f"del rules: {del_set}")
         self.agent.update_sav_table_by_app_id(add_dict, del_set, self.app_id)

@@ -12,8 +12,8 @@
 """
 import time
 import json
-from common.logger import LOGGER
-from control_plane.sav_agent import SavAgent
+from common.main_logger import LOGGER
+from control_plane.sav_agent import *
 from concurrent import futures
 import grpc
 from control_plane import agent_msg_pb2, agent_msg_pb2_grpc
@@ -24,6 +24,7 @@ QUIC_SERVER = None
 GRPC_ADDR = None
 QUIC_ADDR = None
 SA_CFG_PATH = r"/root/savop/SavAgent_config.json"
+
 SA = SavAgent(logger=LOGGER, path_to_config=SA_CFG_PATH)
 
 class GrpcServer(agent_msg_pb2_grpc.AgentLinkServicer):
@@ -99,17 +100,11 @@ def _update_gprc_server(logger):
     return
 
 
-def _update_config(new_sa_cfg_path=None):
+def _update_config():
     """
     reserved for future use
     """
     LOGGER.debug("updating config")
-    try:
-        if new_sa_cfg_path:
-            SA.update_config(new_sa_cfg_path)
-            LOGGER.debug("SA config updated")
-        return ""
-    except Exception as err:
-        LOGGER.error(err)
-        msg = err
-        return msg
+    SA.update_config()
+    LOGGER.debug("SA config updated")
+    return ""

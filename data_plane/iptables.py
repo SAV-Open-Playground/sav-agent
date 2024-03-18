@@ -13,7 +13,7 @@
 import os
 import subprocess
 from common.sav_common import get_host_interface_list
-from common.logger import LOGGER as logger
+from common.main_logger import LOGGER as logger
 
 SAV_CHAIN = "SAVAGENT"
 LOG_DIR = "/root/savop/logs"
