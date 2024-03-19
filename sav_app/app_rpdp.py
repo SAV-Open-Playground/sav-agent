@@ -731,7 +731,7 @@ class RPDPApp(SavApp):
         if not msg_cause in valid_types:
             self.logger.error(f"unknown msg_type {msg_cause}")
             return
-        if not msg_type in ["SPA", "SPD"]:
+        if not msg_type in [SPA, SPD]:
             self.logger.error(f"unknown msg_type {msg_type}")
         # self.logger.debug(link_meta)
         # self.logger.debug(msg)
@@ -757,15 +757,15 @@ class RPDPApp(SavApp):
             log_dict['dt'] = msg["created_dt"]
             if link_meta["is_interior"]:
                 log_dict["src_asn"], log_dict["dst_asn"] = log_dict["dst_asn"], log_dict["src_asn"]
-            if msg_type == "SPD":
-                log_dict["spd_sn"] = msg["data"]["SN"]
+            if msg_type == SPD:
+                log_dict["spd_sn"] = msg["data"]["sn"]
                 del log_dict["add"]
                 del log_dict["del"]
         else:
             log_dict["pkt_id"] = msg["pkt_id"]
             log_dict['dt'] = msg["pkt_rec_dt"]
-            if msg_type == "SPD":
-                log_dict["spd_sn"] = msg["msg"]["SN"]
+            if msg_type == SPD:
+                log_dict["spd_sn"] = msg["msg"]["sn"]
                 del log_dict["add"]
                 del log_dict["del"]
 
@@ -780,6 +780,9 @@ class RPDPApp(SavApp):
                 return
             if msg["msg"]["msg_type"] == SPA:
                 self.process_spa(msg, self.agent.link_man.get_by_name(
+                    msg["source_link"]))
+            elif msg["msg"]["msg_type"] == SPD:
+                self.process_spd(msg, self.agent.link_man.get_by_name(
                     msg["source_link"]))
             else:
                 self.logger.error(msg)
@@ -1025,9 +1028,9 @@ class RPDPApp(SavApp):
             self.logger.debug(f"-{i}")
         # self.logger.debug(msg)
         self._log_for_front(msg, "receive", link_meta,
-                            "SPA", rpdp_msg['spa_add'], rpdp_msg['spa_del'])
+                            SPA, rpdp_msg['spa_add'], rpdp_msg['spa_del'])
         self._log_for_front(msg, "terminate", link_meta,
-                            "SPA", rpdp_msg['spa_add'], rpdp_msg['spa_del'])
+                            SPA, rpdp_msg['spa_add'], rpdp_msg['spa_del'])
         self._refresh_sav_rules()
         intra_links = self.agent.link_man.get_all_up_type(
             is_interior=False, include_native_bgp=False)
@@ -1037,7 +1040,7 @@ class RPDPApp(SavApp):
             link_meta = self.agent.link_man.get_by_name(link_name)
             self._send_spa_origin_intra(
                 link_meta=link_meta, link_name=link_name, prefixes=local_prefixes)
-            self._log_for_front(msg, "relay", link_meta, "SPA", [], [])
+            self._log_for_front(msg, "relay", link_meta, SPA, [], [])
 
     def _get_spd_sn(self, dst):
         """
@@ -1057,14 +1060,58 @@ class RPDPApp(SavApp):
             ret += f"{peer_asn}"
         return ret
 
-    def send_spd(self, remote_links, as_neighbors, my_as_prefixes, my_asn, my_router_id) -> None:
+    def _get_spd_msg(self, as_neighbors, my_asn, my_router_id, link_name, link_meta, dst_ips=[]) -> dict:
+        is_inter = link_meta["is_interior"]
+        remote_as = link_meta["remote_as"]
+        # TODO addresses,opt_data,neighbor_as_list
+        ret = {
+            "type": SPD,
+            "link_name": link_name,
+            "sn": self._get_spd_sn(self._get_spd_key(
+                link_meta['remote_ip'], is_inter, remote_as)),
+            "origin_router_id": my_router_id
+        }
+        if is_inter:
+
+            ret["origin_asn"] = my_asn
+            ret["validate_asn"] = remote_as
+            ret["neighbor_as_list"] = as_neighbors[remote_as]
+            ret["opt_data"] = []
+        else:
+            ret["opt_data"] = []
+            ret["addresses"] = dst_ips
+        return ret
+
+    def send_spd(self, links, as_neighbors, my_as_prefixes, my_asn, my_router_id) -> None:
+        """send spd on rpdp links"""
+        self.logger.debug(links.keys())
+        for link_name, link_meta in links.items():
+            spd_msg = self._get_spd_msg(
+                as_neighbors, my_asn, my_router_id, link_name, link_meta, [link_meta["remote_ip"]])
+            if link_meta["link_type"] == RPDP_OVER_HTTP:
+                spd_msg["msg_type"] = SPD
+                data = {
+                    "url": f"http://{link_meta['remote_ip']}:8888/{RPDP_OVER_HTTP}/",
+                    "data": spd_msg,
+                    "msg_type": link_meta["link_type"],
+                    "timeout": 10,
+                    "store_rep": False,
+                    "source_app": self.app_id}
+                self.logger.debug(data)
+                self.agent.link_man.put_send_async(data)
+            else:
+                self.logger.error(
+                    f"unknown link type {link_meta['link_type']}")
+                raise NotImplementedError()
+
+    def send_spd1(self, remote_links, as_neighbors, my_as_prefixes, my_asn, my_router_id) -> None:
         """
         send inter-as spds on remote_links
         send intra-as spds on my_as_prefixes
         """
 
         # send intra-as spds
-        # self.logger.debug(remote_links)
+        self.logger.debug(remote_links.keys())
         # self.logger.debug(as_neighbors)
         # self.logger.debug(my_as_prefixes)
         timeout = 0
@@ -1087,13 +1134,13 @@ class RPDPApp(SavApp):
                                          is_interior=is_interior, my_as=my_asn,
                                          peer_as=peer_as, peer_neighbor_as_list=as_neighbors[peer_as]
                                          )
-
+                self.logger.debug(data)
                 msg = get_agent_bird_msg(
                     data, link_meta["link_type"], self.app_id, timeout, False)
                 # self.logger.debug(msg)
                 self.agent.link_man.put_send_async(msg)
                 self._log_for_front(
-                    msg, "origin", link_meta, "SPD", None, None)
+                    msg, "origin", link_meta, SPD, None, None)
             except Exception as e:
                 self.logger.exception(e)
                 self.logger.error(e)
@@ -1128,10 +1175,10 @@ class RPDPApp(SavApp):
                     self._get_spd_key(dst_ip, is_interior)), origin_router_id=my_router_id, opt_data=[], is_interior=is_interior, addresses=addresses)
                 msg = get_agent_bird_msg(
                     data, link_meta["link_type"], self.app_id, timeout, False)
-                # self.logger.debug(msg)
+                self.logger.debug(msg)
                 self.agent.link_man.put_send_async(msg)
                 self._log_for_front(
-                    msg, "origin", link_meta, "SPD", None, None)
+                    msg, "origin", link_meta, SPD, None, None)
             except Exception as e:
                 self.logger.exception(e)
                 self.logger.error(e)
@@ -1154,41 +1201,53 @@ class RPDPApp(SavApp):
             self.logger.info(
                 f"spd sn check failed, processed sn {link_meta['spd_sn']}, received sn {sn},ignore")
             return False
-
     def process_spd(self, msg, link_meta):
         """
         process rpdp route refresh message
         """
         # self.logger.debug(msg)
-        if not self._spd_sn_check(msg["msg"]["SN"], msg["source_link"]):
+
+        spd_msg = msg['msg']
+        link_type = link_meta["link_type"]
+        is_inter = link_meta["is_interior"]
+        if link_type == RPDP_OVER_BGP:
+            # process common fields
+            spd_msg["sn"] = spd_msg["SN"]
+            del spd_msg["SN"]
+            spd_msg['origin_asn'] = spd_msg["source_asn"]
+            del spd_msg["source_asn"]
+            spd_msg['neighbor_as_list'] = spd_msg["peer_neighbor_asns"]
+            del spd_msg["peer_neighbor_asns"]
+        elif link_type == RPDP_OVER_HTTP:
+            # self.logger.debug(spd_msg)
+            pass
+        else:
+            self.logger.error(f"unknown link type {link_type}")
+        if not self._spd_sn_check(spd_msg["sn"], msg["source_link"]):
             self.logger.warning("spd_sn check failed")
             return
-        spd_msg = msg["msg"]
-
-        # process common fields
-        origin_router_id = netaddr.IPAddress(spd_msg["origin_router_id"])
-        proto_name = spd_msg["protocol_name"]
-        sub_type = spd_msg["sub_type"]
-        if sub_type == 2:
-            # self.logger.debug(json.dumps(spd_msg,indent=2))
+        spd_msg["origin_ip"] = netaddr.IPAddress(spd_msg['origin_router_id'])
+        del spd_msg['origin_router_id']
+        self.logger.debug(spd_msg)
+        if is_inter:
+            need_to_relay = self.agent.config["local_as"] != spd_msg["origin_asn"]
             data = self.spd_data["inter"]
-            if self.agent.config["local_as"] == spd_msg["source_asn"]:
-                need_to_relay = False
-            else:
-                need_to_relay = True
-            new_ases = [spd_msg["source_asn"]]
-            new_ases.extend(spd_msg["peer_neighbor_asns"])
+
+            new_ases = [spd_msg["origin_asn"]]
+            new_ases.extend(spd_msg["neighbor_as_list"])
             for asn in new_ases:
                 if not asn in data:
                     data[asn] = set()
-                data[asn].add(proto_name)
+                data[asn].add(msg["source_link"])
             self.spd_data["inter"] = data
-        elif sub_type == 1:
-            need_to_relay = False
+            if need_to_relay:
+                pass
+                # TODO SPD relay
+                # self.logger.error("inter spd relay todo")
+        else:
             data = self.spd_data["intra"]
-            spd_msg["addresses"] = addresses2ips(
-                spd_msg["addresses"], spd_msg["ip_version"])
-            new_ips = [origin_router_id]
+            need_to_relay = False
+            new_ips = [spd_msg['origin_ip']]
             for ip in spd_msg["addresses"]:
                 try:
                     _ = self.agent.link_man.get_by_local_ip(ip)
@@ -1197,21 +1256,15 @@ class RPDPApp(SavApp):
             for ip in new_ips:
                 if not ip in data:
                     data[ip] = set()
-                data[ip].add(proto_name)
+                data[ip].add(msg["source_link"])
             self.spd_data["intra"] = data
-        else:
-            self.logger.debug(msg)
-            self.logger.error(f"unknown subtype: {spd_msg['subtype']}")
-        if need_to_relay:
-            pass
-            # TODO SPD relay
-            # if sub_type == 1:
-            #     self.logger.error("intra spd relay todo")
-            # elif sub_type == 2:
-            #     self.logger.error("inter spd relay todo")
-        # self.logger.debug(self.spd_data)
-        self._log_for_front(msg, "receive", link_meta, "SPD", None, None)
-        self._log_for_front(msg, "terminate", link_meta, "SPD", None, None)
+            if need_to_relay:
+                pass
+                # TODO SPD relay
+                # self.logger.error("inter spd relay todo")
+        msg['msg'] = spd_msg
+        self._log_for_front(msg, "receive", link_meta, SPD, None, None)
+        self._log_for_front(msg, "terminate", link_meta, SPD, None, None)
         self._refresh_sav_rules()
 
     def _send_spa_origin_bgp(self, spa_msg, link_meta):
@@ -1255,7 +1308,7 @@ class RPDPApp(SavApp):
                 i["prefix"] = str(i["prefix"])
             for i in log_del:
                 i["prefix"] = str(i["prefix"])
-            self._log_for_front(msg, "origin", link_meta, "SPA",
+            self._log_for_front(msg, "origin", link_meta, SPA,
                                 log_add, log_del)
         except Exception as e:
             self.logger.error(e)

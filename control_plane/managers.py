@@ -118,13 +118,12 @@ class BirdCMDManager():
             # self.logger.debug(json.dumps({key1: raw_input[key1]}, indent=2))
         return raw_input
 
-    def update_fib(self, my_asn, log_err=True):
+    def update_bird_fib(self, my_asn, log_err=True):
         """
         return if changed and a dict of changes
         """
         self.bird_fib["check_time"] = time.time()
         new_data = self._parse_bird_fib(log_err, my_asn)
-        # self.logger.debug(f"_parse_bird_fib finished")
         something_updated = False
         adds, dels = self._diff_fib(self.bird_fib["fib"], new_data)
         if len(adds) + len(dels) > 0:
@@ -266,6 +265,7 @@ class BirdCMDManager():
                 else:
                     # temp = []
                     # for src in srcs:
+                    #     self.logger.debug(src)
                     #     if "pro"
                     #     if src["type"] == "BGP univ":
                     #         temp.append(src)
@@ -530,6 +530,16 @@ class LinkManager(InfoManager):
 
     def get_all_link_meta(self):
         result = copy.deepcopy(self.data["links"])
+        return result
+
+    def get_all_rpdp_links(self) -> dict:
+        """return a dict of all rpdp links
+        key is link_name, value is link_meta
+        """
+        result = {}
+        for name, data in self.data["links"].items():
+            if data["link_type"] in RPDP_LINK_TYPES:
+                result[name] = data
         return result
 
     def _update_metric(self, d, msg):

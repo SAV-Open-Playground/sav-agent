@@ -551,7 +551,7 @@ def get_bird_spd_data(protocol_name, channel, rpdp_version, sn, origin_router_id
 
     addresses = ips2addresses(addresses)
     ret = {
-        "type": "spd",
+        "type": SPD,
         "protocol_name": protocol_name,
         "is_native_bgp": False,
         "channel": f"{channel}{rpdp_version}",

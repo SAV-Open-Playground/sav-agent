@@ -295,6 +295,7 @@ class SavAgent():
         return copy.deepcopy(self.data["roa_info"])
 
     def _get_route_pyroute(self, route, ifas) -> tuple[netaddr.IPNetwork, dict]:
+        # self.logger.debug(route)
         dst = route.get_attr('RTA_DST')
         oif = route.get_attr('RTA_OIF')
         gateway = route.get_attr('RTA_GATEWAY', "0.0.0.0")
@@ -619,12 +620,13 @@ class SavAgent():
 
     def get_fib(self, source="kernel", f_types=["remote"]):
         """
-        @param source: one of ["kernel","bird"]
+        @param source: one of valid_sources
         @param f_types: a list of data you want to include, element can be one of ["remote","local","default"]
         """
-        if not source in ["kernel", "bird"]:
+        valid_sources = ["kernel", "bird"]
+        if not source in valid_sources:
             self.logger.error(
-                f"invalid source:{source}, should be one of [kernel,bird]")
+                f"invalid source:{source}, should be one of {valid_sources}")
             return {}
         for t in f_types:
             if not t in ["remote", "local", "default"]:
@@ -743,6 +745,7 @@ class SavAgent():
         return is_kernel_fib_change, fib_adds, fib_dels
         """
         fib_adds, fib_dels = self._refresh_kernel_fib()
+        self.bird_man.update_bird_fib(self.config["local_as"])
         is_kernel_fib_change = ((len(fib_adds) != 0) or (len(fib_dels) != 0))
         self._refresh_adj_in()
         return is_kernel_fib_change, fib_adds, fib_dels
@@ -975,7 +978,7 @@ class SavAgent():
         intra_paths = []
         inter_paths = []
         if input_paths is None:
-            pp = self.get_fib("bird", ["remote"])
+            pp = self.get_fib("kernel", ["remote"])
             self.logger.debug(f"pp:{pp}")
             for prefix in pp:
                 for path in pp[prefix]["as_path"]:
@@ -1244,27 +1247,17 @@ class SavAgent():
         """
         build spd and send to all links
         """
-        my_asn = self.config["local_as"]
         # self.logger.debug("sending spd")
         if self.rpdp_app is None:
             self.logger.debug("rpdp_app missing, unable to send spd")
-            return False
-        # here the remote refers to prefixes that are not originated by this router
-        possible_prefixes = self.get_fib("bird", ["remote"])
-        inter_as_links = {}
-        for link_name in self.link_man.get_all_up_type(True, False):
-            inter_as_links[link_name] = self.link_man.get_by_name(link_name)
-
-        temp = {}
-        intra_as_links = {}
-        my_as_prefixes = {}
+            return
+        my_asn = self.config["local_as"]
+        # spd_prefixes are prefixes that are originated by other routers within my_asn
+        spd_prefixes = {}
         as_neighbors = {}
-        # self.logger.debug(inter_as_links)
-        # self.logger.debug(possible_prefixes)
+        possible_prefixes = self.get_fib("bird", ["remote"])
         for prefix, srcs in possible_prefixes.items():
-            # self.logger.debug(f"{prefix}:{srcs}")
             my_asn_prefix = False
-
             for src in srcs:
                 if src["origin_asn"] == my_asn:
                     my_asn_prefix = True
@@ -1287,11 +1280,13 @@ class SavAgent():
                         except IndexError:
                             pass
             if my_asn_prefix:
-                my_as_prefixes[prefix] = srcs
-
-        self.rpdp_app.send_spd(inter_as_links, as_neighbors, my_as_prefixes,
-                               self.config["local_as"], self.config["router_id"])
-        return True
+                spd_prefixes[prefix] = srcs
+        self.logger.debug(f"my_as_prefixes:{spd_prefixes.keys()}")
+        self.logger.debug(f"as_neighbors:{as_neighbors}")
+        self.rpdp_app.send_spd(
+            self.link_man.get_all_rpdp_links(),
+            as_neighbors, spd_prefixes,
+            my_asn, self.config["router_id"])
 
     def _interval_trigger(self):
         """
@@ -1303,7 +1298,7 @@ class SavAgent():
         data = {
             "last_trigger": t0,
             "events": {
-                "spd": {"last_trigger": t0, "interval": 5},
+                SPD: {"last_trigger": t0, "interval": 5},
                 "cfg_update": {"last_trigger": t0, "interval": 5}
                 # "spa_init": {"last_trigger": t0, "interval": 5}
             }
@@ -1316,7 +1311,7 @@ class SavAgent():
                     cur_t = time.time()
                     if cur_t - data["events"][event]["last_trigger"] > data["events"][event]["interval"]:
                         data["events"][event]["last_trigger"] = cur_t
-                        if event == "spd":
+                        if event == SPD:
                             self._refresh_kernel_fib()
                             # self.logger.debug("triggering spd")
                             if not self.data["metric"]["initial_fib_stable"]:
