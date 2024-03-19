@@ -176,8 +176,8 @@ class SavAgent():
         # value is list of directly connected as numbers, link is undirected
         self.data["sav_graph"] = {"nodes": {}, "links": {}}
         self.link_man = LinkManager(
-            self.data["links"], self, logger=self.logger)
-        self.data["kernel_fib"] = {"data": self.parse_kernel_fib3(),
+            self.data["links"], self, self.logger)
+        self.data["kernel_fib"] = {"data": self.parse_kernel_fib(),
                                    "update_time": time.time(),
                                    "check_time": time.time()}
         self.rpdp_app = None
@@ -313,7 +313,7 @@ class SavAgent():
             ret["Iface"] = f"{ifas[oif].ifname}"
         return p, ret
 
-    def parse_kernel_fib3(self) -> dict:
+    def parse_kernel_fib(self) -> dict:
         try:
             routes = IPRoute().get_routes(table=254)
             ifas = IPDB().interfaces
@@ -344,16 +344,7 @@ class SavAgent():
         tell if kernel fib has changed
         return adds, dels
         """
-        new_ = self.parse_kernel_fib3()
-        # new_ = parse_kernel_fib()
-        # for k in ["127.0.0.0/8", "127.0.0.1/32", "127.255.255.255/32"]:
-        #     if netaddr.IPNetwork(k) in new_:
-        #         del new_[netaddr.IPNetwork(k)]
-        # for k, v in new_.items():
-        #     self.logger.warn(f"{k}:{v}")
-        # for k, v in self.parse_kernel_fib3().items():
-        #     self.logger.warn(f"{k}:{v}")
-        #
+        new_ = self.parse_kernel_fib()
         if len(new_) == 0:
             self.logger.warning("kernel fib empty")
         if use_ignore_prefix:
@@ -435,7 +426,7 @@ class SavAgent():
         self.logger.debug("bird ready")
         while not self.data["metric"]["initial_fib_stable"]:
             # wait for fib to first fib stable
-            self._refresh_both_fib()
+            self._refresh_fib()
             time.sleep(3)
         self.logger.debug("fib stable")
         if self.config["enable_rpki"]:
@@ -459,7 +450,7 @@ class SavAgent():
 
     def _refresh_adj_in(self):
         for l_name, l_meta in self.link_man.get_all_link_meta().items():
-            if l_meta["link_type"] in ["dsav"]:
+            if l_meta["link_type"] in RPDP_LINK_TYPES:
                 proto_name = l_meta["protocol_name"]
                 ret = birdc_get_import(
                     self.logger, proto_name, f"ipv{self.config['auto_ip_version']}")
@@ -522,8 +513,7 @@ class SavAgent():
         self.logger.debug(f"before initial fib")
         fib_adds = self.get_fib("kernel", ["remote", "local"])
         self.logger.debug(f"initial fib:{fib_adds}")
-        bird_adds = self.get_fib("bird", ["remote", "local"])
-        self._notify_apps(True, fib_adds, {}, bird_adds, {})
+        self._notify_apps(True, fib_adds, {})
         self.logger.debug("starting main loop")
         while True:
             try:
@@ -747,23 +737,15 @@ class SavAgent():
         ret = temp
         return ret
 
-    def _refresh_both_fib(self):
+    def _refresh_fib(self):
         """
-        refresh both kernel fib and bird fib
-        return is_bird_fib_changed, is_kernel_fib_change, fib_adds, fib_dels, bird_adds,bird_dels
+        refresh kernel fib
+        return is_kernel_fib_change, fib_adds, fib_dels
         """
         fib_adds, fib_dels = self._refresh_kernel_fib()
-        # if self.bird_man.is_bird_ready():
-        #     is_bird_fib_changed, bird_adds, bird_dels = self.bird_man.update_fib(
-        #         self.config["local_as"])
-        # else:
-        if True:
-            is_bird_fib_changed = False
-            bird_adds = {}
-            bird_dels = {}
         is_kernel_fib_change = ((len(fib_adds) != 0) or (len(fib_dels) != 0))
         self._refresh_adj_in()
-        return is_bird_fib_changed, is_kernel_fib_change, fib_adds, fib_dels, bird_adds, bird_dels
+        return is_kernel_fib_change, fib_adds, fib_dels
 
     def _process_native_bgp_update(self) -> None:
         """
@@ -776,27 +758,18 @@ class SavAgent():
         """
         refresh both fibs and notify apps if fibs changed
         """
-        bird_changed, kernel_changed, fib_adds, fib_dels, bird_adds, bird_dels = self._refresh_both_fib()
+        kernel_changed, fib_adds, fib_dels = self._refresh_fib()
         # now we have the latest fib in kernel and bird
-        if bird_changed != kernel_changed:
-            self.logger.warning("bird fib and kernel fib change inconsistent")
-            self.logger.debug(f"bird_adds:{bird_adds}")
-            self.logger.debug(f"bird_dels:{bird_dels}")
-            self.logger.debug(f"fib_adds:{fib_adds}")
-            self.logger.debug(f"fib_dels:{fib_dels}")
-            self.logger.debug(bird_changed)
-            self.logger.debug(kernel_changed)
-        if bird_changed or kernel_changed:
-            self._notify_apps(False, fib_adds, fib_dels, bird_adds, bird_dels)
+        if kernel_changed:
+            self._notify_apps(False, fib_adds, fib_dels)
 
-    def _notify_apps(self, reset, fib_adds, fib_dels, bird_adds, bird_dels, app_list=None):
+    def _notify_apps(self, reset, fib_adds, fib_dels, app_list=None):
         """
         notify sav_apps to generate sav rules
         if reset is True, it will clear all existing rules and re-generate all rules(the fib_adds and fib_dels will be ignored)
         if app_list is None, all apps will be notified.
         """
         self.logger.debug(f"fib_dels:{fib_dels}")
-        self.logger.debug(f"bird_dels:{bird_dels}")
         if app_list is None:
             app_list = self.get_all_app_ids()
         self.logger.debug(f"app list:{app_list}")
@@ -817,7 +790,7 @@ class SavAgent():
                 else:
                     # app_type in [UrpfApp, EfpUrpfApp, FpUrpfApp]:
                     add_dict, del_list = app.generate_sav_rules(
-                        fib_adds, fib_dels, bird_adds, bird_dels, self.get_sav_rules_by_app(app_id))
+                        fib_adds, fib_dels, self.get_sav_rules_by_app(app_id))
                     # TODO filter
                     if self.config["use_ignore_nets"]:
                         temp = {}
@@ -1123,60 +1096,74 @@ class SavAgent():
         t0 = input_msg["schedule_dt"]
         # self.logger.debug(input_msg)
         log_msg = f"start msg, pkt_id:{input_msg['pkt_id']}, msg_type: {input_msg['msg_type']}"
-        key_types = [("msg_type", str), ("pkt_id", int), ("pkt_rec_dt", float)]
+        key_types = [("msg_type", str), ("pkt_id", int),
+                     ("pkt_rec_dt", float)]
         keys_types_check(input_msg, key_types)
         msg, m_t = input_msg["msg"], input_msg["msg_type"]
-        match m_t:
-            case "link_state_change":
-                self._process_link_state_change(input_msg)
-            case "bird_bgp_config":
-                # TODO for faster performance
-                pass
-            case "bgp_update":
-                self._process_native_bgp_update()
-            case "rpdp_update":
-                # self.logger.debug(f"rpdp_update:{msg}")
-                link_name = input_msg["source_link"]
-                link_meta = self.link_man.get_by_name(link_name)
-                self.rpdp_app.process_spa(input_msg, link_meta)
-            case "rpdp_route_refresh":
-                link_name = input_msg["source_link"]
-                link_meta = self.link_man.get_by_name(link_name)
-                self.rpdp_app.process_spd(input_msg, link_meta)
-            case "grpc_msg":
-                if self.rpdp_app:
-                    self.rpdp_app.process_grpc_msg(input_msg)
-            case "quic_msg":
-                if self.rpdp_app:
-                    self.rpdp_app.process_quic_msg(input_msg)
-            case "perf_test":
-                if self.rpdp_app:
-                    self.rpdp_app.perf_test_send(
-                        list(map(json.loads, msg)))
-            case "passport_key_exchange":
-                key = "key_exchange"
-                self.passport_app.update_metric(
-                    msg, key, False, True)
-                self.passport_app.process_key_publish(input_msg)
-                self.passport_app.update_metric(
-                    msg, key, False, False, t0)
-            case "passport_send_pkt":
-                key = "pkt"
-                self.passport_app.update_metric(
-                    msg, key, True, True)
-                target_ip = msg["target_ip"]
-                self.passport_app.send_pkt(target_ip, msg["data"])
-                self.passport_app.update_metric(
-                    msg, key, True, False, t0)
-            case "passport_recv_pkt":
-                key = "pkt"
-                self.passport_app.update_metric(
-                    input_msg["msg"], key, False, True)
-                self.passport_app.rec_pkt(input_msg)
-                self.passport_app.update_metric(
-                    input_msg["msg"], key, False, False, t0)
-            case _:
-                self.logger.warning(f"unknown msg type: [{m_t}]\n{input_msg}")
+        if m_t == "link_state_change":
+            self._process_link_state_change(input_msg)
+        elif m_t == "bgp_update":
+            self._process_native_bgp_update()
+        #
+        elif "dst_sav_app" in input_msg:
+            dst_sav_app = input_msg["dst_sav_app"]
+            if dst_sav_app == RPDP_ID:
+                if not self.rpdp_app:
+                    self.logger.warning(
+                        f"{RPDP_ID} missing, unable to process msg for {RPDP_ID}")
+                self.rpdp_app.recv_msg(input_msg)
+            else:
+                self.logger.error(f"unknown dst_sav_app:{dst_sav_app}")
+
+        else:
+            raise ValueError(f"unknown msg type: {input_msg}")
+        # match m_t:
+        #     # case "bird_bgp_config":
+        #     # TODO for faster performance
+        #     # pass
+        #     case "rpdp-http_recv_pkt":
+        #         # self.logger.debug(f"rpdp-http_recv_pkt:{msg}")
+        #         link_name = input_msg["source_link"]
+        #         link_meta = self.link_man.get_by_name(link_name)
+        #         self.rpdp_app.process_spa(input_msg, link_meta)
+        #     case "rpdp_route_refresh":
+        #         link_name = input_msg["source_link"]
+        #         link_meta = self.link_man.get_by_name(link_name)
+        #         self.rpdp_app.process_spd(input_msg, link_meta)
+        #     case "grpc_msg":
+        #         if self.rpdp_app:
+        #             self.rpdp_app.process_grpc_msg(input_msg)
+        #     case "quic_msg":
+        #         if self.rpdp_app:
+        #             self.rpdp_app.process_quic_msg(input_msg)
+        #     case "perf_test":
+        #         if self.rpdp_app:
+        #             self.rpdp_app.perf_test_send(
+        #                 list(map(json.loads, msg)))
+        #     case "passport_key_exchange":
+        #         key = "key_exchange"
+        #         self.passport_app.update_metric(
+        #             msg, key, False, True)
+        #         self.passport_app.process_key_publish(input_msg)
+        #         self.passport_app.update_metric(
+        #             msg, key, False, False, t0)
+        #     case "passport_send_pkt":
+        #         key = "pkt"
+        #         self.passport_app.update_metric(
+        #             msg, key, True, True)
+        #         target_ip = msg["target_ip"]
+        #         self.passport_app.send_pkt(target_ip, msg["data"])
+        #         self.passport_app.update_metric(
+        #             msg, key, True, False, t0)
+        #     case "passport_recv_pkt":
+        #         key = "pkt"
+        #         self.passport_app.update_metric(
+        #             input_msg["msg"], key, False, True)
+        #         self.passport_app.rec_pkt(input_msg)
+        #         self.passport_app.update_metric(
+        #             input_msg["msg"], key, False, False, t0)
+        #     case _:
+        #         self.logger.warning(f"unknown msg type: [{m_t}]\n{input_msg}")
         t1 = time.time()
         # if m_t in ["quic_msg", "passport_pkt", "grpc_msg", "bgp_update"]:
         #     if len(input_msg["msg"]["sav_nlri"]) > 0:

@@ -54,7 +54,7 @@ class EfpUrpfApp(SavApp):
             if not link_meta["is_interior"]:
                 continue
                 # only works for interior links
-            if link_meta["link_type"] in ["dsav"]:
+            if link_meta["link_type"] in ["bgp"]:
                 self.protocol_metas.append(link_meta)
 
     def _dict_to_rules(self, RPF_dict):
@@ -79,7 +79,7 @@ class EfpUrpfApp(SavApp):
             ret = birdc_get_import(self.logger, protocol_name, f"rpdp{v}")
         return ret
 
-    def generate_sav_rules(self, fib_adds, fib_dels, bird_add, bird_dels, old_rules):
+    def generate_sav_rules(self, fib_adds, fib_dels, old_rules):
         """
         fib change detected
         """

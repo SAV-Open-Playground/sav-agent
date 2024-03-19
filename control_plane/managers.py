@@ -198,38 +198,38 @@ class BirdCMDManager():
     #     # self.logger.debug(prefix_data)
     #     return prefix_data
 
-    def _tell_prefix(self, prefix, prefix_srcs, my_asn):
-        """
-        tell if prefix is a local remote or default
-        local: the prefixes that I will broadcast
-        remote: the prefixes that I learned from other device
-        default: the default route
-        """
-        device_flag = False
-        bgp_flag = False
-        static_flag = False
-        if prefix.prefixlen == 0:
-            return "default"
-        for src in prefix_srcs:
-            if not "type" in src:
-                self.logger.error(src)
-                self.logger.error(prefix)
-                continue
-            if src["type"] == "device univ":
-                device_flag = True
-            if src["type"] == "BGP univ":
-                bgp_flag = True
-            if src["type"] == "static univ":
-                static_flag = True
-        if static_flag:
-            return "local"
-        if device_flag:
-            return "local"
-        if bgp_flag:
-            return "remote"
-        self.logger.error("unable to tell")
-        self.logger.error(src)
-        self.logger.error(prefix)
+    # def _tell_prefix(self, prefix, prefix_srcs, my_asn):
+    #     """
+    #     tell if prefix is a local remote or default
+    #     local: the prefixes that I will broadcast
+    #     remote: the prefixes that I learned from other device
+    #     default: the default route
+    #     """
+    #     device_flag = False
+    #     bgp_flag = False
+    #     static_flag = False
+    #     if prefix.prefixlen == 0:
+    #         return "default"
+    #     for src in prefix_srcs:
+    #         if not "type" in src:
+    #             self.logger.error(src)
+    #             self.logger.error(prefix)
+    #             continue
+    #         if src["type"] == "device univ":
+    #             device_flag = True
+    #         if src["type"] == "BGP univ":
+    #             bgp_flag = True
+    #         if src["type"] == "static univ":
+    #             static_flag = True
+    #     if static_flag:
+    #         return "local"
+    #     if device_flag:
+    #         return "local"
+    #     if bgp_flag:
+    #         return "remote"
+    #     self.logger.error("unable to tell")
+    #     self.logger.error(src)
+    #     self.logger.error(prefix)
 
     def _parse_bird_fib(self, log_err, my_asn):
         """
@@ -404,7 +404,7 @@ class LinkManager(InfoManager):
 
     # TODO: we have three types of link: native bgp, modified bgp and grpc
 
-    def __init__(self, data, agent, logger=None):
+    def __init__(self, data, agent, logger):
         super(LinkManager, self).__init__(data, logger)
         self._send_buff = queue.Queue()
         self.bird_cmd_buff = queue.Queue()
@@ -414,9 +414,12 @@ class LinkManager(InfoManager):
         self._job_id = 0
         self._add_lock = False
         self.agent = agent
-        self.read_brd_cfg(agent.config['local_as'])
+        self.valid_types = ["bgp", RPDP_OVER_BGP, RPDP_OVER_HTTP]
+        self.add_sa_cfg_links(agent.config)
         self.bird_man = BirdCMDManager(logger)
 
+    def recv_http_post(self, msg):
+        self.logger.debug(f"recv_http_post got {msg}")
     def get_link_state(self, link_name):
         """
         return the state of the link
@@ -428,7 +431,7 @@ class LinkManager(InfoManager):
         if found, return the deepcopy of the link meta
         """
         if not name in self.data["links"]:
-            self.logger.debug(self.data)
+            # self.logger.debug(self.data)
             raise ValueError(f"link {name} not found")
         try:
             return copy.deepcopy(self.data["links"][name])
@@ -458,12 +461,8 @@ class LinkManager(InfoManager):
         # self.logger.debug(self.data["links"])
         raise ValueError(f"local_ip {local_ip} not found")
 
-    def update_config(self, config) -> None:
-        self.config = config
-
     def put_send_async(self, msg) -> None:
         """
-        supported type : ["http-post","grpc","quic","dsav"]
         timeout is in seconds, if set to 0, then will keep trying until sent
         "retry" is optional, if set, then will retry for the given times (default is 10)
         """
@@ -473,7 +472,7 @@ class LinkManager(InfoManager):
                      ("timeout", int), ("store_rep", bool)]
         keys_types_check(msg, key_types)
         # self.logger.debug(f"passed key_types_check")
-        supported_type = ["http-post", "dsav"]
+        supported_type = [RPDP_OVER_HTTP, RPDP_OVER_BGP]
 
         if not msg["msg_type"] in supported_type:
             raise ValueError(
@@ -497,61 +496,35 @@ class LinkManager(InfoManager):
         """
         raise NotImplementedError
 
-    def read_brd_cfg(self, my_asn) -> None:
+    def add_sa_cfg_links(self, sa_config) -> None:
         """
         read link meta from bird config, call if needed
         """
-        f = open("/usr/local/etc/bird.conf", "r")
-        data = f.readlines()
-        f.close()
-        for i in range(len(data)):
-            if data[i].startswith("protocol bgp savbgp"):
-                data = data[i:]
-                break
+        my_asn = sa_config["local_as"]
         temp = {}
-        proto_name = None
-        for l in data:
-            l = l.strip()
-            # self.logger.debug(l)
-            if l.startswith("protocol"):
-                l = l.split(" ")
-                proto_name = l[2]
-                meta = {
-                    "initial_broadcast": False,
-                    "as4_session": True,
-                    "protocol_name": proto_name,
-                    "status": True,  # faster
-                    "interface_name": f"eth_{proto_name.split('_')[2]}"
-                }
-
-                if "sav_inter" in l:
-                    meta["link_type"] = "dsav"
-                elif "basic" in l:
-                    meta["link_type"] = "native_bgp"
-                else:
-                    self.logger.error(f"unknown link type: {l}")
-                temp[proto_name] = meta
-            elif l.startswith("local role"):
-                l = l.split(" ")
-                local_role = l[-1][:-1]
-                temp[proto_name]["local_role"] = local_role
-                match local_role:
-                    case "peer":
-                        temp[proto_name]["remote_role"] = local_role
-                    case "provider":
-                        temp[proto_name]["remote_role"] = "customer"
-                    case "customer":
-                        temp[proto_name]["remote_role"] = "provider"
-            elif l.startswith("neighbor"):
-                l = l.split(" ")
-                temp[proto_name]["remote_ip"] = netaddr.IPAddress(l[1])
-                temp[proto_name]["remote_as"] = int(l[-1][:-1])
-                is_inter = temp[proto_name]["remote_as"] != my_asn
-                temp[proto_name]["is_interior"] = is_inter
-            elif l.startswith("source address"):
-                l = l.split(" ")
-                temp[proto_name]["local_ip"] = netaddr.IPAddress(l[-1][:-1])
+        for proto_name, cfg_link in sa_config["link_map"].items():
+            # self.logger.debug(proto_name)
+            link_meta = {
+                "initial_broadcast": False,
+                "as4_session": True,
+                "protocol_name": proto_name,
+                "status": True,
+                "interface_name": f"eth_{proto_name.split('_')[2]}",
+                "remote_ip": netaddr.IPAddress(cfg_link['link_data']["remote_ip"]),
+                "local_ip": netaddr.IPAddress(cfg_link['link_data']["local_ip"]),
+                "remote_role": cfg_link['link_data']['remote_role'],
+                "local_role": cfg_link['link_data']['local_role'],
+                "remote_as": cfg_link['link_data']['remote_as']
+            }
+            link_meta["is_interior"] = link_meta["remote_as"] != sa_config["local_as"]
+            if not cfg_link["link_type"] in self.valid_types:
+                self.logger.error(f"unsupported value:{cfg_link['link_type']}")
+                continue
+            link_meta["link_type"] = cfg_link["link_type"]
+            temp["_".join(
+                [link_meta["link_type"], sa_config['device_id'], cfg_link['link_data']['remote_id']])] = link_meta
         self.data["check_time"] = time.time()
+        self.logger.debug(temp.keys())
         self.data["links"] = temp
         self.data["update_time"] = self.data["check_time"]
 
@@ -573,32 +546,39 @@ class LinkManager(InfoManager):
     def send_msg(self, msg) -> None:
         # self.logger.debug(msg)
         msg["schedule_dt"] = time.time()
-        match msg["msg_type"]:
-            case "http-post":
-                sent = self._send_http_post(msg)
-            case "dsav":
-                self.bird_cmd_buff.put(msg["data"])
-                try:
-                    msg["call_agent_msg_dt"] = time.time()
-                    self.agent.bird_man.bird_cmd("call_agent")
-                    sent = True
-                except Exception as e:
-                    self.logger.exception(e)
-                    sent = False
-            case "grpc":
-                raise NotImplementedError
-            case _:
-                raise ValueError(f"unknown msg type {msg['type']}")
+        m_t = msg["msg_type"]
+        if m_t == RPDP_OVER_HTTP:
+            sent = self._send_http_post(msg)
+        elif m_t == RPDP_OVER_BGP:
+            desired_link_name = msg["data"]["protocol_name"]
+            link = self.data["links"].get(desired_link_name, None)
+            if not link:
+                self.logger.error(
+                    f"link {desired_link_name} not found in {self.data['links']}")
+                sent = False
+                return
+            if link["link_type"] != RPDP_OVER_BGP:
+                self.logger.error(
+                    f"link {desired_link_name} is not dsav")
+                sent = False
+                return
+            # self.logger.debug(msg["data"])
+            self.bird_cmd_buff.put(msg["data"])
+            try:
+                msg["call_agent_msg_dt"] = time.time()
+                self.agent.bird_man.bird_cmd("call_agent")
+                sent = True
+            except Exception as e:
+                self.logger.exception(e)
+                sent = False
+        else:
+            raise NotImplementedError
         msg["finished_dt"] = time.time()
         # update_metric
         if msg["source_app"] == RPDP_ID:
-            match msg["msg_type"]:
-                case "dsav":
-                    temp = self._update_metric(
-                        self.agent.rpdp_app.metric["dsav"], msg)
-                    self.agent.rpdp_app.metric["dsav"] = temp
-                case _:
-                    raise ValueError(f"unknown msg type {msg['type']}")
+            temp = self._update_metric(
+                self.agent.rpdp_app.metric[m_t], msg)
+            self.agent.rpdp_app.metric[m_t] = temp
         else:
             raise ValueError(f"unknown msg source_app {msg['source_app']}")
         if not sent:
@@ -609,10 +589,12 @@ class LinkManager(InfoManager):
             # self.logger.debug(f"send success {msg}")
 
     def _send_http_post(self, msg):
+        # if msg["timeout"] == 0: will keep trying until sent
+        # self.logger.debug(msg)
         if msg["timeout"] == 0:
             while True:
                 rep = self.post_session.post(
-                    msg["url"], json=msg["data"], timeout=3)
+                    msg["url"], data=pickle.dumps(msg["data"]), timeout=3)
                 if rep.status_code == 200:
                     if msg["store_rep"]:
                         self.result_buff[msg["pkt_id"]] = rep.json()
@@ -621,7 +603,7 @@ class LinkManager(InfoManager):
             retry = 10
         for i in range(retry):
             rep = self.post_session.post(
-                msg["url"], json=msg["data"], timeout=msg["timeout"])
+                msg["url"], data=pickle.dumps(msg["data"]), timeout=msg["timeout"])
             if rep.status_code == 200:
                 self.result_buff[msg["pkt_id"]] = rep.json()
                 return True
@@ -637,7 +619,7 @@ class LinkManager(InfoManager):
         if link_name in self.data:
             self.logger.warning(f"key {link_name} already exists")
             return
-        if not link_type in ["native_bgp", "dsav"]:
+        if not link_type in ["bgp", "dsav"]:
             self.logger.error(f'unknown link_type: {link_type}')
             return
         self.data[link_name] = meta_dict
@@ -679,7 +661,7 @@ class LinkManager(InfoManager):
         for link_name, link in self.data["links"].items():
             # self.logger.debug(link)
             if link["status"]:
-                if link["link_type"] == "native_bgp":
+                if link["link_type"] == "bgp":
                     # self.logger.debug(link["protocol_name"])
                     if include_native_bgp:
                         temp.append(link_name)
@@ -723,7 +705,7 @@ class LinkManager(InfoManager):
                      ("is_interior", bool), ("status", bool),
                      ("initial_broadcast", bool)]
         keys_types_check(meta, key_types)
-        if not meta["link_type"] in ["native_bgp", "dsav"]:
+        if not meta["link_type"] in ["bgp", "dsav"]:
             raise ValueError(f'unknown link_type: {meta["link_type"]}')
         return True
 

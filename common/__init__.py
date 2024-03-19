@@ -327,7 +327,7 @@ class SavApp():
     def check_status(self):
         raise NotImplementedError
 
-    def generate_sav_rules(self, fib_adds, fib_dels, bird_add, bird_dels, old_rules):
+    def generate_sav_rules(self, fib_adds, fib_dels, old_rules):
         """
         generate sav rules based on the current information
         """
@@ -451,42 +451,6 @@ def birdc_get_protos_by(logger, key, value):
         if a[key] == value:
             result.append(a)
     return result
-
-
-def parse_kernel_fib() -> dict:
-    """
-    execute and parse the output of "route -n -F" command
-    """
-    v4table = run_cmd("route -n -F")
-    v6table = run_cmd("route -6 -n -F")
-    ret = {}
-    for table in [v4table, v6table]:
-        while "\t" in table:
-            table = table.replace("\t", " ")
-        while "  " in table:
-            table = table.replace("  ", " ")
-        table = table.split("\n")
-        table.pop()  # removing tailing empty line
-        _ = table.pop(0)
-        table = list(map(lambda x: x.split(" "), table))
-        headings = table.pop(0)
-        table = list(map(lambda x: dict(zip(headings, x)), table))
-        for row in table:
-            if 'Genmask' in row:
-                prefix = netaddr.IPNetwork(
-                    row["Destination"] + "/" + row["Genmask"])
-                ret[prefix] = row
-            else:
-                prefix = netaddr.IPNetwork(row["Destination"])
-                ret[prefix] = row
-    # filter remove the default route
-    r4_default = netaddr.IPNetwork("0.0.0.0/0")
-    r6_default = netaddr.IPNetwork("::/0")
-    if r4_default in ret:
-        del ret[r4_default]
-    if r6_default in ret:
-        del ret[r6_default]
-    return ret
 
 
 def birdc_get_import(logger, protocol_name, channel_name="ipv4"):

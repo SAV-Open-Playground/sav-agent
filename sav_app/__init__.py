@@ -5,10 +5,6 @@
    Description :
    Author :       MichaelYoung
    date:          2024/1/2
--------------------------------------------------
-   Change Activity:
-                   2024/1/2:
--------------------------------------------------
 """
 # imort your sav_app here and include your string_id here
 from .app_rpdp import RPDPApp, RPDP_ID

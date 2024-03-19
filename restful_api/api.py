@@ -11,10 +11,12 @@
 -------------------------------------------------
 """
 import json
+import pickle
 import time
 import copy
+
 from flask import request, Blueprint
-from common.sav_common import TIMEIT_THRESHOLD, json_w
+from common.sav_common import RPDP_OVER_BGP, RPDP_OVER_HTTP, TIMEIT_THRESHOLD, json_w
 from common.main_logger import LOGGER
 from control_plane import SA
 from data_plane.data_plane_enable import interceptor
@@ -64,9 +66,9 @@ def index():
         else:
             msg["source_link"] = msg["msg"]["protocol_name"]
             if not m_t == "link_state_change":
-                msg['link_type'] = "native_bgp"
+                msg['link_type'] = "bgp"
                 if RPDP_ID in msg["msg"]["channels"]:
-                    msg['link_type'] = "dsav"
+                    msg['link_type'] = RPDP_OVER_BGP
         msg["pkt_rec_dt"] = t0
         SA.put_msg(msg)
         rep = {"code": "0000", "message": "success"}
@@ -283,3 +285,21 @@ def refresh_proto(active_app):
             "code": "-1",
             "message": "the tool parameter don't exits! Please check your parameter"}
     return {"code": "0000", "message": f"{None}"}
+
+
+@api_blueprint.route(f'/{RPDP_OVER_HTTP}/', methods=["POST", "GET"])
+def recv_rpdp_msg():
+    try:
+        msg = pickle.loads(request.data)
+        src_link = msg["link_name"].split("_")
+        src_link.insert(1, src_link.pop(-1))
+        SA.put_msg({"msg": msg,
+                    "source_link": "_".join(src_link),
+                    "msg_type": f"{RPDP_OVER_HTTP}_recv_pkt",
+                    "dst_sav_app": RPDP_ID,
+                    "source_app": "",
+                    "pkt_rec_dt": time.time()})
+        return {"code": "0000", "message": "msg received"}
+    except Exception as e:
+        LOGGER.exception(e)
+        return {"code": "5000", "message": f"{e}"}

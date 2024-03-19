@@ -73,7 +73,7 @@ class FpUrpfApp(SavApp):
                 raise ValueError(f"unknown ip version {prefix.version}")
         return origin_interfaces_table, origin_prefix_table
 
-    def generate_sav_rules(self, fib_adds, fib_dels, bird_add, bird_dels, old_rules):
+    def generate_sav_rules(self, fib_adds, fib_dels, old_rules):
         """
         only implement the inter-as mode
         """

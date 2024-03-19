@@ -54,7 +54,7 @@ class BarApp(SavApp):
                 result.add(meta["remote_as"])
         return result
 
-    def generate_sav_rules(self, fib_adds, fib_dels, bird_add, bird_dels, old_rules):
+    def generate_sav_rules(self, fib_adds, fib_dels, old_rules):
         """
         Although ASPA and ROA is included, only BGP update(FIB change) will trigger BAR to generate rules
         """

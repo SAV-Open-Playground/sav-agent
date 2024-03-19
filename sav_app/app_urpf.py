@@ -27,7 +27,7 @@ class UrpfApp(SavApp):
         self.mode = mode
         super(UrpfApp, self).__init__(agent, name, logger)
 
-    def generate_sav_rules(self, fib_adds, fib_dels, bird_add,bird_dels, old_rules):
+    def generate_sav_rules(self, fib_adds, fib_dels, old_rules):
         """
         generate sav rule based on the latest fib,
         only add is implemented
