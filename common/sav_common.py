@@ -87,6 +87,7 @@ def parse_bird_table(table, logger=None):
         else:
             rows.append(this_row)
             this_row = [line]
+    rows.append(this_row)
     while [] in rows:
         rows.remove([])
     for row in rows:
@@ -95,7 +96,7 @@ def parse_bird_table(table, logger=None):
         # if "blackhole" in heading:
         # continue
         prefix = heading.split(" ")[0]
-
+        
         if "-" in prefix:
             logger.debug(prefix)
             prefix = prefix.split("-")[0]
@@ -499,6 +500,7 @@ def birdc_get_import(logger, protocol_name, channel_name="ipv4"):
     default = {"import": {}}
     cmd = f"show route all import table {protocol_name}.{channel_name}"
     data = birdc_cmd(logger, cmd)
+    # logger.debug(data)
     if data is None:
         return default
     if data.startswith("No import table in channel"):
