@@ -353,8 +353,8 @@ class RPDPApp(SavApp):
     def send_msg(self, msg, config, link):
         """send msg to other sav agent"""
         t0 = time.time()
-        self.logger.debug(f"sending {msg}")
-        self.logger.debug(f"link: {link}")
+        # self.logger.debug(f"sending {msg}")
+        # self.logger.debug(f"link: {link}")
         try:
             map_data = {}
             link_name = link["protocol_name"]
@@ -976,7 +976,7 @@ class RPDPApp(SavApp):
         # self.logger.debug(msg)
         # self.logger.debug(link_meta)
         rpdp_msg = msg["msg"]
-        self.logger.debug(rpdp_msg)
+        # self.logger.debug(rpdp_msg)
         is_inter = link_meta["is_interior"]
         if is_inter:
             data = self.spa_data["inter"]
@@ -984,7 +984,7 @@ class RPDPApp(SavApp):
             data = self.spa_data["intra"]
         log_spa_changes = {"add": [], "del": []}
         for add_nlri in rpdp_msg['spa_add']:
-            self.logger.debug(add_nlri)
+            # self.logger.debug(add_nlri)
             if is_inter:
                 origin_key = add_nlri["origin_asn"]
             else:
@@ -1021,11 +1021,16 @@ class RPDPApp(SavApp):
             self.spa_data["inter"] = data
         else:
             self.spa_data["intra"] = data
-        self.logger.debug("log_spa_changes")
         for i in log_spa_changes['add']:
-            self.logger.debug(f"+{i}")
+            if is_inter:
+                self.logger.debug(f"INTER spa+{i}")
+            else:
+                self.logger.debug(f"INTRA spa+{i}")
         for i in log_spa_changes['del']:
-            self.logger.debug(f"-{i}")
+            if is_inter:
+                self.logger.debug(f"INTER spa-{i}")
+            else:
+                self.logger.debug(f"INTRA spa-{i}")
         # self.logger.debug(msg)
         self._log_for_front(msg, "receive", link_meta,
                             SPA, rpdp_msg['spa_add'], rpdp_msg['spa_del'])
@@ -1060,7 +1065,7 @@ class RPDPApp(SavApp):
             ret += f"{peer_asn}"
         return ret
 
-    def _get_spd_msg(self, as_neighbors, my_asn, my_router_id, link_name, link_meta, dst_ips=[]) -> dict:
+    def _get_spd_msg(self, as_neighbors, my_asn, my_router_id, link_name, link_meta, dst_router_ids=[]) -> dict:
         is_inter = link_meta["is_interior"]
         remote_as = link_meta["remote_as"]
         # TODO addresses,opt_data,neighbor_as_list
@@ -1079,12 +1084,12 @@ class RPDPApp(SavApp):
             ret["opt_data"] = []
         else:
             ret["opt_data"] = []
-            ret["addresses"] = dst_ips
+            ret["addresses"] = dst_router_ids
         return ret
 
     def send_spd(self, links, as_neighbors, my_as_prefixes, my_asn, my_router_id) -> None:
         """send spd on rpdp links"""
-        self.logger.debug(links.keys())
+        # self.logger.debug(links.keys())
         for link_name, link_meta in links.items():
             spd_msg = self._get_spd_msg(
                 as_neighbors, my_asn, my_router_id, link_name, link_meta, [link_meta["remote_ip"]])
@@ -1097,7 +1102,7 @@ class RPDPApp(SavApp):
                     "timeout": 10,
                     "store_rep": False,
                     "source_app": self.app_id}
-                self.logger.debug(data)
+                # self.logger.debug(data)
                 self.agent.link_man.put_send_async(data)
             else:
                 self.logger.error(
@@ -1111,7 +1116,7 @@ class RPDPApp(SavApp):
         """
 
         # send intra-as spds
-        self.logger.debug(remote_links.keys())
+        # self.logger.debug(remote_links.keys())
         # self.logger.debug(as_neighbors)
         # self.logger.debug(my_as_prefixes)
         timeout = 0
@@ -1134,7 +1139,7 @@ class RPDPApp(SavApp):
                                          is_interior=is_interior, my_as=my_asn,
                                          peer_as=peer_as, peer_neighbor_as_list=as_neighbors[peer_as]
                                          )
-                self.logger.debug(data)
+                # self.logger.debug(data)
                 msg = get_agent_bird_msg(
                     data, link_meta["link_type"], self.app_id, timeout, False)
                 # self.logger.debug(msg)
@@ -1206,7 +1211,6 @@ class RPDPApp(SavApp):
         process rpdp route refresh message
         """
         # self.logger.debug(msg)
-
         spd_msg = msg['msg']
         link_type = link_meta["link_type"]
         is_inter = link_meta["is_interior"]
@@ -1228,11 +1232,10 @@ class RPDPApp(SavApp):
             return
         spd_msg["origin_ip"] = netaddr.IPAddress(spd_msg['origin_router_id'])
         del spd_msg['origin_router_id']
-        self.logger.debug(spd_msg)
+        # self.logger.debug(spd_msg)
         if is_inter:
             need_to_relay = self.agent.config["local_as"] != spd_msg["origin_asn"]
             data = self.spd_data["inter"]
-
             new_ases = [spd_msg["origin_asn"]]
             new_ases.extend(spd_msg["neighbor_as_list"])
             for asn in new_ases:
@@ -1468,7 +1471,7 @@ class RPDPApp(SavApp):
         ) if v["link_type"] in RPDP_LINK_TYPES}
         local_prefixes = self.get_local_prefixes()
         # self.logger.debug(f"local_prefixes: {local_prefixes}")
-        self.logger.debug(f"rpdp_links: {rpdp_links.keys()}")
+        # self.logger.debug(f"rpdp_links: {rpdp_links.keys()}")
         for link_name, link in rpdp_links.items():
             if link["initial_broadcast"]:
                 continue
@@ -1495,9 +1498,11 @@ class RPDPApp(SavApp):
                 continue
             this_spd = spd_data[router_id]
             for allowed_link_name in this_spd:
+                # self.logger.debug(allowed_link_name)
                 link_meta = self.agent.link_man.get_by_name(
                     allowed_link_name)
                 local_ip = link_meta["local_ip"]
+                # self.logger.debug(local_ip)
                 for prefix, prefix_data in prefixes_data.items():
                     try:
                         rule = get_sav_rule(
@@ -1525,13 +1530,13 @@ class RPDPApp(SavApp):
 
         spa_data = self.spa_data["intra"]
         spd_data = self.spd_data["intra"]
-        self.logger.debug(f"INTRA spa_data: {spa_data}")
-        self.logger.debug(f"INTRA spd_data: {spd_data}")
+        # self.logger.debug(f"INTRA spa_data: {spa_data}")
+        # self.logger.debug(f"INTRA spd_data: {spd_data}")
         new_intra_rules = self._gen_rules(spa_data, spd_data, False)
         spa_data = self.spa_data["inter"]
         spd_data = self.spd_data["inter"]
-        self.logger.debug(f"INTER spa_data: {spa_data}")
-        self.logger.debug(f"INTER spd_data: {spd_data}")
+        # self.logger.debug(f"INTER spa_data: {spa_data}")
+        # self.logger.debug(f"INTER spd_data: {spd_data}")
         new_inter_rules = self._gen_rules(spa_data, spd_data, True)
         local_prefixes = self.get_local_prefixes()
         new_rules = {**new_intra_rules, **new_inter_rules}

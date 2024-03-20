@@ -114,6 +114,7 @@ class EfpUrpfApp(SavApp):
             roa_info = self.agent.get_roa_info()
         if self.aspa:
             aspa_info = self.agent.get_aspa_info()
+        # self.logger.debug(self.protocol_metas)
         for meta in self.protocol_metas:
             if not meta["is_interior"]:
                 # only works for interior links
@@ -123,7 +124,8 @@ class EfpUrpfApp(SavApp):
             all_int_in[protocol_name] = {"meta": meta}
             all_int_in[protocol_name]["adj-in"] = self._parse_import_table(
                 protocol_name)
-            # self.logger.debug(msg=f"all_int_in:{all_int_in[protocol_name]['adj-in']}")
+            # self.logger.debug(
+            # msg=f"all_int_in of {protocol_name}:{all_int_in[protocol_name]['adj-in']}")
             # filter out the adj-in that does not match the roa
             if self.roa:
                 temp = {}

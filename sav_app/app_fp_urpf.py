@@ -42,6 +42,7 @@ class FpUrpfApp(SavApp):
         origin_interfaces_table = {}
         origin_prefix_table = {}
         for prefix, srcs in self.agent.get_fib("bird", ["remote"]).items():
+            # self.logger.debug(prefix)
             if prefix.version in [4, 6]:
                 for line in srcs:
                     if "origin_asn" in line:
@@ -63,10 +64,15 @@ class FpUrpfApp(SavApp):
             origin_prefix_table[my_asn] = set()
             origin_interfaces_table[my_asn] = set()
         for prefix, srcs in self.agent.get_fib("bird", ["local"]).items():
+            self.logger.debug((prefix, srcs))
             if prefix.version in [4, 6]:
                 for line in srcs:
                     origin_prefix_table[my_asn].add(prefix)
                     interface = line.get("interface_name", None)
+                    if interface:
+                        origin_interfaces_table[my_asn].add(interface)
+                    else:
+                        interface = line.get("device", None)
                     if interface:
                         origin_interfaces_table[my_asn].add(interface)
             else:
@@ -78,8 +84,8 @@ class FpUrpfApp(SavApp):
         only implement the inter-as mode
         """
         origin_interfaces_table, origin_prefix_table = self._get_prefix_interface_table()
-        self.logger.debug(f"origin_interfaces_table={origin_interfaces_table}")
-        self.logger.debug(f"origin_prefix_table={origin_prefix_table}")
+        # self.logger.debug(f"origin_interfaces_table={origin_interfaces_table}")
+        # self.logger.debug(f"origin_prefix_table={origin_prefix_table}")
         add_dict = {}
         del_set = set()
         new_rules = {}
@@ -95,7 +101,7 @@ class FpUrpfApp(SavApp):
             if not r_k in new_rules:
                 del_set.add(r_k)
         self.rules = new_rules
-        self.logger.debug(f"new_rules={new_rules}")
+        # self.logger.debug(f"new_rules={new_rules}")
         # self.logger.debug(f"{self.app_id}: add_rules={add_dict}")
         # self.logger.debug(f"{self.app_id}: del_rules={del_set}")
         return add_dict, del_set

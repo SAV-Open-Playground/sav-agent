@@ -290,6 +290,9 @@ def refresh_proto(active_app):
 @api_blueprint.route(f'/{RPDP_OVER_HTTP}/', methods=["POST", "GET"])
 def recv_rpdp_msg():
     try:
+
+        # LOGGER.debug(dir(request))
+        # LOGGER.debug(request.remote_addr)
         msg = pickle.loads(request.data)
         src_link = msg["link_name"].split("_")
         src_link.insert(1, src_link.pop(-1))

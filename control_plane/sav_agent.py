@@ -1281,8 +1281,8 @@ class SavAgent():
                             pass
             if my_asn_prefix:
                 spd_prefixes[prefix] = srcs
-        self.logger.debug(f"my_as_prefixes:{spd_prefixes.keys()}")
-        self.logger.debug(f"as_neighbors:{as_neighbors}")
+        # self.logger.debug(f"my_as_prefixes:{spd_prefixes.keys()}")
+        # self.logger.debug(f"as_neighbors:{as_neighbors}")
         self.rpdp_app.send_spd(
             self.link_man.get_all_rpdp_links(),
             as_neighbors, spd_prefixes,
@@ -1337,4 +1337,3 @@ class SavAgent():
         for t in self._thread_pool:
             t.daemon = True
             t.start()
-        # self._start_fib_monitor()
