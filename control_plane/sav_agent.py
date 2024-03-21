@@ -81,6 +81,18 @@ class SavAgent():
         # self.logger.debug(f"putting out msg {msg}")
         self.link_man.put_send_async(msg)
 
+    def _update_location(self, link_map, my_as):
+        """
+        using link_map to identify the location
+        """
+        for link_name, d in link_map.items():
+            if d["link_type"] == "bgp":
+                if d["remote_as"] != my_as:
+                    self.config["is_edge"] = True
+        if not "is_edge" in self.config:
+            self.config["is_edge"] = False
+        self.logger.info(
+            f"location updated is_edge is {self.config['is_edge']}")
     def update_config(self):
         """
         return dictionary object if is a valid config file (only check type not value). 
@@ -123,11 +135,8 @@ class SavAgent():
                 if not config["enabled_sav_app"] in config["apps"]:
                     self.logger.warning(
                         f"sav app {config['enabled_sav_app']} not in apps:{config['apps']}")
-                # add ips to dummy interface
-                # self.logger.debug(config["prefix_method"])
-                # if config["prefix_method"] == "independent_interface":
-                #     add_prefix(config["prefixes"].keys())
-                #     self.logger.debug(f"added prefix to dummy interface")
+                # identify the location using link_map
+                self._update_location(config['link_map'], config['local_as'])
                 self.logger.debug(f"config updated")
                 return
             except Exception as e:

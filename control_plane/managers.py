@@ -510,11 +510,11 @@ class LinkManager(InfoManager):
                 "protocol_name": proto_name,
                 "status": True,
                 "interface_name": f"eth_{proto_name.split('_')[2]}",
-                "remote_ip": netaddr.IPAddress(cfg_link['link_data']["remote_ip"]),
-                "local_ip": netaddr.IPAddress(cfg_link['link_data']["local_ip"]),
-                "remote_role": cfg_link['link_data']['remote_role'],
-                "local_role": cfg_link['link_data']['local_role'],
-                "remote_as": cfg_link['link_data']['remote_as']
+                "remote_ip": netaddr.IPAddress(cfg_link["remote_ip"]),
+                "local_ip": netaddr.IPAddress(cfg_link["local_ip"]),
+                "remote_role": cfg_link['remote_role'],
+                "local_role": cfg_link['local_role'],
+                "remote_as": cfg_link['remote_as']
             }
             link_meta["is_interior"] = link_meta["remote_as"] != sa_config["local_as"]
             if not cfg_link["link_type"] in self.valid_types:
@@ -522,9 +522,8 @@ class LinkManager(InfoManager):
                 continue
             link_meta["link_type"] = cfg_link["link_type"]
             temp["_".join(
-                [link_meta["link_type"], sa_config['device_id'], cfg_link['link_data']['remote_id']])] = link_meta
+                [link_meta["link_type"], sa_config['device_id'], cfg_link['remote_id']])] = link_meta
         self.data["check_time"] = time.time()
-        self.logger.debug(temp.keys())
         self.data["links"] = temp
         self.data["update_time"] = self.data["check_time"]
 
@@ -569,6 +568,7 @@ class LinkManager(InfoManager):
         if m_t == RPDP_OVER_HTTP:
             sent = self._send_http_post(msg)
         elif m_t == RPDP_OVER_BGP:
+            self.logger.debug(msg["data"])
             desired_link_name = msg["data"]["protocol_name"]
             link = self.data["links"].get(desired_link_name, None)
             if not link:
