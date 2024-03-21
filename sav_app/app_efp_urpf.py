@@ -50,7 +50,7 @@ class EfpUrpfApp(SavApp):
         get all protocol names that starts with sav
         """
         self.protocol_metas = []
-        for link_name, link_meta in self.agent.link_man.get_all_link_meta().items():
+        for link_name, link_meta in self.agent.link_man.get_all_bgp_links().items():
             if not link_meta["is_interior"]:
                 continue
                 # only works for interior links

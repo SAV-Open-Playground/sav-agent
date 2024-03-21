@@ -1141,7 +1141,7 @@ class RPDPApp(SavApp):
                 timeout = 0
                 
                 spd_msg["protocol_name"] = link_name
-                spd_msg["is_native_bgp"] = False
+                spd_msg["is_native_bgp"] = 0
                 spd_msg["channel"] = f"{RPDP_ID}{ip_version}"
                 spd_msg["rpdp_version"] = ip_version
                 spd_msg["SN"] = spd_msg["sn"]
@@ -1157,6 +1157,7 @@ class RPDPApp(SavApp):
                 else:
                     spd_msg["addresses"] = ips2addresses(spd_msg["addresses"])
                     spd_msg["opt_data_len"] = len(spd_msg["opt_data"])
+                self.logger.debug(spd_msg)
                 msg = get_agent_bird_msg(
                     spd_msg, link_meta["link_type"], self.app_id, timeout, False)
                 self.agent.link_man.put_send_async(msg)
@@ -1372,6 +1373,7 @@ class RPDPApp(SavApp):
                                  d["is_interior"])
         msg = get_agent_bird_msg(
             data, RPDP_OVER_BGP, self.app_id, 0, False)
+        self.logger.debug(msg)
         try:
             self.agent.link_man.put_send_async(msg)
             if is_inter:

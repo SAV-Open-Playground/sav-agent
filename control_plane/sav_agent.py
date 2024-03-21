@@ -81,18 +81,15 @@ class SavAgent():
         # self.logger.debug(f"putting out msg {msg}")
         self.link_man.put_send_async(msg)
 
-    def _update_location(self, link_map, my_as):
+    def _is_edge_router(self, link_map, my_as):
         """
-        using link_map to identify the location
+        return True if the router is an edge router
         """
         for link_name, d in link_map.items():
             if d["link_type"] == "bgp":
                 if d["remote_as"] != my_as:
-                    self.config["is_edge"] = True
-        if not "is_edge" in self.config:
-            self.config["is_edge"] = False
-        self.logger.info(
-            f"location updated is_edge is {self.config['is_edge']}")
+                    return True
+        return False
     def update_config(self):
         """
         return dictionary object if is a valid config file (only check type not value). 
@@ -126,6 +123,9 @@ class SavAgent():
                         f"invalid location {config['location']}, should be one of {valid_location}")
                 if str(self.config) == str(config):
                     return
+                config["is_edge"] = self._is_edge_router(
+                    config["link_map"], config["local_as"])
+
                 self.config = config
                 if config["use_ignore_nets"]:
                     self.ignore_prefixes = list(
@@ -136,7 +136,6 @@ class SavAgent():
                     self.logger.warning(
                         f"sav app {config['enabled_sav_app']} not in apps:{config['apps']}")
                 # identify the location using link_map
-                self._update_location(config['link_map'], config['local_as'])
                 self.logger.debug(f"config updated")
                 return
             except Exception as e:
