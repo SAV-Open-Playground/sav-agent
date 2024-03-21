@@ -7,6 +7,7 @@
              In this implementation, the SPA and SPD is encoded into standard BGP Update message
 """
 
+from operator import ifloordiv
 from sys import prefix
 import grpc
 from control_plane import agent_msg_pb2, agent_msg_pb2_grpc
@@ -312,6 +313,7 @@ class RPDPApp(SavApp):
         for k in RPDP_LINK_TYPES:
             ret[k] = init_protocol_metric()
         return ret
+
     def get_prefix_as_path_dict(self):
         # retrun the bird prefix-(AS)path table in RPDPApp (no refreshing)
         return self.prefix_as_path_dict
@@ -1037,15 +1039,16 @@ class RPDPApp(SavApp):
         self._log_for_front(msg, "terminate", link_meta,
                             SPA, rpdp_msg['spa_add'], rpdp_msg['spa_del'])
         self._refresh_sav_rules()
-        intra_links = self.agent.link_man.get_all_up_type(
-            is_interior=False, include_native_bgp=False)
-        # relay to INTRA links
-        local_prefixes = self.get_local_prefixes()
-        for link_name in intra_links:
-            link_meta = self.agent.link_man.get_by_name(link_name)
-            self._send_spa_origin_intra(
-                link_meta=link_meta, link_name=link_name, prefixes=local_prefixes)
-            self._log_for_front(msg, "relay", link_meta, SPA, [], [])
+        if is_inter:
+            intra_links = self.agent.link_man.get_all_rpdp_links()
+            intra_links = {k: v for k, v in intra_links.items()
+                           if not v["is_interior"]}
+            # relay to INTRA links
+            local_prefixes = self.get_local_prefixes()
+            for link_name, link_meta in intra_links.items():
+                self._send_spa_origin_intra(
+                    link_meta=link_meta, link_name=link_name, prefixes=local_prefixes)
+                self._log_for_front(msg, "relay", link_meta, SPA, [], [])
 
     def _get_spd_sn(self, dst):
         """
@@ -1065,34 +1068,58 @@ class RPDPApp(SavApp):
             ret += f"{peer_asn}"
         return ret
 
-    def _get_spd_msg(self, as_neighbors, my_asn, my_router_id, link_name, link_meta, dst_router_ids=[]) -> dict:
-        is_inter = link_meta["is_interior"]
-        remote_as = link_meta["remote_as"]
-        # TODO addresses,opt_data,neighbor_as_list
-        ret = {
-            "type": SPD,
-            "link_name": link_name,
-            "sn": self._get_spd_sn(self._get_spd_key(
-                link_meta['remote_ip'], is_inter, remote_as)),
-            "origin_router_id": my_router_id
-        }
-        if is_inter:
+    def _get_as_neighbors(self, target_asn):
+        ret = set()
+        fib = self.agent.get_fib("bird", ["remote"])
 
-            ret["origin_asn"] = my_asn
-            ret["validate_asn"] = remote_as
-            ret["neighbor_as_list"] = as_neighbors[remote_as]
-            ret["opt_data"] = []
-        else:
-            ret["opt_data"] = []
-            ret["addresses"] = dst_router_ids
+        for p, p_srcs in fib.items():
+            origin_asn = None
+            as_paths = []
+            for src in p_srcs:
+                if not "as_path" in src:
+                    self.logger.error(f"as_path missing {p}:{src}")
+                else:
+                    if not src["as_path"] in as_paths:
+                        as_paths.append(src["as_path"])
+                if not origin_asn:
+                    origin_asn = src["origin_asn"]
+                if origin_asn != src["origin_asn"]:
+                    self.logger.error(f"origin_asn mismatch {p}:{src}")
+            # as_paths = list(set(as_paths))
+            if not origin_asn == target_asn:
+                continue
+            # self.logger.debug(f"{p}/{origin_asn}:{as_paths}")
+            for as_path in as_paths:
+                if len(as_path) < 2:
+                    continue
+                asn = as_path[-2]
+                ret.add(asn)
         return ret
 
-    def send_spd(self, links, as_neighbors, my_as_prefixes, my_asn, my_router_id) -> None:
+    def send_spd(self) -> None:
         """send spd on rpdp links"""
-        # self.logger.debug(links.keys())
-        for link_name, link_meta in links.items():
-            spd_msg = self._get_spd_msg(
-                as_neighbors, my_asn, my_router_id, link_name, link_meta, [link_meta["remote_ip"]])
+        rpdp_links = self.agent.link_man.get_all_rpdp_links()
+        # self.logger.debug(rpdp_links)
+        my_asn = self.agent.config["local_as"]
+        my_router_id = self.agent.config["router_id"]
+        for link_name, link_meta in rpdp_links.items():
+            is_inter = link_meta["is_interior"]
+            remote_as = link_meta["remote_as"]
+            spd_msg = {
+                "type": SPD,
+                "link_name": link_name,
+                "sn": self._get_spd_sn(self._get_spd_key(
+                    link_meta['remote_ip'], is_inter, remote_as)),
+                "origin_router_id": my_router_id
+            }
+            if is_inter:
+                spd_msg["origin_asn"] = my_asn
+                spd_msg["validate_asn"] = remote_as
+                spd_msg["neighbor_as_list"] = self._get_as_neighbors(remote_as)
+                spd_msg["opt_data"] = []
+            else:
+                spd_msg["opt_data"] = []
+                spd_msg["addresses"] = []
             if link_meta["link_type"] == RPDP_OVER_HTTP:
                 spd_msg["msg_type"] = SPD
                 data = {
@@ -1206,6 +1233,7 @@ class RPDPApp(SavApp):
             self.logger.info(
                 f"spd sn check failed, processed sn {link_meta['spd_sn']}, received sn {sn},ignore")
             return False
+
     def process_spd(self, msg, link_meta):
         """
         process rpdp route refresh message
@@ -1233,15 +1261,34 @@ class RPDPApp(SavApp):
         spd_msg["origin_ip"] = netaddr.IPAddress(spd_msg['origin_router_id'])
         del spd_msg['origin_router_id']
         # self.logger.debug(spd_msg)
+        bgp_links = self.agent.link_man.get_all_bgp_links()
+        bgp_inter_links = {}
+        bgp_intra_links = {}
+        for link_name, link_meta in bgp_links.items():
+            if link_meta["is_interior"]:
+                bgp_inter_links[link_meta["remote_as"]] = link_name
+            else:
+                # here we need to use sav scope to find the router_id_ip
+                as_scope = self.agent.config['as_scope']
+                for dev_id, dev_data in as_scope.items():
+                    if str(link_meta["remote_ip"]) in dev_data["ips"]:
+                        bgp_intra_links[netaddr.IPAddress(
+                            dev_data["router_id"])] = link_name
+                        break
         if is_inter:
             need_to_relay = self.agent.config["local_as"] != spd_msg["origin_asn"]
             data = self.spd_data["inter"]
-            new_ases = [spd_msg["origin_asn"]]
-            new_ases.extend(spd_msg["neighbor_as_list"])
-            for asn in new_ases:
+            allowed_ases = [spd_msg["origin_asn"]]
+            # self.logger.debug(f"allowed_ases: {allowed_ases}")
+            allowed_ases.extend(spd_msg["neighbor_as_list"])
+            # self.logger.debug(f"allowed_ases: {allowed_ases}")
+            for asn in allowed_ases:
                 if not asn in data:
                     data[asn] = set()
-                data[asn].add(msg["source_link"])
+                if not asn in bgp_inter_links:
+                    self.logger.error(f"no bgp link for {asn}")
+                    continue
+                data[asn].add(bgp_inter_links[asn])
             self.spd_data["inter"] = data
             if need_to_relay:
                 pass
@@ -1250,16 +1297,19 @@ class RPDPApp(SavApp):
         else:
             data = self.spd_data["intra"]
             need_to_relay = False
-            new_ips = [spd_msg['origin_ip']]
-            for ip in spd_msg["addresses"]:
-                try:
-                    _ = self.agent.link_man.get_by_local_ip(ip)
-                except ValueError:
-                    new_ips.append(ip)
-            for ip in new_ips:
+            allowed_ips = [spd_msg['origin_ip']]
+            allowed_ips.extend(spd_msg["addresses"])
+            # self.logger.debug(spd_msg)
+            # self.logger.debug(spd_msg['origin_ip'])
+            # self.logger.debug(allowed_ips)
+            # self.logger.debug(bgp_intra_links)
+            for ip in allowed_ips:
                 if not ip in data:
                     data[ip] = set()
-                data[ip].add(msg["source_link"])
+                if not ip in bgp_intra_links:
+                    self.logger.error(f"no intra link for {ip}")
+                    continue
+                data[ip].add(bgp_intra_links[ip])
             self.spd_data["intra"] = data
             if need_to_relay:
                 pass
@@ -1344,7 +1394,6 @@ class RPDPApp(SavApp):
             "source_app": self.app_id}
         self.agent.link_man.put_send_async(data)
 
-
     def _send_spa_origin_inter(self, link_name, link_meta, prefixes):
         """
         send spa origin msg
@@ -1384,6 +1433,7 @@ class RPDPApp(SavApp):
                    "is_interior": link_meta["is_interior"]
                    }
         return spa_msg
+
     def _send_spa_origin_intra(self, link_name, link_meta, prefixes):
         """
         send spa origin msg
@@ -1395,13 +1445,20 @@ class RPDPApp(SavApp):
         # f"building spa origin on intra {link_name}:{prefixes}")
         link_type = link_meta["link_type"]
         spa_msg = self._get_spa_origin_msg(link_name, link_meta, prefixes)
-
         if link_type == RPDP_OVER_BGP:
             self._send_spa_origin_bgp(spa_msg, link_meta)
         elif link_type == RPDP_OVER_HTTP:
             self._send_spa_origin_http(spa_msg, link_meta)
-        else:
-            raise ValueError(f"unknown link type {link_type}")
+        self.agent.link_man.update_link_kv(
+            link_name, "initial_broadcast", True)
+        # log_add = read_intra_spa_nlri_hex(spa_add, ip_version)
+        # log_del = read_intra_spa_nlri_hex(spa_del, ip_version)
+        # for i in log_add:
+        #     i["prefix"] = str(i["prefix"])
+        # for i in log_del:
+        #     i["prefix"] = str(i["prefix"])
+        # self._log_for_front(msg, "origin", link_meta, "SPA",
+        #                     log_add, log_del)
         return
         for p, p_data in prefixes.items():
             # self.logger.debug(f"p: {p}, data: {p_data}")
@@ -1465,13 +1522,9 @@ class RPDPApp(SavApp):
         """
         decide whether to send initial broadcast on each link
         """
-        all_links = self.agent.link_man.get_all_link_meta()
-        # self.logger.debug(f"all_links: {all_links.keys()}")
-        rpdp_links = {k: v for k, v in all_links.items(
-        ) if v["link_type"] in RPDP_LINK_TYPES}
+        rpdp_links = self.agent.link_man.get_all_rpdp_links()
         local_prefixes = self.get_local_prefixes()
         # self.logger.debug(f"local_prefixes: {local_prefixes}")
-        # self.logger.debug(f"rpdp_links: {rpdp_links.keys()}")
         for link_name, link in rpdp_links.items():
             if link["initial_broadcast"]:
                 continue

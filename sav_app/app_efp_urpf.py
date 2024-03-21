@@ -116,16 +116,13 @@ class EfpUrpfApp(SavApp):
             aspa_info = self.agent.get_aspa_info()
         # self.logger.debug(self.protocol_metas)
         for meta in self.protocol_metas:
-            if not meta["is_interior"]:
-                # only works for interior links
-                continue
             protocol_name = meta["protocol_name"]
             # only works for interior links
             all_int_in[protocol_name] = {"meta": meta}
             all_int_in[protocol_name]["adj-in"] = self._parse_import_table(
                 protocol_name)
             # self.logger.debug(
-            # msg=f"all_int_in of {protocol_name}:{all_int_in[protocol_name]['adj-in']}")
+            #     msg=f"all_int_in of {protocol_name}:{all_int_in[protocol_name]['adj-in']}")
             # filter out the adj-in that does not match the roa
             if self.roa:
                 temp = {}
@@ -138,7 +135,7 @@ class EfpUrpfApp(SavApp):
                             self.logger.warning(
                                 f"roa mismatch: adj-in info:  {this_asn}:{this_prefix}\nroa info:{roa_info[this_asn]}")
                 all_int_in[protocol_name]["adj-in"] = temp
-        # self.logger.debug(f"EFP-A all_int_in:{all_int_in}")
+        self.logger.debug(f"EFP-A all_int_in:{all_int_in}")
         for protocol_name, data in all_int_in.items():
             if data["meta"]["remote_role"] == "customer":
                 if self.aspa:
@@ -149,7 +146,7 @@ class EfpUrpfApp(SavApp):
                             f"aspa check failed: {self.agent.config['local_as']}")
                         continue
                 for prefix, paths in data["adj-in"].items():
-                    # self.logger.debug(f"{prefix}, {paths}")
+                    self.logger.debug(f"{prefix}, {paths}")
                     for path in paths:
                         X[path["origin_as"]] = set()
         for origin_asn in X:

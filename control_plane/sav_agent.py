@@ -1251,42 +1251,11 @@ class SavAgent():
         if self.rpdp_app is None:
             self.logger.debug("rpdp_app missing, unable to send spd")
             return
-        my_asn = self.config["local_as"]
-        # spd_prefixes are prefixes that are originated by other routers within my_asn
-        spd_prefixes = {}
-        as_neighbors = {}
-        possible_prefixes = self.get_fib("bird", ["remote"])
-        for prefix, srcs in possible_prefixes.items():
-            my_asn_prefix = False
-            for src in srcs:
-                if src["origin_asn"] == my_asn:
-                    my_asn_prefix = True
-                if not src["origin_asn"] in as_neighbors:
-                    as_neighbors[src["origin_asn"]] = []
-                t = src["type"]
-                if not t == "BGP univ":
-                    self.logger.error(f"unknown type:{t}")
-                if "as_path" in src:
-                    if my_asn in src["as_path"]:
-                        x = src["as_path"].index(src["origin_asn"])
-                        try:
-                            as_neighbors[src["origin_asn"]].append(
-                                src["as_path"][x+1])
-                        except IndexError:
-                            pass
-                        try:
-                            as_neighbors[src["origin_asn"]].append(
-                                src["as_path"][x-1])
-                        except IndexError:
-                            pass
-            if my_asn_prefix:
-                spd_prefixes[prefix] = srcs
-        # self.logger.debug(f"my_as_prefixes:{spd_prefixes.keys()}")
-        # self.logger.debug(f"as_neighbors:{as_neighbors}")
-        self.rpdp_app.send_spd(
-            self.link_man.get_all_rpdp_links(),
-            as_neighbors, spd_prefixes,
-            my_asn, self.config["router_id"])
+        try:
+            self.rpdp_app.send_spd()
+        except Exception as e:
+            self.logger.exception(e)
+            self.logger.error(e)
 
     def _interval_trigger(self):
         """

@@ -532,6 +532,15 @@ class LinkManager(InfoManager):
         result = copy.deepcopy(self.data["links"])
         return result
 
+    def get_all_bgp_links(self) -> dict:
+        """return a dict of all bgp links
+        key is link_name, value is link_meta
+        """
+        result = {}
+        for name, data in self.data["links"].items():
+            if data["link_type"] in ["bgp"]:
+                result[name] = data
+        return result
     def get_all_rpdp_links(self) -> dict:
         """return a dict of all rpdp links
         key is link_name, value is link_meta
