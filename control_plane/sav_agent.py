@@ -121,11 +121,12 @@ class SavAgent():
                 if not config["location"] in valid_location:
                     raise ValueError(
                         f"invalid location {config['location']}, should be one of {valid_location}")
-                if str(self.config) == str(config):
-                    return
+                
                 config["is_edge"] = self._is_edge_router(
                     config["link_map"], config["local_as"])
-
+                
+                if str(self.config) == str(config):
+                    return
                 self.config = config
                 if config["use_ignore_nets"]:
                     self.ignore_prefixes = list(
@@ -225,27 +226,37 @@ class SavAgent():
         """
         init all app instances
         """
-        # bird and grpc are must
-        # self.logger.debug(self.config["apps"])
-        if len(self.config["apps"]) == 0:
-            self.logger.warning("no sav app given")
-        all_instances = sav_app_init(self, self.logger)
-        # self.logger.debug(all_instances)
-        sav_apps = {}
-        for app_id in self.config["apps"]:
-            self.logger.debug(f"app_id:{app_id}")
-            if not app_id in all_instances:
-                self.logger.error(f"app_id:[{app_id}] not recognized")
-                continue
-            sav_apps[app_id] = all_instances[app_id]
-            if app_id == RPDP_ID:
-                self.rpdp_app = sav_apps[app_id]
-            if app_id == PASSPORT_ID:
-                self.passport_app = sav_apps[app_id]
-        self.data["apps"] = sav_apps
-        self.data["active_app"] = self.data["apps"][self.config["enabled_sav_app"]]
-        self.logger.debug(
-            msg=f"initialized apps: {list(self.data['apps'].keys())},using {self.data['active_app'].app_id}")
+        try:
+            # bird and grpc are must
+            # self.logger.debug(self.config["apps"])
+            if len(self.config["apps"]) == 0:
+                self.logger.warning("no sav app given")
+            all_instances = sav_app_init(self, self.logger)
+            # self.logger.debug(all_instances)
+            sav_apps = {}
+            for app_id in self.config["apps"]:
+                self.logger.debug(f"app_id:{app_id}")
+                if not app_id in all_instances:
+                    self.logger.error(f"app_id:[{app_id}] not recognized")
+                    continue
+                sav_apps[app_id] = all_instances[app_id]
+                if app_id == RPDP_ID:
+                    self.rpdp_app = sav_apps[app_id]
+                if app_id == PASSPORT_ID:
+                    self.passport_app = sav_apps[app_id]
+            self.data["apps"] = sav_apps
+            if not self.config["enabled_sav_app"] in self.data["apps"]:
+                self.logger.warning(f"{self.config['enabled_sav_app']} not inilized, not setting active_app")
+                self.data["active_app"] = None
+                self.logger.debug(
+                    msg=f"initialized apps: {list(self.data['apps'].keys())},using {None}")
+            else:
+                self.data["active_app"] = self.data["apps"][self.config["enabled_sav_app"]]
+                self.logger.debug(
+                    msg=f"initialized apps: {list(self.data['apps'].keys())},using {self.data['active_app'].app_id}")
+        except Exception as e:
+            self.logger.exception(e)
+            self.logger.error(e)
 
     def get_aspa_info(self):
         """
@@ -449,7 +460,6 @@ class SavAgent():
                 time.sleep(5)
                 self._refresh_roa_info()
             self.logger.debug("got roa")
-
         self._init_apps()
         self.logger.debug(f"initial wait: {time.time()-t0:.4f} seconds")
 
@@ -930,7 +940,25 @@ class SavAgent():
             new_rule["interface_name"] = ifa
             ret[get_key_from_sav_rule(new_rule)] = new_rule
         return ret
-
+    def get_sav_rules_by_app_black(self,app_name, is_interior=None, ip_version=None):
+        raw_rules = self.get_sav_rules_by_app(app_name,is_interior,ip_version)
+        white_list = {}
+        for r_k,r in raw_rules.items():
+            if not r['prefix'] in white_list:
+                white_list[r['prefix']] = set()
+            white_list[r['prefix']].add(r['interface_name'])
+        black_list = {}
+        all_interfaces = get_all_interfaces()
+        for p,allowed_ifas in white_list.items():
+            for ifa in all_interfaces:
+                if ifa in allowed_ifas:
+                    continue
+                d = {"prefix":p,"interface_name":ifa,"source_app":app_name}
+                black_list[f"{p}_-1_{ifa}"]= d
+        self.logger.debug(black_list)
+        return black_list
+        
+        
     def get_sav_rules_by_app(self, app_name, is_interior=None, ip_version=None):
         """
         return all sav rules for given app

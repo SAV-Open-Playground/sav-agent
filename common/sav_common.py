@@ -280,7 +280,12 @@ def scope_to_hex_str(scope, is_inter, is_as4=True):
             temp += ipv4_str_to_hex(ipv4)
     return ",".join(temp)
 
-
+def get_all_interfaces():
+    ret = set()
+    with IPDB() as ipdb: 
+        for interface in ipdb.interfaces.values():
+            ret.add(interface.name)
+    return ret
 def get_ifa_by_ip(ip: str) -> str:
     """
     return interface name by ip
