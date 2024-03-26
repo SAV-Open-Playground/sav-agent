@@ -335,8 +335,10 @@ class SavAgent():
 
     def parse_kernel_fib(self) -> dict:
         try:
-            routes = IPRoute().get_routes(table=254)
-            ifas = IPDB().interfaces
+            ip_route = IPRoute()
+            ip_db = IPDB()
+            routes = ip_route.get_routes(table=254)
+            ifas = ip_db.interfaces
             ret = {}
             for route in routes:
                 # self.logger.debug(route)
@@ -352,6 +354,8 @@ class SavAgent():
                 # if v["Iface"] == "lo":
                 #     continue
                 ret[k] = v
+            ip_db.release()
+            ip_route.close()
             return ret
         except Exception as e:
             self.logger.exception(e)
