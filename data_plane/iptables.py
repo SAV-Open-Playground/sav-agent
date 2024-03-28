@@ -12,7 +12,7 @@
 """
 import os
 import subprocess
-from common.sav_common import get_host_interface_list
+from common import get_all_interfaces
 from common.main_logger import LOGGER as logger
 
 SAV_CHAIN = "SAVAGENT"
@@ -41,7 +41,7 @@ class IPTableManager():
         input_status = subprocess.call(['ip6tables', '-I', 'INPUT', '-j', SAV_CHAIN])
         forward_status = subprocess.call(['ip6tables', '-I', 'FORWARD', '-j', SAV_CHAIN])
         # init tc tool's qdisc, class, filter
-        interface_list = get_host_interface_list()
+        interface_list = get_all_interfaces()
         for index in range(0, len(interface_list)):
             init_tc_command = f"tc qdisc add dev {interface_list[index]} root handle 1: htb default 20 && " \
                               f"tc class add dev {interface_list[index]} parent 1:0 classid 1:1 htb rate 3Mbit && " \
@@ -73,7 +73,7 @@ class IPTableManager():
         flush_chain_status = subprocess.call(['iptables', '-F', SAV_CHAIN])
         if flush_chain_status != 0:
             logger.error(f"flush ip4tables failed")
-        interface_set = set(get_host_interface_list())
+        interface_set = set(get_all_interfaces())
         # store iptables
         store_init_filer_talbes_commmand = f"iptables-save -t filter > {LOG_DIR}/ip4tables_filter_rule.txt"
         command_status = self._command_executor(command=store_init_filer_talbes_commmand)
@@ -119,7 +119,7 @@ class IPTableManager():
         flush_chain_status = subprocess.call(['ip6tables', '-F', SAV_CHAIN])
         if flush_chain_status != 0:
             logger.error(f"flush ip6tables failed")
-        interface_set = set(get_host_interface_list())
+        interface_set = set(get_all_interfaces())
         # store iptables
         store_init_filer_talbes_commmand = f"ip6tables-save -t filter > {LOG_DIR}/ip6tables_filter_rule.txt"
         command_status = self._command_executor(command=store_init_filer_talbes_commmand)
@@ -172,7 +172,7 @@ class IPTableManager():
         flush_chain_status = subprocess.call(['iptables', '-F', SAV_CHAIN])
         if flush_chain_status != 0:
             logger.error(f"flush ip4tables failed")
-        interface_list = get_host_interface_list()
+        interface_list = get_all_interfaces()
         # store iptables
         store_init_filer_talbes_commmand = f"iptables-save -t filter > {LOG_DIR}/ip4tables_filter_rule.txt"
         command_status = self._command_executor(command=store_init_filer_talbes_commmand)
@@ -197,7 +197,7 @@ class IPTableManager():
         flush_chain_status = subprocess.call(['ip6tables', '-F', SAV_CHAIN])
         if flush_chain_status != 0:
             logger.error(f"flush ip6tables failed")
-        interface_list = get_host_interface_list()
+        interface_list = get_all_interfaces()
         # store iptables
         store_init_filer_talbes_commmand = f"ip6tables-save -t filter > {LOG_DIR}/ip6tables_filter_rule.txt"
         command_status = self._command_executor(command=store_init_filer_talbes_commmand)

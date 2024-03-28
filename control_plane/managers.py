@@ -8,7 +8,7 @@
 '''
 import queue
 import copy
-from common.sav_common import *
+from common import *
 from sav_app import *
 
 
@@ -409,7 +409,6 @@ class LinkManager(InfoManager):
         self._send_buff = queue.Queue()
         self.bird_cmd_buff = queue.Queue()
         self.post_session = requests.Session()
-        self.post_session.keep_alive = True
         self.result_buff = {}
         self._job_id = 0
         self._add_lock = False
@@ -618,6 +617,8 @@ class LinkManager(InfoManager):
                     if msg["store_rep"]:
                         self.result_buff[msg["pkt_id"]] = rep.json()
                     return True
+                else:
+                    self.logger.debug(f"retrying{msg['url']}: {msg}")
         if not "retry" in msg:
             retry = 10
         for i in range(retry):
@@ -627,6 +628,7 @@ class LinkManager(InfoManager):
                 self.result_buff[msg["pkt_id"]] = rep.json()
                 return True
             time.sleep(msg["timeout"])
+            self.logger.warning(f"failed{msg['url']}: {msg}")
         return False
 
     def add(self, meta_dict):

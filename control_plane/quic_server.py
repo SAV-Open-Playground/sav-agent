@@ -4,7 +4,7 @@ from email.utils import formatdate
 from typing import Callable,  Dict, List, Optional
 import json
 import requests
-from common.sav_common import get_logger
+from common import get_logger
 import aioquic
 import wsproto
 import wsproto.events

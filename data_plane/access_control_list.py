@@ -11,57 +11,57 @@
 -------------------------------------------------
 """
 import os
-from common.sav_common import subprocess_run, get_host_interface_list
+from common import subproc_run, get_all_interfaces
 
 CURRENT_DIR = os.path.dirname(os.path.realpath(__file__))
 
 class AccessControlListManager:
     def huawei_acl_generator(self, acl_sav_rule):
-        status = subprocess_run(
+        status = subproc_run(
             command=f'cat /dev/null > {CURRENT_DIR}/huawei_acl_rule.txt')
-        status = subprocess_run(
+        status = subproc_run(
             command=f'echo "system-view" >> {CURRENT_DIR}/huawei_acl_rule.txt')
         for iface, prefix_set in acl_sav_rule.items():
-            status = subprocess_run(
+            status = subproc_run(
                 command=f'echo "acl name sav_{iface}" >> {CURRENT_DIR}/huawei_acl_rule.txt')
             for prefix in prefix_set:
-                status = subprocess_run(
+                status = subproc_run(
                     command=f'echo "rule deny {prefix} 0.0.0.255" >> {CURRENT_DIR}/huawei_acl_rule.txt')
-            status = subprocess_run(
+            status = subproc_run(
                 command=f'echo "quit" >> {CURRENT_DIR}/huawei_acl_rule.txt')
-            status = subprocess_run(
+            status = subproc_run(
                 command=f'echo "interface Ethernet {iface}" >> {CURRENT_DIR}/huawei_acl_rule.txt')
-            status = subprocess_run(
+            status = subproc_run(
                 command=f'echo acl sav_{iface} inbound >> {CURRENT_DIR}/huawei_acl_rule.txt')
-            status = subprocess_run(
+            status = subproc_run(
                 command=f'echo "quit" >> {CURRENT_DIR}/huawei_acl_rule.txt')
-        status = subprocess_run(
+        status = subproc_run(
             command=f'echo "save" >> {CURRENT_DIR}/huawei_acl_rule.txt')
 
     def h3c_acl_generator(self, acl_sav_rule):
-        status = subprocess_run(
+        status = subproc_run(
             command=f'cat /dev/null > {CURRENT_DIR}/h3c_acl_rule.txt')
-        status = subprocess_run(
+        status = subproc_run(
             command=f'echo "system-view" >> {CURRENT_DIR}/h3c_acl_rule.txt')
         for iface, prefix_set in acl_sav_rule.items():
-            status = subprocess_run(
+            status = subproc_run(
                 command=f'echo "acl name sav_{iface}" >> {CURRENT_DIR}/h3c_acl_rule.txt')
             for prefix in prefix_set:
-                status = subprocess_run(
+                status = subproc_run(
                     command=f'echo "rule deny {prefix} 0.0.0.255" >> {CURRENT_DIR}/h3c_acl_rule.txt')
-            status = subprocess_run(
+            status = subproc_run(
                 command=f'echo "quit" >> {CURRENT_DIR}/h3c_acl_rule.txt')
-            status = subprocess_run(
+            status = subproc_run(
                 command=f'echo "interface Ethernet {iface}" >> {CURRENT_DIR}/h3c_acl_rule.txt')
-            status = subprocess_run(
+            status = subproc_run(
                 command=f'echo acl sav_{iface} inbound >> {CURRENT_DIR}/h3c_acl_rule.txt')
-            status = subprocess_run(
+            status = subproc_run(
                 command=f'echo "quit" >> {CURRENT_DIR}/h3c_acl_rule.txt')
-        status = subprocess_run(
+        status = subproc_run(
             command=f'echo "save" >> {CURRENT_DIR}/h3c_acl_rule.txt')
 
     def acl_generator(self, rules):
-        interface_set = set(get_host_interface_list())
+        interface_set = set(get_all_interfaces())
         sav_rule = {}
         for rule in list(rules.values()):
             prefix, interface = str(rule["prefix"].ip), rule["interface_name"]

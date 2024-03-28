@@ -9,7 +9,7 @@
 
 import grpc
 from control_plane import agent_msg_pb2, agent_msg_pb2_grpc
-from common.sav_common import *
+from common import *
 from urllib.parse import urlparse
 from aioquic.asyncio.protocol import QuicConnectionProtocol
 import threading

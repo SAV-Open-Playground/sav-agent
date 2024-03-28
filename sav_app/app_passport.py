@@ -12,7 +12,7 @@ import hashlib
 import hmac
 
 
-from common.sav_common import *
+from common import *
 PASSPORT_ID = "passport"
 
 

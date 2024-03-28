@@ -1,4 +1,4 @@
-from common.sav_common import *
+from common import *
 head
 
 STRICT_URPF_ID = "strict_urpf"

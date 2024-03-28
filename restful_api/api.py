@@ -16,7 +16,7 @@ import time
 import copy
 
 from flask import request, Blueprint
-from common.sav_common import RPDP_OVER_BGP, RPDP_OVER_HTTP, TIMEIT_THRESHOLD, json_w
+from common import RPDP_OVER_BGP, RPDP_OVER_HTTP, TIMEIT_THRESHOLD, json_w
 from common.main_logger import LOGGER
 from control_plane import SA
 from data_plane.data_plane_enable import interceptor

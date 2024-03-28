@@ -63,6 +63,8 @@ class SavAgent():
         first_dt = time.time()
         if logger is None:
             logger = get_logger("sav-agent")
+        self.ip_route = IPRoute()
+        self.ip_db = IPDB()
         self.logger = logger
         self.config = {}
         self.link_man = None
@@ -335,10 +337,8 @@ class SavAgent():
 
     def parse_kernel_fib(self) -> dict:
         try:
-            ip_route = IPRoute()
-            ip_db = IPDB()
-            routes = ip_route.get_routes(table=254)
-            ifas = ip_db.interfaces
+            routes = self.ip_route.get_routes(table=254)
+            ifas = self.ip_db.interfaces
             ret = {}
             for route in routes:
                 # self.logger.debug(route)
@@ -354,8 +354,6 @@ class SavAgent():
                 # if v["Iface"] == "lo":
                 #     continue
                 ret[k] = v
-            ip_db.release()
-            ip_route.close()
             return ret
         except Exception as e:
             self.logger.exception(e)
@@ -975,7 +973,7 @@ class SavAgent():
         """
         temp = self._get_sav_rules_by_app(
             app_name, is_interior)
-        all_interfaces = get_host_interface_list()
+        all_interfaces = get_all_interfaces()
         ret = {}
         for k, v in temp.items():
             if ip_version is None:

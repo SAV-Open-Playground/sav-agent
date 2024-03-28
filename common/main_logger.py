@@ -8,5 +8,5 @@
 @Contact :   yuqian.shi@outlook.com
 @Desc    :   initialize the main logger for sav-agent
 """
-from common.sav_common import get_logger
+from common import get_logger
 LOGGER = get_logger("sav-agent")

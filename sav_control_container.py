@@ -31,6 +31,7 @@ class Bot:
         self.stable_threshold = 30
         self.last_check_dt = 0
         self._system_check()
+        self.last_cmd = ""
 
     def _system_check(self):
         """
@@ -57,16 +58,9 @@ class Bot:
                  ]
         for c in cmds:
             try:
-                self._run_cmd(cmd+c)
+                run_cmd(cmd+c)
             except Exception as e:
                 pass
-
-    def _run_cmd(self, cmd, timeout=60):
-        try:
-            result = subprocess.run(cmd, shell=True, capture_output=True, encoding='utf-8', timeout=timeout)
-        except subprocess.TimeoutExpired:
-            return 255
-        return result.returncode
 
     def _http_request_executor(self, url_str, log=True):
         url = f"http://localhost:8888{url_str}"
@@ -151,7 +145,6 @@ class Bot:
         return json.load(open(file_path, "r", encoding="utf-8"))
 
     def _add_prefix(self, prefixes, interface="eth_veth") -> None:
-        run_cmd(f"ip link del {interface}")
         run_cmd(f"ip link add {interface} type veth")
         for p in prefixes:
             p = netaddr.IPNetwork(p)
@@ -167,8 +160,8 @@ class Bot:
                             "execute_start_time": f"{self._get_current_datetime_str()}",
                             "cmd_exe_dt": time.time(),
                             "action": action})
-        result = self._run_cmd("iptables -F SAVAGENT")
-        result = self._run_cmd(
+        run_cmd("iptables -F SAVAGENT", ignore_error=True)
+        result = run_cmd(
             "bash /root/savop/router_kill_and_start.sh stop")
         if result == 0:
             exec_result.update({"execute_end_time": f"{self._get_current_datetime_str()}",

@@ -6,7 +6,7 @@
 @Desc    :   the app_fp_urpf.py is responsible for Fp-uRPF-SAV rule generation
 """
 
-from common.sav_common import *
+from common import *
 FP_URPF_ID = "fp_urpf"
 
 

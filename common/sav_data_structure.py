@@ -6,7 +6,6 @@
 @Version :   0.1
 @Desc    :   Defines data structure and related conversions
 """
-import netaddr
 import time
 import json
 # for RPDP SPA msg

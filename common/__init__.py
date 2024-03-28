@@ -4,16 +4,15 @@
 @File    :   sav_common.py
 @Time    :   2023/01/17 16:04:22
 @Version :   0.1
-
-@Desc    :   The sav_common.py contains shared functions and classes
+@Desc    :   The sav_common.py contains shared functions and classes for savop project.
 """
 
 import os
-import netaddr
 import subprocess
 import requests
+import pickle
 from common.sav_data_structure import *
-from pyroute2 import IPDB
+from pyroute2 import IPRoute, IPDB
 import time
 import logging
 import logging.handlers
@@ -47,10 +46,6 @@ def get_logger(file_name) -> logging.Logger:
 
     logger.addHandler(handler)
     return logger
-
-
-def subprocess_run(command):
-    return subprocess.run(command, shell=True, capture_output=True, encoding='utf-8')
 
 
 class RPDPPeer:
@@ -155,34 +150,36 @@ def rule_list_diff(old_rules, new_rules):
 
 
 def subproc_run(cmd, shell=True, capture_output=True, encoding='utf-8'):
-    return subprocess.run(
-        cmd,
-        shell=shell,
-        capture_output=capture_output,
-        encoding=encoding)
+    return subprocess.run(cmd, close_fds=True, shell=shell, capture_output=capture_output, encoding=encoding, check=True)
 
 
-def run_cmd(command):
-    ret = subproc_run(command, shell=True,
-                      capture_output=True, encoding='utf-8')
-    if ret.returncode != 0:
-        print(ret)
-    return ret.stdout
+def run_cmd(command, ignore_error=False):
+    try:
+        ret = subproc_run(command, shell=True,
+                          capture_output=True, encoding='utf-8')
+        if ret.returncode != 0:
+            if not ignore_error:
+                print(ret)
+                raise ValueError(f"command {command} failed")
+        return ret.stdout
+    except Exception as e:
+        if not ignore_error:
+            print(e)
+            raise ValueError(f"command {command} failed")
 
 
-def get_host_interface_list():
+def get_all_interfaces():
     """
     return a list of 'clean' interface names
     """
-    command = "ip link|grep -v 'link' | grep -v -E 'docker0|lo' | awk -F: '{ print $2 }' | sed 's/ //g'"
-    std_out = run_cmd(command)
-    result = std_out.split("\n")[:-1]
-    result = list(map(lambda x: x.split('@')[0], result))
-    result = [i for i in result if len(i) != 0]
-    # TODO demo filter
-    # only include interfaces start with eth_, for demo
-    result = [i for i in result if i.startswith("eth_")]
-    return result
+    ret = []
+    with IPDB() as ipdb:
+        for interface in ipdb.interfaces.values():
+            if interface.ifname.startswith("eth"):
+                ret.append(interface.ifname)
+            # TODO demo filter
+            # only include interfaces start with eth_, for demo
+    return ret
 
 
 def diff_sav_rules(old_rules, new_rules):
