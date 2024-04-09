@@ -14,6 +14,7 @@ import os
 import subprocess
 from common import get_all_interfaces
 from common.main_logger import LOGGER as logger
+from sav_app.app_efp_urpf import EFP_URPF_A_ID, EFP_URPF_B_ID
 
 SAV_CHAIN = "SAVAGENT"
 LOG_DIR = "/root/savop/logs"
@@ -53,6 +54,7 @@ class IPTableManager():
         return command_result.returncode
 
     def enable(self, rules, active_app):
+        logger.info(f"{active_app}:{rules.keys()}")
         ipv4_rules, ipv6_rules = self._separate_v4_and_v6_addr(rules=rules)
         self._enable_ipv4(rules=ipv4_rules, active_app=active_app)
         self._enable_ipv6(rules=ipv6_rules, active_app=active_app)
@@ -79,13 +81,22 @@ class IPTableManager():
         command_status = self._command_executor(command=store_init_filer_talbes_commmand)
         filter_rules = ""
         container_id = os.environ.get("HOSTNAME")
-        if active_app not in ["EFP-uRPF-Algorithm-A_app", "EFP-uRPF-Algorithm-B_app"]:
-            for r in list(rules.values()):
-                ip_addr, prefixlen, interface_name = str(r["prefix"].ip), r["prefix"].prefixlen, set((r["interface_name"],))
-                for interface in interface_set - interface_name:
+        if active_app not in [EFP_URPF_A_ID, EFP_URPF_B_ID]:
+            # interface Aggregation
+            aggre_rules = {}
+            for k, v in rules.items():
+                ip_addr, prefixlen, interface_name = str(v["prefix"].ip), v["prefix"].prefixlen, set((v["interface_name"],))
+                key = f"{ip_addr}_{prefixlen}"
+                if key not in aggre_rules:
+                    aggre_rules.update({key: set((v["interface_name"],))})
+                else:
+                    aggre_rules[key] = aggre_rules[key].union(interface_name)
+            for k, v in aggre_rules.items():
+                ip_addr, prefixlen, allow_interface_set = k.split("_")[0], k.split("_")[1], v
+                for interface in interface_set - allow_interface_set:
                     log_line = f'-A SAVAGENT -s {ip_addr}/{prefixlen} -i {interface} -j LOG --log-prefix \"IPTABLES {container_id} DROP: \" --log-level 7' + "\n"
                     line = f"-A SAVAGENT -s {ip_addr}/{prefixlen} -i {interface} -j DROP"
-                    filter_rules = filter_rules + log_line  + line + "\n"
+                    filter_rules = filter_rules + log_line + line + "\n"
             with open(f"{LOG_DIR}/ip4tables_filter_rule.txt", "r") as f:
                 lines = f.readlines()[:-2]
             content = ""
@@ -97,12 +108,13 @@ class IPTableManager():
             apply_filer_talbes_commmand = f"iptables-restore < {LOG_DIR}/ip4tables_filter_rule.txt"
             command_status = self._command_executor(command=apply_filer_talbes_commmand)
         # using white list mode for EFP-uRPF
-        elif active_app in ["EFP-uRPF-Algorithm-A_app", "EFP-uRPF-Algorithm-B_app"]:
+        elif active_app in [EFP_URPF_A_ID, EFP_URPF_B_ID]:
             for r in list(rules.values()):
                 ip_addr, prefixlen, interface_name = str(r["prefix"].ip), r["prefix"].prefixlen, r["interface_name"]
+                log_line = f'-A SAVAGENT -s {ip_addr}/{prefixlen} -i {interface_name} -j LOG --log-prefix \"IPTABLES {container_id} ACCEPT: \" --log-level 7' + "\n"
                 line = f"-A SAVAGENT -s {ip_addr}/{prefixlen} -i {interface_name} -j ACCEPT"
-                filter_rules = filter_rules + line + "\n"
-            line = f"-A SAVAGENT -p tcp -j DROP"
+                filter_rules = filter_rules + log_line + line + "\n"
+            line = f"-A SAVAGENT -p udp -j DROP"
             filter_rules = filter_rules + line + "\n"
             with open(f"{LOG_DIR}/ip4tables_filter_rule.txt", "r") as f:
                 lines = f.readlines()[:-2]
@@ -125,13 +137,23 @@ class IPTableManager():
         command_status = self._command_executor(command=store_init_filer_talbes_commmand)
         filter_rules = ""
         container_id = os.environ.get("HOSTNAME")
-        if active_app not in ["EFP-uRPF-Algorithm-A_app", "EFP-uRPF-Algorithm-B_app"]:
-            for r in list(rules.values()):
-                ip_addr, prefixlen, interface_name = str(r["prefix"].ip), r["prefix"].prefixlen, set((r["interface_name"],))
-                for interface in interface_set - interface_name:
+        if active_app not in [EFP_URPF_A_ID, EFP_URPF_B_ID]:
+            # interface Aggregation
+            aggre_rules = {}
+            for k, v in rules.items():
+                ip_addr, prefixlen, interface_name = str(v["prefix"].ip), v["prefix"].prefixlen, set(
+                    (v["interface_name"],))
+                key = f"{ip_addr}_{prefixlen}"
+                if key not in aggre_rules:
+                    aggre_rules.update({key: set((v["interface_name"],))})
+                else:
+                    aggre_rules[key] = aggre_rules[key].union(interface_name)
+            for k, v in aggre_rules.items():
+                ip_addr, prefixlen, allow_interface_set = k.split("_")[0], k.split("_")[1], v
+                for interface in interface_set - allow_interface_set:
                     log_line = f"-A SAVAGENT -s {ip_addr}/{prefixlen} -i {interface} -j LOG --log-prefix \"IPTABLES {container_id} DROP: \"" + "\n"
                     line = f"-A SAVAGENT -s {ip_addr}/{prefixlen} -i {interface} -j DROP"
-                    filter_rules = filter_rules + log_line  + line + "\n"
+                    filter_rules = filter_rules + log_line + line + "\n"
             with open(f"{LOG_DIR}/ip6tables_filter_rule.txt", "r") as f:
                 lines = f.readlines()[:-2]
             content = ""
@@ -143,7 +165,7 @@ class IPTableManager():
             apply_filer_talbes_commmand = f"ip6tables-restore < {LOG_DIR}/ip6tables_filter_rule.txt"
             command_status = self._command_executor(command=apply_filer_talbes_commmand)
         # using white list mode for EFP-uRPF
-        elif active_app in ["EFP-uRPF-Algorithm-A_app", "EFP-uRPF-Algorithm-B_app"]:
+        elif active_app in [EFP_URPF_A_ID, EFP_URPF_B_ID]:
             for r in list(rules.values()):
                 ip_addr, prefixlen, interface_name = str(r["prefix"].ip), r["prefix"].prefixlen, r["interface_name"]
                 line = f"-A SAVAGENT -s {ip_addr}/{prefixlen} -i {interface_name} -j ACCEPT"
