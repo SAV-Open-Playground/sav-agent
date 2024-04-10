@@ -11,10 +11,13 @@
 -------------------------------------------------
 """
 import json
+import subprocess
 from common.main_logger import LOGGER
 from data_plane.sav_rule_manager import SavRuleManager
 from data_plane.iptables import IPTableManager
 from data_plane.access_control_list import AccessControlListManager
+
+SAV_CHAIN = "SAVAGENT"
 
 
 class Interceptor:
@@ -51,6 +54,8 @@ class Interceptor:
                 return
             sav_rules = self.sav_rule_manager.get_sav_rules_by_app(app_name=active_app)
             if len(sav_rules) == 0:
+                flush_chain_status = subprocess.call(['iptables', '-F', SAV_CHAIN])
+                flush_chain_status = subprocess.call(['ip6tables', '-F', SAV_CHAIN])
                 return f"there is no {active_app} sav rules, " \
                     f"so don't need to refresh iptables"
             if (tool == "iptables") and (limit_rate is None):
