@@ -12,6 +12,7 @@
 """
 import os
 import subprocess
+from data_plane.sav_rule_manager import SavRuleManager
 from common import get_all_interfaces
 from common.main_logger import LOGGER as logger
 from sav_app.app_efp_urpf import EFP_URPF_A_ID, EFP_URPF_B_ID
@@ -24,6 +25,7 @@ class IPTableManager():
     """
     generate iptables rules and apply them
     """
+    sav_rule_manager = SavRuleManager()
 
     def __init__(self):
         """
@@ -114,8 +116,13 @@ class IPTableManager():
                 log_line = f'-A SAVAGENT -s {ip_addr}/{prefixlen} -i {interface_name} -j LOG --log-prefix \"IPTABLES {container_id} ACCEPT: \" --log-level 7' + "\n"
                 line = f"-A SAVAGENT -s {ip_addr}/{prefixlen} -i {interface_name} -j ACCEPT"
                 filter_rules = filter_rules + log_line + line + "\n"
-            line = f"-A SAVAGENT -p udp -j DROP"
-            filter_rules = filter_rules + line + "\n"
+            for interface_info in self.sav_rule_manager.get_interface_info():
+                logger.debug(interface_info)
+                interface_name, interface_role = interface_info[0], interface_info[3]
+                if interface_role == "provider":
+                    log_line = f'-A SAVAGENT -i {interface_name} -p udp -j LOG --log-prefix \"IPTABLES {container_id} ACCEPT: \" --log-level 7' + "\n"
+                    line = f"-A SAVAGENT -i {interface_name} -p udp -j DROP"
+                    filter_rules = filter_rules + log_line + line + "\n"
             with open(f"{LOG_DIR}/ip4tables_filter_rule.txt", "r") as f:
                 lines = f.readlines()[:-2]
             content = ""
@@ -141,8 +148,7 @@ class IPTableManager():
             # interface Aggregation
             aggre_rules = {}
             for k, v in rules.items():
-                ip_addr, prefixlen, interface_name = str(v["prefix"].ip), v["prefix"].prefixlen, set(
-                    (v["interface_name"],))
+                ip_addr, prefixlen, interface_name = str(v["prefix"].ip), v["prefix"].prefixlen, set((v["interface_name"],))
                 key = f"{ip_addr}_{prefixlen}"
                 if key not in aggre_rules:
                     aggre_rules.update({key: set((v["interface_name"],))})
@@ -170,8 +176,12 @@ class IPTableManager():
                 ip_addr, prefixlen, interface_name = str(r["prefix"].ip), r["prefix"].prefixlen, r["interface_name"]
                 line = f"-A SAVAGENT -s {ip_addr}/{prefixlen} -i {interface_name} -j ACCEPT"
                 filter_rules = filter_rules + line + "\n"
-            line = f"-A SAVAGENT -p tcp -j DROP"
-            filter_rules = filter_rules + line + "\n"
+            for interface_info in self.sav_rule_manager.get_interface_info():
+                interface_name, interface_role = interface_info[0], interface_info[3]
+                if interface_role == "provider":
+                    log_line = f'-A SAVAGENT -i {interface_name} -p udp -j LOG --log-prefix \"IPTABLES {container_id} ACCEPT: \" --log-level 7' + "\n"
+                    line = f"-A SAVAGENT -i {interface_name} -p udp -j DROP"
+                    filter_rules = filter_rules + log_line + line + "\n"
             with open(f"{LOG_DIR}/ip6tables_filter_rule.txt", "r") as f:
                 lines = f.readlines()[:-2]
             content = ""
@@ -182,6 +192,7 @@ class IPTableManager():
                 f.write(content)
             apply_filer_talbes_commmand = f"ip6tables-restore < {LOG_DIR}/ip6tables_filter_rule.txt"
             command_status = self._command_executor(command=apply_filer_talbes_commmand)
+
     def tc_enable(self, rules, active_app):
         ipv4_rules, ipv6_rules = self._separate_v4_and_v6_addr(rules=rules)
         self._tc_enable_ipv4(rules=ipv4_rules, active_app=active_app)
