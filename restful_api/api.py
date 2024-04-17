@@ -16,7 +16,7 @@ import time
 import copy
 
 from flask import request, Blueprint
-from common import RPDP_OVER_BGP, RPDP_OVER_HTTP, TIMEIT_THRESHOLD, json_w
+from common import LINK_RPDP_BGP, LINK_RPDP_HTTP, TIMEIT_THRESHOLD, json_w
 from common.main_logger import LOGGER
 from control_plane import SA
 from data_plane.data_plane_enable import interceptor
@@ -38,6 +38,7 @@ def index():
         LOGGER.exception(err)
         LOGGER.error(err)
         return {"code": "5001", "message": "Invalid Json String", "data": str(request.data)}
+    LOGGER.debug(msg)
     try:
         required_keys = ["msg_type", "msg"]
         for key in required_keys:
@@ -51,7 +52,7 @@ def index():
                 # LOGGER.debug(f"bird try to get cmd")
                 cmd = SA.link_man.bird_cmd_buff.get()
                 SA.link_man.bird_cmd_buff.task_done()
-                # LOGGER.debug(f"bird got cmd {cmd}")
+                LOGGER.debug(f"bird got cmd {cmd}")
                 return {"code": "2000", "data": cmd, "message": "success"}
             except IndexError as err:
                 SA.logger.warning(f"bird try to get cmd but no cmd in queue")
@@ -68,7 +69,7 @@ def index():
             if not m_t == "link_state_change":
                 msg['link_type'] = "bgp"
                 if RPDP_ID in msg["msg"]["channels"]:
-                    msg['link_type'] = RPDP_OVER_BGP
+                    msg['link_type'] = LINK_RPDP_BGP
         msg["pkt_rec_dt"] = t0
         SA.put_msg(msg)
         rep = {"code": "0000", "message": "success"}
@@ -287,7 +288,7 @@ def refresh_proto(active_app):
     return {"code": "0000", "message": f"{None}"}
 
 
-@api_blueprint.route(f'/{RPDP_OVER_HTTP}/', methods=["POST", "GET"])
+@api_blueprint.route(f'/{LINK_RPDP_HTTP}/', methods=["POST", "GET"])
 def recv_rpdp_msg():
     try:
 
@@ -298,7 +299,7 @@ def recv_rpdp_msg():
         src_link.insert(1, src_link.pop(-1))
         SA.put_msg({"msg": msg,
                     "source_link": "_".join(src_link),
-                    "msg_type": f"{RPDP_OVER_HTTP}_recv_pkt",
+                    "msg_type": f"{LINK_RPDP_HTTP}_recv_pkt",
                     "dst_sav_app": RPDP_ID,
                     "source_app": "",
                     "pkt_rec_dt": time.time()})

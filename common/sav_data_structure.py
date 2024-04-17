@@ -6,6 +6,7 @@
 @Version :   0.1
 @Desc    :   Defines data structure and related conversions
 """
+import netaddr
 import time
 import json
 # for RPDP SPA msg
@@ -655,7 +656,12 @@ def process_src_kv(k, v, my_asn):
         raise ValueError(f"unknown key:{k_temp}")
     return 1
 
-
+def translate_bird_out(line):
+    line = line.strip()
+    for k, v in HARDCODE_KEYS.items():
+        if line.startswith(k):
+            return v, line[len(k):]
+    raise ValueError(f"unknown key [{line}]")
 def parse_prefix(data, my_asn):
     """
     special parsing for bird show route all cmd,
@@ -679,17 +685,6 @@ def parse_prefix(data, my_asn):
             prefix = netaddr.IPNetwork(prefix)
             ret[prefix] = [" "+" ".join(temp[1:])]
             cur_prefix = prefix
-    hardcoded_keys = {"\tdev ": "device",
-                      "\tType: ": "type",
-                      "\tBGP.origin: ": "origin",
-                      "\tBGP.as_path: ": "as_path",
-                      "\tvia ": "via",
-                      "\tBGP.next_hop: ": "next_hop",
-                      "\tBGP.local_pref: ": "metric",
-                      "\tBGP.otc: ": "only_to_customer",
-                      "\tBGP.community: ": "community",
-                      "\tKernel.source: ": "kernel_source",
-                      "\tKernel.metric: ": "Kernel_metric"}
     for prefix, lines in ret.items():
         srcs = {}
         cur_key = None
@@ -700,27 +695,25 @@ def parse_prefix(data, my_asn):
             else:
                 if cur_key == None:
                     raise ValueError("key not found")
-                found = False
-                # input(l)
-                for k, v in hardcoded_keys.items():
-                    if l.startswith(k):
-                        srcs[cur_key][v] = l[len(k):]
-                        if k == "\tBGP.as_path: ":
-                            srcs[cur_key][v] = list(
-                                map(int, srcs[cur_key][v].split()))
-                            if len(srcs[cur_key][v]) > 0:
-                                srcs[cur_key]["origin"] = srcs[cur_key][v][0]
-                                srcs[cur_key]["origin_type"] = "AS"
-                        elif k == "\tBGP.local_pref: ":
-                            srcs[cur_key][v] = int(
-                                srcs[cur_key][v])
-                        elif k == "\tvia ":
-                            srcs[cur_key]["interface_name"] = l.split("on ")[1]
-                        found = True
-                        break
-                if not found:
-                    print(data)
+                new_k, new_v = translate_bird_out(l)
+                if not new_k:
                     raise ValueError(f"unknown key {[l]}")
+                if new_k == "as_path":
+                    as_path = list(map(int, new_v.split()))
+                    srcs[cur_key]["as_path"] = as_path
+                    # if len(as_path) > 0:
+                    #         srcs[cur_key]["origin_as"] = as_path[0]
+                    #         srcs[cur_key]["origin_type"] = "AS"
+                elif new_k in ["interface_name", "type", "via", "origin"]:
+                    # no action required
+                    srcs[cur_key][new_k] = new_v
+                elif new_k == "next_hop":
+                    # address type
+                    srcs[cur_key][new_k] = netaddr.IPAddress(new_v)
+                elif new_k in ["metric", "only_to_customer"]:
+                    srcs[cur_key][new_k] = int(new_v)
+                else:
+                    raise NotImplementedError(f"{new_k}:{new_v}")
         new_srcs = []
         for k, v in srcs.items():
             new_v = process_src_kv(k, v, my_asn)
@@ -787,7 +780,6 @@ def parse_bird_show_route_all(data, my_asn):
         lines = my_split(i, "\n")
         table_heading = lines.pop(0)
         table_name = table_heading.strip().split(":")[0]
-
         table_data = i.split(table_heading)[1][1:]
         if table_name == "r4":
             ret[table_name] = parse_r4(table_data)

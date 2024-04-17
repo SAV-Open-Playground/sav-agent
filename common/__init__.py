@@ -4,15 +4,16 @@
 @File    :   sav_common.py
 @Time    :   2023/01/17 16:04:22
 @Version :   0.1
-@Desc    :   The sav_common.py contains shared functions and classes for savop project.
+
+@Desc    :   The sav_common.py contains shared functions and classes
 """
 
 import os
 import subprocess
 import requests
-import pickle
 from common.sav_data_structure import *
-from pyroute2 import IPRoute, IPDB
+import pickle
+from pyroute2 import IPDB
 import time
 import logging
 import logging.handlers
@@ -62,69 +63,119 @@ class RPDPPeer:
 RPDP_PEER_TYPE = RPDPPeer
 
 
+def _trim_table(table):
+    """
+    remove the first and last line
+    """
+    table = table.split("\n")
+    while "" in table:
+        table.remove("")
+    table_name = table.pop(0)[1:-1]
+    parsed_rows = {}
+    stack = []
+    for line in table:
+        level = 0
+        while line.startswith("\t"):
+            level += 1
+            line = line[1:]
+        while len(stack) > level:
+            stack.pop()
+        if level == 0:
+            stack = [line]
+        else:
+            parent = stack[-1]
+            if parent not in parsed_rows:
+                parsed_rows[parent] = []
+            parsed_rows[parent].append(line)
+            stack.append(line)
+    return table_name, parsed_rows
+
+
 def parse_bird_table(table, logger=None):
     """
     return table_name(string) and parsed_rows(dict)
     """
-    temp = table.split("\n")
-    while "" in temp:
-        temp.remove("")
-    table_name = temp[0][1:-1]
-    parsed_rows = {}
-    temp = temp[1:]
-    rows = []
-    this_row = []
-    for line in temp:
-        if (line.startswith("\t") or line.startswith(" ")):
-            this_row.append(line)
-        else:
-            rows.append(this_row)
-            this_row = [line]
-    while [] in rows:
-        rows.remove([])
-    for row in rows:
-        heading = row.pop(0)
-        # skip blackhole
-        # if "blackhole" in heading:
-        # continue
-        prefix = heading.split(" ")[0]
-
-        if "-" in prefix:
-            logger.debug(prefix)
-            prefix = prefix.split("-")[0]
-            logger.debug(prefix)
-        # TODO: demo filter
-        if prefix == "0.0.0.0/0":
+    table_name, table_content = _trim_table(table)
+    new_table_content = {}
+    for k, v in table_content.items():
+        try:
+            p = netaddr.IPNetwork(k.split(" ")[0])
+        except Exception as e:
+            logger.debug(k.split(" ")[0])
+            logger.exception(e)
+            new_table_content[k] = v
             continue
-        prefix = netaddr.IPNetwork(prefix)
-        if prefix not in parsed_rows:
-            parsed_rows[prefix] = []
-        temp = {}
-        for line in row:
-            # logger.debug([line])
-            if line.startswith("\tBGP.as_path:"):
-                if line.endswith("_path: "):
-                    temp["as_path"] = []
+        # get info from k
+        while "  " in k:
+            k = k.replace("  ", " ")
+        k = k.split("[")
+        prefix_type = k[0].split(" ")[1]
+        k = k[1]
+        link_name = k.split(" ")[0]
+        time_str = k.split(" ")[1][:-1]
+        k = k.split("]")[1].strip()
+        k = k.split(" ")
+        unknown_value = k[0]
+        metric = int(k[1][1:-1])
+        if not p in new_table_content:
+            new_table_content[p] = {"srcs": [], "origin_ases": set()}
+        this_src = {
+            "type": prefix_type,
+            "link_name": link_name,
+            "time_str": time_str,
+            "unknown_value": unknown_value,
+            "metric": metric,
+            "unprocessed_lines": [],
+        }
+        for l in v:
+            try:
+                sub_k, sub_v = translate_bird_out(l)
+                if sub_k == "via":
+                    this_src["interface_name"] = sub_v.split(
+                        "on ")[-1]
+                    this_src["via"] = netaddr.IPAddress(
+                        sub_v.split(" ")[0])
+                elif sub_k in ["type", "origin"]:
+                    this_src[sub_k] = sub_v
+                elif sub_k == "as_path":
+                    while "  " in sub_v:
+                        sub_v = sub_v.replace("  ", " ")
+                    sub_v = sub_v.strip().split(" ")
+                    while "" in sub_v:
+                        sub_v.remove("")
+                    this_src[sub_k] = list(map(int, sub_v))
+                    this_src[sub_k].reverse()
+                    if not len(this_src[sub_k]) == 0:
+                        new_table_content[p]["origin_ases"].add(
+                            this_src[sub_k][0])
+                elif sub_k == "next_hop":
+                    this_src[sub_k] = netaddr.IPAddress(sub_v)
+                elif sub_k == "metric":
+                    if not int(sub_v) == this_src["metric"]:
+                        logger.warning(
+                            f"metric not match:{sub_v}:{this_src['metric']}")
+                elif sub_k == "only_to_customer":
+                    this_src[sub_k] = int(sub_v.strip())
                 else:
-                    temp["as_path"] = list(
-                        map(int, line.split(": ")[1].split(" ")))
-                    temp["as_path"].reverse()
-                    temp["origin_as"] = temp["as_path"][0]
-            if line.startswith("\tvia"):
-                temp["interface_name"] = line.split("on ")[-1]
-                temp["interface_ip"] = line.split(
-                    "on ")[0].split("via ")[-1]
-            if line.startswith("                     "):
-                if not temp == {}:
-                    parsed_rows[prefix].append(temp)
-                    temp = {}
-        # add the last one
-        if not temp == {}:
-            parsed_rows[prefix].append(temp)
-        # parsed_rows[prefix].sort()
-        if len(parsed_rows[prefix]) == 1 and len(parsed_rows[prefix][0]) == 0:
-            del parsed_rows[prefix]
-    return table_name, parsed_rows
+                    this_src["unprocessed_lines"].append(l)
+                    logger.warning(f"unprocessed line:[{sub_k}:{sub_v}]")
+            except Exception as e:
+                logger.debug(l)
+                logger.exception(e)
+                this_src["unprocessed_lines"].append(l)
+                logger.debug(l)
+                continue
+        new_table_content[p]["srcs"].append(this_src)
+    for k, v in new_table_content.items():
+        new_table_content[k]["origin_ases"] = list(v["origin_ases"])
+        if len(v["origin_ases"]) == 0:
+            logger.warning(f"no origin as for {k}")
+        elif len(v["origin_ases"]) == 1:
+            new_table_content[p]["prefix_type"] = SOLE_HOMING
+        elif len(v["origin_ases"]) > 1:
+            new_table_content[p]["prefix_type"] = MULT_HOMING_PARTIAL
+
+    return table_name, new_table_content
 
 
 def check_msg(key, msg, meta=SAV_META):
@@ -150,36 +201,34 @@ def rule_list_diff(old_rules, new_rules):
 
 
 def subproc_run(cmd, shell=True, capture_output=True, encoding='utf-8'):
-    return subprocess.run(cmd, close_fds=True, shell=shell, capture_output=capture_output, encoding=encoding, check=True)
+    return subprocess.run(
+        cmd,
+        shell=shell,
+        capture_output=capture_output,
+        encoding=encoding)
 
 
-def run_cmd(command, ignore_error=False):
-    try:
-        ret = subproc_run(command, shell=True,
-                          capture_output=True, encoding='utf-8')
-        if ret.returncode != 0:
-            if not ignore_error:
-                print(ret)
-                raise ValueError(f"command {command} failed")
-        return ret.stdout
-    except Exception as e:
-        if not ignore_error:
-            print(e)
-            raise ValueError(f"command {command} failed")
+def run_cmd(command):
+    ret = subproc_run(command, shell=True,
+                      capture_output=True, encoding='utf-8')
+    if ret.returncode != 0:
+        print(ret)
+    return ret.stdout
 
 
-def get_all_interfaces():
+def get_host_interface_list() -> list[str]:
     """
     return a list of 'clean' interface names
     """
-    ret = []
-    with IPDB() as ipdb:
-        for interface in ipdb.interfaces.values():
-            if interface.ifname.startswith("eth"):
-                ret.append(interface.ifname)
-            # TODO demo filter
-            # only include interfaces start with eth_, for demo
-    return ret
+    command = "ip link|grep -v 'link' | grep -v -E 'docker0|lo' | awk -F: '{ print $2 }' | sed 's/ //g'"
+    std_out = run_cmd(command)
+    result = std_out.split("\n")[:-1]
+    result = list(map(lambda x: x.split('@')[0], result))
+    result = [i for i in result if len(i) != 0]
+    # TODO demo filter
+    # only include interfaces start with eth_, for demo
+    result = [i for i in result if i.startswith("eth_")]
+    return result
 
 
 def diff_sav_rules(old_rules, new_rules):
@@ -287,6 +336,19 @@ def get_ifa_by_ip(ip: str) -> str:
     raise ValueError(f"unable to get interface for {ip}")
 
 
+def get_all_interfaces():
+    """
+    return a list of all interface names
+    """
+    ret = []
+    with IPDB() as ipdb:
+        for interface in ipdb.interfaces:
+            # TODO SAV filter
+            if str(interface).startswith("eth"):
+                ret.append(interface)
+    return ret
+
+
 def read_json(path_to_json):
     with open(path_to_json, "r", encoding="utf-8") as json_file:
         return json.loads(json_file.read())
@@ -374,6 +436,7 @@ def birdc_cmd(logger, cmd, log_err=True):
     t0 = time.time()
     cmd = f"/usr/local/sbin/birdc {cmd}"
     try:
+        # logger.debug("birdc_cmd")
         if "call_agent" in cmd:
             proc = subprocess.Popen(
                 ["/usr/local/sbin/birdc", "call_agent"],
@@ -393,6 +456,7 @@ def birdc_cmd(logger, cmd, log_err=True):
                 stderr=subprocess.PIPE)
             out = proc.stdout.read()
             out = out.decode()
+        proc.kill()
     except Exception as e:
         logger.debug(cmd)
         logger.debug(type(e))
@@ -455,9 +519,11 @@ def birdc_get_import(logger, protocol_name, channel_name="ipv4"):
     using birdc show all import to get import table
     return a list
     """
-    default = {"import": {}}
+    default = {}
     cmd = f"show route all import table {protocol_name}.{channel_name}"
+    # logger.debug(cmd)
     data = birdc_cmd(logger, cmd)
+    # logger.debug(data)
     if data is None:
         return default
     if data.startswith("No import table in channel"):
@@ -472,7 +538,10 @@ def birdc_get_import(logger, protocol_name, channel_name="ipv4"):
     for table in data:
         table_name, table_data = parse_bird_table(table, logger)
         if table_name == "import":
+            # logger.debug(table_data)
             return table_data
+        else:
+            logger.warning(f"table_name:{table_name}:{table_data}")
     return default
 
 

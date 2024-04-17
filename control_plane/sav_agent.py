@@ -55,16 +55,16 @@ class SendAgent():
         """
         currently we don't handle the reply (ignore), don't use if you need reply
         """
+        raise NotImplementedError
 
 
 class SavAgent():
     def __init__(self, logger=None, path_to_config=os.path.join(
             os.path.dirname(os.path.abspath(__file__)), "SavAgent_config.json")):
         first_dt = time.time()
+        self.ip_route = IPRoute()
         if logger is None:
             logger = get_logger("sav-agent")
-        self.ip_route = IPRoute()
-        self.ip_db = IPDB()
         self.logger = logger
         self.config = {}
         self.link_man = None
@@ -72,12 +72,30 @@ class SavAgent():
         self.update_config()
         self._init_data(first_dt)
         self._in_msgs = queue.Queue()
-
         # self.sib_man = s(logger=self.logger)
         self.bird_man = BirdCMDManager(logger=self.logger)
         self._start()
-
         # self.grpc_server = None
+
+    def get_interface_info(self):
+        """return a list of tuples, each tuple is (interface_name(str), interface_ips([ip_string]),inter_domain(bool),local_role(str))"""
+        ret = []
+        for link in self.ip_route.get_links():
+            interface = self.ip_route.get_addr(
+                label=link.get_attr('IFLA_IFNAME'))
+            if interface:
+                if_addrs = [addr.get_attr('IFA_ADDRESS') for addr in interface]
+                if_name = link.get_attr('IFLA_IFNAME')
+                is_inter = False
+                local_role = ""
+                for cfg_link_name, cfg_link_info in self.config['link_map'].items():
+                    if cfg_link_info['local_ip'] in if_addrs:
+                        if cfg_link_info['local_role'] in ["customer", "provider", "peer"]:
+                            is_inter = True
+                            local_role = cfg_link_info['local_role']
+                if not if_name == "lo":
+                    ret.append((if_name, if_addrs, is_inter, local_role))
+        return ret
 
     def put_out_msg(self, msg):
         # self.logger.debug(f"putting out msg {msg}")
@@ -92,6 +110,7 @@ class SavAgent():
                 if d["remote_as"] != my_as:
                     return True
         return False
+
     def update_config(self):
         """
         return dictionary object if is a valid config file (only check type not value). 
@@ -114,19 +133,17 @@ class SavAgent():
                 quic_config = config["quic_config"]
                 grpc_keys = [("server_enabled", bool)]
                 keys_types_check(quic_config, grpc_keys)
-
-                valid_location = ["edge_full", "internal", "gray"]
                 temp = {}
                 for p in config["prefixes"]:
                     temp[netaddr.IPNetwork(p)] = config["prefixes"][p]
                 config["prefixes"] = temp
-                if not config["location"] in valid_location:
+                if not config["location"] in ROUTER_LOCATIONS:
                     raise ValueError(
-                        f"invalid location {config['location']}, should be one of {valid_location}")
-                
+                        f"invalid location {config['location']}, should be one of {ROUTER_LOCATIONS}")
+
                 config["is_edge"] = self._is_edge_router(
                     config["link_map"], config["local_as"])
-                
+
                 if str(self.config) == str(config):
                     return
                 self.config = config
@@ -248,7 +265,8 @@ class SavAgent():
                     self.passport_app = sav_apps[app_id]
             self.data["apps"] = sav_apps
             if not self.config["enabled_sav_app"] in self.data["apps"]:
-                self.logger.warning(f"{self.config['enabled_sav_app']} not inilized, not setting active_app")
+                self.logger.warning(
+                    f"{self.config['enabled_sav_app']} not inilized, not setting active_app")
                 self.data["active_app"] = None
                 self.logger.debug(
                     msg=f"initialized apps: {list(self.data['apps'].keys())},using {None}")
@@ -337,8 +355,11 @@ class SavAgent():
 
     def parse_kernel_fib(self) -> dict:
         try:
-            routes = self.ip_route.get_routes(table=254)
-            ifas = self.ip_db.interfaces
+            # ip_route = IPRoute()
+            ip_route = self.ip_route
+            ip_db = IPDB()
+            routes = ip_route.get_routes(table=254)
+            ifas = ip_db.interfaces
             ret = {}
             for route in routes:
                 # self.logger.debug(route)
@@ -354,6 +375,8 @@ class SavAgent():
                 # if v["Iface"] == "lo":
                 #     continue
                 ret[k] = v
+            ip_db.release()
+            # ip_route.close()
             return ret
         except Exception as e:
             self.logger.exception(e)
@@ -465,17 +488,30 @@ class SavAgent():
         self._init_apps()
         self.logger.debug(f"initial wait: {time.time()-t0:.4f} seconds")
 
-    def get_adj_in(self, protocol_name):
-        adj_info = copy.deepcopy(self.data["adj_in"][protocol_name])
-        return
+    def get_adj_in(self, protocol_name=None):
+        """if protocol_name is None, return all adj_in
+        else return the adj_in for the given protocol_name"""
+        if protocol_name is None:
+            return copy.deepcopy(self.data["adj_in"])
+        return copy.deepcopy(self.data["adj_in"][protocol_name])
 
     def _refresh_adj_in(self):
-        for l_name, l_meta in self.link_man.get_all_link_meta().items():
-            if l_meta["link_type"] in RPDP_LINK_TYPES:
-                proto_name = l_meta["protocol_name"]
-                ret = birdc_get_import(
-                    self.logger, proto_name, f"ipv{self.config['auto_ip_version']}")
-                self.data["adj_in"][proto_name] = ret
+        if not self.bird_man.is_bird_ready():
+            self.logger.warning("bird not ready")
+            return
+        for l_meta in self.link_man.get_all_link_meta().values():
+            if not l_meta["link_type"] in LINK_NATIVE_BGP:
+                continue
+            proto_name = l_meta["protocol_name"]
+            ret = birdc_get_import(
+                self.logger, proto_name, f"ipv{self.config['auto_ip_version']}")
+            if self.config["use_ignore_nets"]:
+                for k in list(ret.keys()):
+                    for p in self.ignore_prefixes:
+                        if k in p:
+                            del ret[k]
+                            break
+            self.data["adj_in"][proto_name] = ret
 
     def is_all_msgs_finished(self):
         """
@@ -531,7 +567,7 @@ class SavAgent():
         """
         self._initial_wait()
         # generate initial sav rules
-        self.logger.debug(f"before initial fib")
+        self.logger.debug("before initial fib")
         fib_adds = self.get_fib("kernel", ["remote", "local"])
         self.logger.debug(f"initial fib:{fib_adds}")
         self._notify_apps(True, fib_adds, {})
@@ -942,25 +978,26 @@ class SavAgent():
             new_rule["interface_name"] = ifa
             ret[get_key_from_sav_rule(new_rule)] = new_rule
         return ret
-    def get_sav_rules_by_app_black(self,app_name, is_interior=None, ip_version=None):
-        raw_rules = self.get_sav_rules_by_app(app_name,is_interior,ip_version)
+
+    def get_sav_rules_by_app_black(self, app_name, is_interior=None, ip_version=None):
+        raw_rules = self.get_sav_rules_by_app(
+            app_name, is_interior, ip_version)
         white_list = {}
-        for r_k,r in raw_rules.items():
+        for r_k, r in raw_rules.items():
             if not r['prefix'] in white_list:
                 white_list[r['prefix']] = set()
             white_list[r['prefix']].add(r['interface_name'])
         black_list = {}
-        all_interfaces = get_all_interfaces()
-        for p,allowed_ifas in white_list.items():
+        all_interfaces = get_host_interface_list()
+        for p, allowed_ifas in white_list.items():
             for ifa in all_interfaces:
                 if ifa in allowed_ifas:
                     continue
-                d = {"prefix":p,"interface_name":ifa,"source_app":app_name}
-                black_list[f"{p}_-1_{ifa}"]= d
+                d = {"prefix": p, "interface_name": ifa, "source_app": app_name}
+                black_list[f"{p}_-1_{ifa}"] = d
         self.logger.debug(black_list)
         return black_list
-        
-        
+
     def get_sav_rules_by_app(self, app_name, is_interior=None, ip_version=None):
         """
         return all sav rules for given app
@@ -973,7 +1010,7 @@ class SavAgent():
         """
         temp = self._get_sav_rules_by_app(
             app_name, is_interior)
-        all_interfaces = get_all_interfaces()
+        all_interfaces = get_host_interface_list()
         ret = {}
         for k, v in temp.items():
             if ip_version is None:
@@ -1145,7 +1182,13 @@ class SavAgent():
             self._process_link_state_change(input_msg)
         elif m_t == "bgp_update":
             self._process_native_bgp_update()
-        #
+        elif m_t in ["rpdp_update"]:
+            if not self.rpdp_app:
+                self.logger.warning(
+                    f"{RPDP_ID} missing, unable to process msg for {RPDP_ID}")
+            # add link_type
+            input_msg["msg"]["link_type"] = input_msg["link_type"]
+            self.rpdp_app.recv_msg(input_msg)
         elif "dst_sav_app" in input_msg:
             dst_sav_app = input_msg["dst_sav_app"]
             if dst_sav_app == RPDP_ID:
@@ -1286,6 +1329,7 @@ class SavAgent():
         build spd and send to all links
         """
         # self.logger.debug("sending spd")
+        self._notify_apps(False, {}, {})
         if self.rpdp_app is None:
             self.logger.debug("rpdp_app missing, unable to send spd")
             return

@@ -72,12 +72,7 @@ class EfpUrpfApp(SavApp):
         """
         using birdc show all import to get bird fib
         """
-        default = {"import": {}}
-        v = self.agent.config["auto_ip_version"]
-        ret = birdc_get_import(self.logger, protocol_name, f"ipv{v}")
-        if ret == default:
-            ret = birdc_get_import(self.logger, protocol_name, f"rpdp{v}")
-        return ret
+        return self.agent.get_adj_in(protocol_name)
 
     def generate_sav_rules(self, fib_adds, fib_dels, old_rules):
         """
@@ -119,10 +114,8 @@ class EfpUrpfApp(SavApp):
             protocol_name = meta["protocol_name"]
             # only works for interior links
             all_int_in[protocol_name] = {"meta": meta}
-            all_int_in[protocol_name]["adj-in"] = self._parse_import_table(
+            all_int_in[protocol_name]["adj-in"] = self.agent.get_adj_in(
                 protocol_name)
-            # self.logger.debug(
-            #     msg=f"all_int_in of {protocol_name}:{all_int_in[protocol_name]['adj-in']}")
             # filter out the adj-in that does not match the roa
             if self.roa:
                 temp = {}
@@ -137,30 +130,34 @@ class EfpUrpfApp(SavApp):
                 all_int_in[protocol_name]["adj-in"] = temp
         self.logger.debug(f"EFP-A all_int_in:{all_int_in}")
         for protocol_name, data in all_int_in.items():
-            if data["meta"]["remote_role"] == "customer":
-                if self.aspa:
-                    if not self._aspa_check(data["meta"], aspa_info, self.agent.config["local_as"]):
-                        self.logger.debug(f"aspa check failed: {data['meta']}")
-                        self.logger.debug(f"aspa check failed: {aspa_info}")
-                        self.logger.debug(
-                            f"aspa check failed: {self.agent.config['local_as']}")
-                        continue
-                for prefix, paths in data["adj-in"].items():
-                    self.logger.debug(f"{prefix}, {paths}")
-                    for path in paths:
-                        X[path["origin_as"]] = set()
+            if not data["meta"]["remote_role"] == "customer":
+                continue
+            if self.aspa:
+                if not self._aspa_check(data["meta"], aspa_info, self.agent.config["local_as"]):
+                    self.logger.debug(f"aspa check failed: {data['meta']}")
+                    self.logger.debug(f"aspa check failed: {aspa_info}")
+                    self.logger.debug(
+                        f"aspa check failed: {self.agent.config['local_as']}")
+                    continue
+            for prefix, prefix_data in data["adj-in"].items():
+                for path in prefix_data["srcs"]:
+                    X[path["as_path"][0]] = set()
         for origin_asn in X:
             for protocol_name, data in all_int_in.items():
-                for prefix, paths in data["adj-in"].items():
-                    for path in paths:
-                        if path["origin_as"] == origin_asn:
+                for prefix, prefix_data in data["adj-in"].items():
+                    for path in prefix_data["srcs"]:
+                        if path["as_path"][0] == origin_asn:
                             # self.logger.debug(f"prefix:{prefix}")
                             X[origin_asn].add(prefix)
         # self.logger.debug(f"EFP-A X:{X}")
         new_rules = {}
+        # self.logger.debug(all_int_in)
+        all_customer_ifas = []
         for protocol_name, data in all_int_in.items():
+            if data["meta"]["remote_role"] == "customer":
+                all_customer_ifas.append(data["meta"]["interface_name"])
+        for data in all_int_in.values():
             if not data["meta"]["remote_role"] == "customer":
-                # self.logger.debug(f"new_rules:{data['meta']['remote_role']}")
                 continue
             for origin_asn, prefixes in X.items():
                 is_prefix_included = False
@@ -170,9 +167,10 @@ class EfpUrpfApp(SavApp):
                         break
                 if is_prefix_included:
                     for prefix in prefixes:
-                        rule = get_sav_rule(
-                            prefix, data["meta"]["interface_name"], self.app_id, origin_asn)
-                        new_rules[get_key_from_sav_rule(rule)] = rule
+                        for ifa in all_customer_ifas:
+                            rule = get_sav_rule(
+                                prefix, ifa, self.app_id, origin_asn)
+                            new_rules[get_key_from_sav_rule(rule)] = rule
         # self.logger.debug(f"EFP-A new_rules:{new_rules}")
 
         return rule_list_diff(old_rules, new_rules)
@@ -190,7 +188,7 @@ class EfpUrpfApp(SavApp):
             protocol_name = link_meta["protocol_name"]
             # self.logger.debug(msg=f"protocol_name:{protocol_name}")
             data = {"meta": link_meta}
-            data["adj-in"] = self._parse_import_table(protocol_name)
+            data["adj-in"] = self.agent.get_adj_in(protocol_name)
             all_int_in.append(data)
 
         for data in all_int_in:
@@ -198,16 +196,20 @@ class EfpUrpfApp(SavApp):
                 interface_name = data["meta"]["interface_name"]
                 if interface_name not in I:
                     I.add(interface_name)
-                for prefix, paths in data["adj-in"].items():
-                    for path in paths:
-                        P.add((prefix, path["origin_as"]))
-                        A.add(path["origin_as"])
+                for prefix, prefix_data in data["adj-in"].items():
+                    for path in prefix_data["srcs"]:
+                        origin_as = path["as_path"][0]
+                        P.add((prefix, origin_as))
+                        A.add(origin_as)
         for data in all_int_in:
             if data["meta"]["remote_role"] in ["peer", "provider"]:
-                for prefix, paths in data["adj-in"].items():
-                    for path in paths:
-                        if path["origin_as"] in A:
-                            Q.add((prefix, path["origin_as"]))
+                # self.logger.debug(
+                    # f"protocol_name:{data['meta']['protocol_name']}:{data['adj-in'].keys()}")
+                for prefix, prefix_data in data["adj-in"].items():
+                    for origin_as in prefix_data["origin_ases"]:
+                        # self.logger.debug(f"{prefix}:{origin_as}")
+                        if origin_as in A:
+                           Q.add((prefix, origin_as))
         Z = P.union(Q)
         # self.logger.debug(f"I:{I}")
         # self.logger.debug(f"P:{P}")

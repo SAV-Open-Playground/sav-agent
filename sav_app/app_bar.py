@@ -44,7 +44,7 @@ class BarApp(SavApp):
         """
         return a set of AS numbers of all customer or peer asn
         """
-        data = birdc_get_protos_by(self.logger, 'Proto', 'BGP')
+        data = birdc_get_protos_by(self.logger, 'Proto', 'LINK_BGP')
         all_protos = [i['Name'] for i in data]
         result = set()
         for proto_name in all_protos:
@@ -56,7 +56,7 @@ class BarApp(SavApp):
 
     def generate_sav_rules(self, fib_adds, fib_dels, old_rules):
         """
-        Although ASPA and ROA is included, only BGP update(FIB change) will trigger BAR to generate rules
+        Although ASPA and ROA is included, only LINK_BGP update(FIB change) will trigger BAR to generate rules
         """
         # get all customer or lateral peer
         return self.procedure_x(old_rules)

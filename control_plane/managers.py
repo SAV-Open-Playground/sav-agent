@@ -104,19 +104,6 @@ class BirdCMDManager():
                 result[k] = self._parse_next_level(v, indent=indent)
         return result
 
-    def _parse_links(self, raw_input):
-        """
-        parse link data inside proto_data
-        """
-        for key1, data in raw_input.items():
-            if not key1.startswith("savbgp"):
-                continue
-            temp = data["sub_1"]
-            del raw_input[key1]["sub_1"]
-            result = self._parse_next_level(temp)
-            raw_input[key1]["links"] = result
-            # self.logger.debug(json.dumps({key1: raw_input[key1]}, indent=2))
-        return raw_input
 
     def update_bird_fib(self, my_asn, log_err=True):
         """
@@ -167,7 +154,7 @@ class BirdCMDManager():
                 temp[table_name][prefix] = {}
                 for k, v in data.items():
                     new_k = k
-                    if new_k.startswith("BGP."):
+                    if new_k.startswith("bgp"):
                         new_k = new_k[4:]
                     if new_k.endswith(":"):
                         new_k = new_k[:-1]
@@ -216,7 +203,7 @@ class BirdCMDManager():
     #             continue
     #         if src["type"] == "device univ":
     #             device_flag = True
-    #         if src["type"] == "BGP univ":
+    #         if src["type"] == "LINK_BGP univ":
     #             bgp_flag = True
     #         if src["type"] == "static univ":
     #             static_flag = True
@@ -247,13 +234,13 @@ class BirdCMDManager():
             self.logger.error(e)
             self.logger.exception(e)
             raise e
-        # self.logger.debug([data])
         have_master = False
         if "master4" in data:
             have_master = True
         if "master6" in data:
             have_master = True
         if not have_master:
+            self.logger.debug([data])
             self.logger.error(
                 "no master table. Is BIRD ready?")
             raise ValueError("no master table. Is BIRD ready?")
@@ -267,99 +254,13 @@ class BirdCMDManager():
                     # for src in srcs:
                     #     self.logger.debug(src)
                     #     if "pro"
-                    #     if src["type"] == "BGP univ":
+                    #     if src["type"] == "LINK_BGP univ":
                     #         temp.append(src)
                     new_data[prefix] = srcs
         t = time.time() - t0
         if t > TIMEIT_THRESHOLD:
             self.logger.warning(f"TIMEIT {time.time() - t0:.4f} seconds")
         return new_data
-
-    def _parse_bird_table(self, table):
-        """
-        return table_name (string) and parsed_rows (dict)
-        """
-        # self.logger.debug([table])
-        t0 = time.time()
-        temp = table.split("\n")
-
-        table_name = temp[0][1:-1]
-        parsed_rows = {}
-        temp = temp[1:]
-        rows = []
-        this_row = []
-        for line in temp:
-            if not (line[0] == '\t' or line[0] == ' '):
-                rows.append(this_row)
-                this_row = [line]
-            else:
-                this_row.append(line)
-        rows.append(this_row)
-        while [] in rows:
-            rows.remove([])
-        # self.logger.debug(f"rows:{rows}")
-        for row in rows:
-            prefix = row.pop(0)
-            # if "blackhole" in prefix:
-            #     continue
-            while "  " in prefix:
-                prefix = prefix.replace("  ", " ")
-
-            prefix_temp = prefix.split(" ")
-            prefix = prefix_temp[0]
-            if len(prefix) < 9:
-                self.logger.error(f"incorrect prefix len: {row}")
-            # self.logger.debug(prefix)
-            # TODO check correctness
-            if "-" in prefix:
-                prefix = prefix.split("-")[0]
-            prefix = netaddr.IPNetwork(prefix)
-            # if prefix.version != ip_version:
-            # continue
-            # if prefix.is_private():
-            #     # self.logger.debug(f"private prefix {prefix} ignored")
-            #     continue
-            #
-            temp = {"meta": " ".join(prefix_temp[1:])}
-            for line in row:
-                if line.startswith("\t") and (":" in line):
-                    line = line.strip()
-                    line = line.split(": ")
-                    k = line[0]
-                    v = ":".join(line[1:])
-                    # self.logger.debug(f"[{k}]:[{v}]")
-                    if k in temp:
-                        if not isinstance(temp[k], list):
-                            temp[k] = [temp[k]]
-                        temp[k].append(v)
-                    else:
-                        temp[k] = v
-                    if k == "BGP.as_path":
-                        # self.logger.debug(f"v:{v}")
-                        if not "as_path" in temp:
-                            temp["as_path"] = []
-                        temp["as_path"].extend(list(map(int, v.split(" "))))
-                        # self.logger.debug(f"as_path:{temp['as_path']}")
-                        del temp["BGP.as_path"]
-                elif line.startswith("\tdev"):
-                    temp["interface"] = line.split(" ")[1]
-                elif line.startswith("\tvia"):
-                    temp["via"] = " ".join(line.split(" ")[1:])
-                elif line.startswith("                     unicast"):
-                    line = line.strip()
-                    temp["source"] = line
-                else:
-                    self.logger.warning([line])
-            if prefix in parsed_rows:
-                self.logger.warning(f"prefix {str(prefix)} already exists")
-            else:
-                parsed_rows[prefix] = temp
-        t = time.time() - t0
-        if t > TIMEIT_THRESHOLD:
-            self.logger.debug(f"TIMEIT {time.time() - t0:.4f} seconds")
-        return table_name, parsed_rows
-
-
 class InfoManager():
     """
     info manager manage the info of stored data,
@@ -409,16 +310,18 @@ class LinkManager(InfoManager):
         self._send_buff = queue.Queue()
         self.bird_cmd_buff = queue.Queue()
         self.post_session = requests.Session()
+        self.post_session.keep_alive = True
         self.result_buff = {}
         self._job_id = 0
         self._add_lock = False
         self.agent = agent
-        self.valid_types = ["bgp", RPDP_OVER_BGP, RPDP_OVER_HTTP]
+        self.valid_types = [LINK_NATIVE_BGP, LINK_RPDP_BGP, LINK_RPDP_HTTP,LINK_BGP_WITH_RPDP]
         self.add_sa_cfg_links(agent.config)
         self.bird_man = BirdCMDManager(logger)
 
     def recv_http_post(self, msg):
         self.logger.debug(f"recv_http_post got {msg}")
+
     def get_link_state(self, link_name):
         """
         return the state of the link
@@ -471,8 +374,7 @@ class LinkManager(InfoManager):
                      ("timeout", int), ("store_rep", bool)]
         keys_types_check(msg, key_types)
         # self.logger.debug(f"passed key_types_check")
-        supported_type = [RPDP_OVER_HTTP, RPDP_OVER_BGP]
-
+        supported_type = [LINK_RPDP_HTTP, LINK_RPDP_BGP,LINK_BGP_WITH_RPDP]
         if not msg["msg_type"] in supported_type:
             raise ValueError(
                 f"unknown msg type {msg['msg_type']} / {supported_type}")
@@ -539,12 +441,16 @@ class LinkManager(InfoManager):
             if data["link_type"] in ["bgp"]:
                 result[name] = data
         return result
+
     def get_all_rpdp_links(self) -> dict:
         """return a dict of all rpdp links
         key is link_name, value is link_meta
         """
         result = {}
         for name, data in self.data["links"].items():
+            # self.logger.debug(name)
+            # self.logger.debug(data["link_type"])
+            # self.logger.debug(RPDP_LINK_TYPES)
             if data["link_type"] in RPDP_LINK_TYPES:
                 result[name] = data
         return result
@@ -564,10 +470,12 @@ class LinkManager(InfoManager):
         # self.logger.debug(msg)
         msg["schedule_dt"] = time.time()
         m_t = msg["msg_type"]
-        if m_t == RPDP_OVER_HTTP:
+        if m_t == LINK_RPDP_HTTP:
             sent = self._send_http_post(msg)
-        elif m_t == RPDP_OVER_BGP:
-            self.logger.debug(msg["data"])
+            if not sent:
+                self.logger.debug(sent)
+        elif m_t == LINK_RPDP_BGP:
+            # self.logger.debug(msg["data"])
             desired_link_name = msg["data"]["protocol_name"]
             link = self.data["links"].get(desired_link_name, None)
             if not link:
@@ -575,9 +483,9 @@ class LinkManager(InfoManager):
                     f"link {desired_link_name} not found in {self.data['links']}")
                 sent = False
                 return
-            if link["link_type"] != RPDP_OVER_BGP:
+            if not link["link_type"] in [LINK_RPDP_BGP,LINK_BGP_WITH_RPDP]:
                 self.logger.error(
-                    f"link {desired_link_name} is not dsav")
+                    f"link {desired_link_name} is not {LINK_RPDP_BGP}")
                 sent = False
                 return
             # self.logger.debug(msg["data"])
@@ -617,8 +525,6 @@ class LinkManager(InfoManager):
                     if msg["store_rep"]:
                         self.result_buff[msg["pkt_id"]] = rep.json()
                     return True
-                else:
-                    self.logger.debug(f"retrying{msg['url']}: {msg}")
         if not "retry" in msg:
             retry = 10
         for i in range(retry):
@@ -628,7 +534,6 @@ class LinkManager(InfoManager):
                 self.result_buff[msg["pkt_id"]] = rep.json()
                 return True
             time.sleep(msg["timeout"])
-            self.logger.warning(f"failed{msg['url']}: {msg}")
         return False
 
     def add(self, meta_dict):
