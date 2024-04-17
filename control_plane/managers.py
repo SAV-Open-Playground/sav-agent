@@ -421,6 +421,8 @@ class LinkManager(InfoManager):
             if not cfg_link["link_type"] in self.valid_types:
                 self.logger.error(f"unsupported value:{cfg_link['link_type']}")
                 continue
+            if "remote_location" in cfg_link:
+                link_meta["remote_location"] = cfg_link["remote_location"]
             link_meta["link_type"] = cfg_link["link_type"]
             temp["_".join(
                 [link_meta["link_type"], sa_config['device_id'], cfg_link['remote_id']])] = link_meta

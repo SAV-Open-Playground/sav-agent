@@ -1034,6 +1034,8 @@ class RPDPApp(SavApp):
             # relay to other edge router in its as
             local_prefixes = self.agent.get_fib("kernel", ["local"])
             for link_name, link_meta in intra_links.items():
+                if not link_meta["link_type"] in RPDP_LINK_TYPES:
+                    continue
                 if link_meta["remote_location"] in [RT_EDGE_REP, RT_EDGE]:
                     self._send_spa_origin_intra(
                         link_meta=link_meta, link_name=link_name, prefixes=local_prefixes)
