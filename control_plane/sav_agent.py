@@ -208,8 +208,33 @@ class SavAgent():
         self.data["kernel_fib"] = {"data": self.parse_kernel_fib(),
                                    "update_time": time.time(),
                                    "check_time": time.time()}
+
+        self.data["interface_info"] = {}
+        self._refresh_interface_info()
         self.rpdp_app = None
         self.passport_app = None
+
+    def _refresh_interface_info(self):
+        """
+        refresh interface info,
+        build a dict, key is interface name, value is a list of bgp link info
+        """
+        self.data["interface_info"] = {}
+        for ifa in get_all_interfaces():
+            if ifa == VIRTUAL_INTERFACE:
+                continue
+            link_metas = self.link_man.get_by_interface(ifa)
+            ifa_metas = []
+            for link_meta in link_metas:
+                if not link_meta["link_type"] in BGP_LINK_TYPES:
+                    continue
+                ifa_meta = {
+                    "is_inter": link_meta["is_interior"],
+                    "local_role": link_meta["local_role"],
+                    "link_name": link_meta["protocol_name"],
+                }
+                ifa_metas.append(ifa_meta)
+            self.data["interface_info"][ifa] = ifa_metas
 
     def add_sav_nodes(self, nodes):
         data = self.data["sav_graph"]["nodes"]
@@ -487,7 +512,15 @@ class SavAgent():
             self.logger.debug("got roa")
         self._init_apps()
         self.logger.debug(f"initial wait: {time.time()-t0:.4f} seconds")
-
+    def find_prefix_info_in_adj_in(self, prefix)-> dict:
+        """
+        find the prefix info in adj_in
+        return a dict, key is protocol name, value is the info
+        """
+        for adj_in in self.data["adj_in"].values():
+            if prefix in adj_in:
+                return adj_in[prefix]
+        self.logger.error(f"prefix {prefix} not found in adj_in")
     def get_adj_in(self, protocol_name=None):
         """if protocol_name is None, return all adj_in
         else return the adj_in for the given protocol_name"""
@@ -828,10 +861,10 @@ class SavAgent():
         if reset is True, it will clear all existing rules and re-generate all rules(the fib_adds and fib_dels will be ignored)
         if app_list is None, all apps will be notified.
         """
-        self.logger.debug(f"fib_dels:{fib_dels}")
+        # self.logger.debug(f"fib_dels:{fib_dels}")
         if app_list is None:
             app_list = self.get_all_app_ids()
-        self.logger.debug(f"app list:{app_list}")
+        # self.logger.debug(f"app list:{app_list}")
         if reset is True:
             self.logger.debug(f"resetting sav table")
             self._init_sav_table()
@@ -1186,6 +1219,7 @@ class SavAgent():
             if not self.rpdp_app:
                 self.logger.warning(
                     f"{RPDP_ID} missing, unable to process msg for {RPDP_ID}")
+                return
             # add link_type
             input_msg["msg"]["link_type"] = input_msg["link_type"]
             self.rpdp_app.recv_msg(input_msg)
@@ -1195,6 +1229,7 @@ class SavAgent():
                 if not self.rpdp_app:
                     self.logger.warning(
                         f"{RPDP_ID} missing, unable to process msg for {RPDP_ID}")
+                    return
                 self.rpdp_app.recv_msg(input_msg)
             else:
                 self.logger.error(f"unknown dst_sav_app:{dst_sav_app}")

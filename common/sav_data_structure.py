@@ -704,7 +704,8 @@ def parse_prefix(data, my_asn):
                     # if len(as_path) > 0:
                     #         srcs[cur_key]["origin_as"] = as_path[0]
                     #         srcs[cur_key]["origin_type"] = "AS"
-                elif new_k in ["interface_name", "type", "via", "origin"]:
+                elif new_k in ["interface_name", "type", "via", 
+                               "origin","community"]:
                     # no action required
                     srcs[cur_key][new_k] = new_v
                 elif new_k == "next_hop":

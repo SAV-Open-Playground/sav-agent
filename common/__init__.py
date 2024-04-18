@@ -118,7 +118,7 @@ def parse_bird_table(table, logger=None):
         unknown_value = k[0]
         metric = int(k[1][1:-1])
         if not p in new_table_content:
-            new_table_content[p] = {"srcs": [], "origin_ases": set()}
+            new_table_content[p] = {"srcs": [], "origin_ases": set(),"origin_ids":set()}
         this_src = {
             "type": prefix_type,
             "link_name": link_name,
@@ -169,7 +169,9 @@ def parse_bird_table(table, logger=None):
     for k, v in new_table_content.items():
         new_table_content[k]["origin_ases"] = list(v["origin_ases"])
         if len(v["origin_ases"]) == 0:
-            logger.warning(f"no origin as for {k}")
+            # logger.debug(f"no origin as for {k}")
+            # new_table_content[p]["prefix_type"] = MULT_HOMING_FULL
+            new_table_content[p]["prefix_type"] = SOLE_HOMING
         elif len(v["origin_ases"]) == 1:
             new_table_content[p]["prefix_type"] = SOLE_HOMING
         elif len(v["origin_ases"]) > 1:

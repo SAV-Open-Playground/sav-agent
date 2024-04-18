@@ -317,7 +317,6 @@ class LinkManager(InfoManager):
         self.agent = agent
         self.valid_types = [LINK_NATIVE_BGP, LINK_RPDP_BGP, LINK_RPDP_HTTP,LINK_BGP_WITH_RPDP]
         self.add_sa_cfg_links(agent.config)
-        self.bird_man = BirdCMDManager(logger)
 
     def recv_http_post(self, msg):
         self.logger.debug(f"recv_http_post got {msg}")
@@ -334,7 +333,7 @@ class LinkManager(InfoManager):
         """
         if not name in self.data["links"]:
             # self.logger.debug(self.data)
-            raise ValueError(f"link {name} not found")
+            raise ValueError(f"link {name} not found in {self.data['links'].keys()}")
         try:
             return copy.deepcopy(self.data["links"][name])
         except Exception as e:
@@ -342,12 +341,14 @@ class LinkManager(InfoManager):
             self.logger.exception(e)
             raise e
 
-    def get_by_interface(self, interface):
-        for name, data in self.data["links"].items():
-            self.logger.debug(data)
-            if data["interface_name"] == interface:
-                return data
-        raise ValueError(f"interface {interface} not found")
+    def get_by_interface(self, interface_name:str)->list:
+        """return a list of link_meta that has the given interface_name
+        """
+        ret = []
+        for data in self.data["links"].values():
+            if data["interface_name"] == interface_name:
+                ret.append(data)
+        return ret
 
     def get_by_remote_ip(self, remote_ip):
         for name, data in self.data["links"].items():

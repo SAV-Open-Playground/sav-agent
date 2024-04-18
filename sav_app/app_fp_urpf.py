@@ -64,7 +64,7 @@ class FpUrpfApp(SavApp):
             origin_prefix_table[my_asn] = set()
             origin_interfaces_table[my_asn] = set()
         for prefix, srcs in self.agent.get_fib("bird", ["local"]).items():
-            self.logger.debug((prefix, srcs))
+            # self.logger.debug((prefix, srcs))
             if prefix.version in [4, 6]:
                 for line in srcs:
                     origin_prefix_table[my_asn].add(prefix)

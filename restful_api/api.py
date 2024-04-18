@@ -295,6 +295,7 @@ def recv_rpdp_msg():
         # LOGGER.debug(dir(request))
         # LOGGER.debug(request.remote_addr)
         msg = pickle.loads(request.data)
+        # LOGGER.debug(msg)
         src_link = msg["link_name"].split("_")
         src_link.insert(1, src_link.pop(-1))
         SA.put_msg({"msg": msg,

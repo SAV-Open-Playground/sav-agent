@@ -50,11 +50,11 @@ class EfpUrpfApp(SavApp):
         get all protocol names that starts with sav
         """
         self.protocol_metas = []
-        for link_name, link_meta in self.agent.link_man.get_all_bgp_links().items():
+        for link_meta in self.agent.link_man.get_all_bgp_links().values():
             if not link_meta["is_interior"]:
                 continue
                 # only works for interior links
-            if link_meta["link_type"] in ["bgp"]:
+            if link_meta["link_type"] in BGP_LINK_TYPES:
                 self.protocol_metas.append(link_meta)
 
     def _dict_to_rules(self, RPF_dict):
@@ -94,7 +94,7 @@ class EfpUrpfApp(SavApp):
         # self.logger.debug(aspa_info)
         # self.logger.debug(my_as)
         adj_customer_as = meta["remote_as"]
-        self.logger.debug(adj_customer_as)
+        # self.logger.debug(adj_customer_as)
         if not adj_customer_as in aspa_info:
             return False
         return my_as in aspa_info[adj_customer_as]
@@ -128,7 +128,7 @@ class EfpUrpfApp(SavApp):
                             self.logger.warning(
                                 f"roa mismatch: adj-in info:  {this_asn}:{this_prefix}\nroa info:{roa_info[this_asn]}")
                 all_int_in[protocol_name]["adj-in"] = temp
-        self.logger.debug(f"EFP-A all_int_in:{all_int_in}")
+        # self.logger.debug(f"EFP-A all_int_in:{all_int_in}")
         for protocol_name, data in all_int_in.items():
             if not data["meta"]["remote_role"] == "customer":
                 continue
@@ -156,21 +156,26 @@ class EfpUrpfApp(SavApp):
         for protocol_name, data in all_int_in.items():
             if data["meta"]["remote_role"] == "customer":
                 all_customer_ifas.append(data["meta"]["interface_name"])
+        ifas_to_go = []
         for data in all_int_in.values():
             if not data["meta"]["remote_role"] == "customer":
                 continue
             for origin_asn, prefixes in X.items():
+                # self.logger.debug(f"{data['meta']['interface_name']}:{prefixes}")
+                # self.logger.debug(f"{data['adj-in'].keys()}")
                 is_prefix_included = False
                 for prefix in prefixes:
                     if prefix in data["adj-in"]:
                         is_prefix_included = True
                         break
                 if is_prefix_included:
-                    for prefix in prefixes:
-                        for ifa in all_customer_ifas:
-                            rule = get_sav_rule(
-                                prefix, ifa, self.app_id, origin_asn)
-                            new_rules[get_key_from_sav_rule(rule)] = rule
+                    ifas_to_go.append(data["meta"]["interface_name"])
+                    break
+        for ifa in ifas_to_go:
+            for origin_asn, prefixes in X.items():
+                for p in prefixes:
+                    rule = get_sav_rule(p, ifa, self.app_id, origin_asn)
+                    new_rules[get_key_from_sav_rule(rule)] = rule
         # self.logger.debug(f"EFP-A new_rules:{new_rules}")
 
         return rule_list_diff(old_rules, new_rules)
