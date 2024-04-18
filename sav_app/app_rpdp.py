@@ -7,255 +7,255 @@
              In this implementation, the SPA and SPD is encoded into standard LINK_BGP Update message
 """
 
-import grpc
-from control_plane import agent_msg_pb2, agent_msg_pb2_grpc
+# import grpc
+# from control_plane import agent_msg_pb2, agent_msg_pb2_grpc
 from common import *
-from common.main_logger import LOGGER
-from urllib.parse import urlparse
-from aioquic.asyncio.protocol import QuicConnectionProtocol
-import threading
-import asyncio
-import json
-import time
-from collections import deque
-from typing import BinaryIO, Callable, Deque, Dict, List, Optional, cast
-import aioquic
-import wsproto
-import wsproto.events
-from aioquic.asyncio.client import connect
-from aioquic.h3.connection import H3_ALPN, ErrorCode, H3Connection
-from aioquic.h3.events import (
-    DataReceived,
-    H3Event,
-    HeadersReceived,
-    PushPromiseReceived,
-)
-from aioquic.quic.configuration import QuicConfiguration
-from aioquic.quic.events import QuicEvent
+# from common.main_logger import LOGGER
+# from urllib.parse import urlparse
+# from aioquic.asyncio.protocol import QuicConnectionProtocol
+# import threading
+# import asyncio
+# import json
+# import time
+# from collections import deque
+# from typing import BinaryIO, Callable, Deque, Dict, List, Optional, cast
+# import aioquic
+# import wsproto
+# import wsproto.events
+# from aioquic.asyncio.client import connect
+# from aioquic.h3.connection import H3_ALPN, ErrorCode, H3Connection
+# from aioquic.h3.events import (
+#     DataReceived,
+#     H3Event,
+#     HeadersReceived,
+#     PushPromiseReceived,
+# )
+# from aioquic.quic.configuration import QuicConfiguration
+# from aioquic.quic.events import QuicEvent
 
-USER_AGENT = "aioquic/" + aioquic.__version__
-GRPC_RETRY_INTERVAL = 0.1
+# USER_AGENT = "aioquic/" + aioquic.__version__
+# GRPC_RETRY_INTERVAL = 0.1
 RPDP_ID = "rpdp"
 
 
-class URL:
-    def __init__(self, url: str) -> None:
-        parsed = urlparse(url)
+# class URL:
+#     def __init__(self, url: str) -> None:
+#         parsed = urlparse(url)
 
-        self.authority = parsed.netloc
-        self.full_path = parsed.path or "/"
-        if parsed.query:
-            self.full_path += "?" + parsed.query
-        self.scheme = parsed.scheme
-
-
-class HttpRequest:
-    def __init__(
-        self,
-        method: str,
-        url: URL,
-        content: bytes = b"",
-        headers: Optional[Dict] = None,
-    ) -> None:
-        if headers is None:
-            headers = {}
-
-        self.content = content
-        self.headers = headers
-        self.method = method
-        self.url = url
+#         self.authority = parsed.netloc
+#         self.full_path = parsed.path or "/"
+#         if parsed.query:
+#             self.full_path += "?" + parsed.query
+#         self.scheme = parsed.scheme
 
 
-class WebSocket:
-    def __init__(
-        self, http: H3Connection, stream_id: int, transmit: Callable[[], None]
-    ) -> None:
-        self.http = http
-        self.queue: asyncio.Queue[str] = asyncio.Queue()
-        self.stream_id = stream_id
-        self.subprotocol: Optional[str] = None
-        self.transmit = transmit
-        self.websocket = wsproto.Connection(wsproto.ConnectionType.CLIENT)
+# class HttpRequest:
+#     def __init__(
+#         self,
+#         method: str,
+#         url: URL,
+#         content: bytes = b"",
+#         headers: Optional[Dict] = None,
+#     ) -> None:
+#         if headers is None:
+#             headers = {}
 
-    async def close(self, code: int = 1000, reason: str = "") -> None:
-        """
-        Perform the closing handshake.
-        """
-        data = self.websocket.send(
-            wsproto.events.CloseConnection(code=code, reason=reason)
-        )
-        self.http.send_data(stream_id=self.stream_id,
-                            data=data, end_stream=True)
-        self.transmit()
-
-    async def recv(self) -> str:
-        """
-        Receive the next message.
-        """
-        return await self.queue.get()
-
-    async def send(self, message: str) -> None:
-        """
-        Send a message.
-        """
-        LOGGER.debug("web_socket_send")
-        assert isinstance(message, str)
-        data = self.websocket.send(wsproto.events.TextMessage(data=message))
-        self.http.send_data(stream_id=self.stream_id,
-                            data=data, end_stream=False)
-        self.transmit()
-
-    def http_event_received(self, event: H3Event) -> None:
-        LOGGER.debug("http_event_received")
-        if isinstance(event, HeadersReceived):
-            for header, value in event.headers:
-                if header == b"sec-websocket-protocol":
-                    self.subprotocol = value.decode()
-        elif isinstance(event, DataReceived):
-            self.websocket.receive_data(event.data)
-
-        for ws_event in self.websocket.events():
-            self.websocket_event_received(ws_event)
-
-    def websocket_event_received(self, event: wsproto.events.Event) -> None:
-        LOGGER.debug("websocket_event_received")
-        if isinstance(event, wsproto.events.TextMessage):
-            self.queue.put_nowait(event.data)
+#         self.content = content
+#         self.headers = headers
+#         self.method = method
+#         self.url = url
 
 
-class HttpClient(QuicConnectionProtocol):
-    def __init__(self, *args, **kwargs) -> None:
-        super().__init__(*args, **kwargs)
+# class WebSocket:
+#     def __init__(
+#         self, http: H3Connection, stream_id: int, transmit: Callable[[], None]
+#     ) -> None:
+#         self.http = http
+#         self.queue: asyncio.Queue[str] = asyncio.Queue()
+#         self.stream_id = stream_id
+#         self.subprotocol: Optional[str] = None
+#         self.transmit = transmit
+#         self.websocket = wsproto.Connection(wsproto.ConnectionType.CLIENT)
 
-        self.pushes: Dict[int, Deque[H3Event]] = {}
-        self._http: Optional[H3Connection] = None
-        self._request_events: Dict[int, Deque[H3Event]] = {}
-        self._request_waiter: Dict[int, asyncio.Future[Deque[H3Event]]] = {}
-        self._websockets: Dict[int, WebSocket] = {}
+#     async def close(self, code: int = 1000, reason: str = "") -> None:
+#         """
+#         Perform the closing handshake.
+#         """
+#         data = self.websocket.send(
+#             wsproto.events.CloseConnection(code=code, reason=reason)
+#         )
+#         self.http.send_data(stream_id=self.stream_id,
+#                             data=data, end_stream=True)
+#         self.transmit()
 
-        self._http = H3Connection(self._quic)
+#     async def recv(self) -> str:
+#         """
+#         Receive the next message.
+#         """
+#         return await self.queue.get()
 
-    async def get(self, url: str, headers: Optional[Dict] = None) -> Deque[H3Event]:
-        """
-        Perform a GET request.
-        """
-        return await self._request(
-            HttpRequest(method="GET", url=URL(url), headers=headers)
-        )
+#     async def send(self, message: str) -> None:
+#         """
+#         Send a message.
+#         """
+#         LOGGER.debug("web_socket_send")
+#         assert isinstance(message, str)
+#         data = self.websocket.send(wsproto.events.TextMessage(data=message))
+#         self.http.send_data(stream_id=self.stream_id,
+#                             data=data, end_stream=False)
+#         self.transmit()
 
-    async def post(
-        self, url: str, data: bytes, headers: Optional[Dict] = None
-    ) -> Deque[H3Event]:
-        """
-        Perform a POST request.
-        """
-        return await self._request(
-            HttpRequest(method="POST", url=URL(url),
-                        content=data, headers=headers)
-        )
+#     def http_event_received(self, event: H3Event) -> None:
+#         LOGGER.debug("http_event_received")
+#         if isinstance(event, HeadersReceived):
+#             for header, value in event.headers:
+#                 if header == b"sec-websocket-protocol":
+#                     self.subprotocol = value.decode()
+#         elif isinstance(event, DataReceived):
+#             self.websocket.receive_data(event.data)
 
-    async def websocket(
-        self, url: str, subprotocols: Optional[List[str]] = None
-    ) -> WebSocket:
-        """
-        Open a WebSocket.
-        """
-        request = HttpRequest(method="CONNECT", url=URL(url))
-        stream_id = self._quic.get_next_available_stream_id()
-        websocket = WebSocket(
-            http=self._http, stream_id=stream_id, transmit=self.transmit
-        )
+#         for ws_event in self.websocket.events():
+#             self.websocket_event_received(ws_event)
 
-        self._websockets[stream_id] = websocket
-
-        headers = [
-            (b":method", b"CONNECT"),
-            (b":scheme", b"https"),
-            (b":authority", request.url.authority.encode()),
-            (b":path", request.url.full_path.encode()),
-            (b":protocol", b"websocket"),
-            (b"user-agent", USER_AGENT.encode()),
-            (b"sec-websocket-version", b"13"),
-        ]
-        if subprotocols:
-            headers.append(
-                (b"sec-websocket-protocol", ", ".join(subprotocols).encode())
-            )
-        self._http.send_headers(stream_id=stream_id, headers=headers)
-
-        self.transmit()
-
-        return websocket
-
-    def http_event_received(self, event: H3Event) -> None:
-        if isinstance(event, (HeadersReceived, DataReceived)):
-            stream_id = event.stream_id
-            if stream_id in self._request_events:
-                # http
-                self._request_events[event.stream_id].append(event)
-                if event.stream_ended:
-                    request_waiter = self._request_waiter.pop(stream_id)
-                    request_waiter.set_result(
-                        self._request_events.pop(stream_id))
-
-            elif stream_id in self._websockets:
-                # websocket
-                websocket = self._websockets[stream_id]
-                websocket.http_event_received(event)
-
-            elif event.push_id in self.pushes:
-                # push
-                self.pushes[event.push_id].append(event)
-
-        elif isinstance(event, PushPromiseReceived):
-            self.pushes[event.push_id] = deque()
-            self.pushes[event.push_id].append(event)
-
-    def quic_event_received(self, event: QuicEvent) -> None:
-        #  pass event to the HTTP layer
-        if self._http is not None:
-            for http_event in self._http.handle_event(event):
-                self.http_event_received(http_event)
-
-    async def _request(self, request: HttpRequest) -> Deque[H3Event]:
-        stream_id = self._quic.get_next_available_stream_id()
-        self._http.send_headers(
-            stream_id=stream_id,
-            headers=[
-                (b":method", request.method.encode()),
-                (b":scheme", request.url.scheme.encode()),
-                (b":authority", request.url.authority.encode()),
-                (b":path", request.url.full_path.encode()),
-                (b"user-agent", USER_AGENT.encode()),
-            ]
-            + [(k.encode(), v.encode()) for (k, v) in request.headers.items()],
-            end_stream=not request.content,
-        )
-        if request.content:
-            self._http.send_data(
-                stream_id=stream_id, data=request.content, end_stream=True
-            )
-
-        waiter = self._loop.create_future()
-        self._request_events[stream_id] = deque()
-        self._request_waiter[stream_id] = waiter
-        self.transmit()
-
-        return await asyncio.shield(waiter)
+#     def websocket_event_received(self, event: wsproto.events.Event) -> None:
+#         LOGGER.debug("websocket_event_received")
+#         if isinstance(event, wsproto.events.TextMessage):
+#             self.queue.put_nowait(event.data)
 
 
-def write_response(
-    http_events: Deque[H3Event], output_file: BinaryIO, include: bool
-) -> None:
-    for http_event in http_events:
-        if isinstance(http_event, HeadersReceived) and include:
-            headers = b""
-            for k, v in http_event.headers:
-                headers += k + b": " + v + b"\r\n"
-            if headers:
-                output_file.write(headers + b"\r\n")
-        elif isinstance(http_event, DataReceived):
-            output_file.write(http_event.data)
+# class HttpClient(QuicConnectionProtocol):
+#     def __init__(self, *args, **kwargs) -> None:
+#         super().__init__(*args, **kwargs)
+
+#         self.pushes: Dict[int, Deque[H3Event]] = {}
+#         self._http: Optional[H3Connection] = None
+#         self._request_events: Dict[int, Deque[H3Event]] = {}
+#         self._request_waiter: Dict[int, asyncio.Future[Deque[H3Event]]] = {}
+#         self._websockets: Dict[int, WebSocket] = {}
+
+#         self._http = H3Connection(self._quic)
+
+#     async def get(self, url: str, headers: Optional[Dict] = None) -> Deque[H3Event]:
+#         """
+#         Perform a GET request.
+#         """
+#         return await self._request(
+#             HttpRequest(method="GET", url=URL(url), headers=headers)
+#         )
+
+#     async def post(
+#         self, url: str, data: bytes, headers: Optional[Dict] = None
+#     ) -> Deque[H3Event]:
+#         """
+#         Perform a POST request.
+#         """
+#         return await self._request(
+#             HttpRequest(method="POST", url=URL(url),
+#                         content=data, headers=headers)
+#         )
+
+#     async def websocket(
+#         self, url: str, subprotocols: Optional[List[str]] = None
+#     ) -> WebSocket:
+#         """
+#         Open a WebSocket.
+#         """
+#         request = HttpRequest(method="CONNECT", url=URL(url))
+#         stream_id = self._quic.get_next_available_stream_id()
+#         websocket = WebSocket(
+#             http=self._http, stream_id=stream_id, transmit=self.transmit
+#         )
+
+#         self._websockets[stream_id] = websocket
+
+#         headers = [
+#             (b":method", b"CONNECT"),
+#             (b":scheme", b"https"),
+#             (b":authority", request.url.authority.encode()),
+#             (b":path", request.url.full_path.encode()),
+#             (b":protocol", b"websocket"),
+#             (b"user-agent", USER_AGENT.encode()),
+#             (b"sec-websocket-version", b"13"),
+#         ]
+#         if subprotocols:
+#             headers.append(
+#                 (b"sec-websocket-protocol", ", ".join(subprotocols).encode())
+#             )
+#         self._http.send_headers(stream_id=stream_id, headers=headers)
+
+#         self.transmit()
+
+#         return websocket
+
+#     def http_event_received(self, event: H3Event) -> None:
+#         if isinstance(event, (HeadersReceived, DataReceived)):
+#             stream_id = event.stream_id
+#             if stream_id in self._request_events:
+#                 # http
+#                 self._request_events[event.stream_id].append(event)
+#                 if event.stream_ended:
+#                     request_waiter = self._request_waiter.pop(stream_id)
+#                     request_waiter.set_result(
+#                         self._request_events.pop(stream_id))
+
+#             elif stream_id in self._websockets:
+#                 # websocket
+#                 websocket = self._websockets[stream_id]
+#                 websocket.http_event_received(event)
+
+#             elif event.push_id in self.pushes:
+#                 # push
+#                 self.pushes[event.push_id].append(event)
+
+#         elif isinstance(event, PushPromiseReceived):
+#             self.pushes[event.push_id] = deque()
+#             self.pushes[event.push_id].append(event)
+
+#     def quic_event_received(self, event: QuicEvent) -> None:
+#         #  pass event to the HTTP layer
+#         if self._http is not None:
+#             for http_event in self._http.handle_event(event):
+#                 self.http_event_received(http_event)
+
+#     async def _request(self, request: HttpRequest) -> Deque[H3Event]:
+#         stream_id = self._quic.get_next_available_stream_id()
+#         self._http.send_headers(
+#             stream_id=stream_id,
+#             headers=[
+#                 (b":method", request.method.encode()),
+#                 (b":scheme", request.url.scheme.encode()),
+#                 (b":authority", request.url.authority.encode()),
+#                 (b":path", request.url.full_path.encode()),
+#                 (b"user-agent", USER_AGENT.encode()),
+#             ]
+#             + [(k.encode(), v.encode()) for (k, v) in request.headers.items()],
+#             end_stream=not request.content,
+#         )
+#         if request.content:
+#             self._http.send_data(
+#                 stream_id=stream_id, data=request.content, end_stream=True
+#             )
+
+#         waiter = self._loop.create_future()
+#         self._request_events[stream_id] = deque()
+#         self._request_waiter[stream_id] = waiter
+#         self.transmit()
+
+#         return await asyncio.shield(waiter)
+
+
+# def write_response(
+#     http_events: Deque[H3Event], output_file: BinaryIO, include: bool
+# ) -> None:
+#     for http_event in http_events:
+#         if isinstance(http_event, HeadersReceived) and include:
+#             headers = b""
+#             for k, v in http_event.headers:
+#                 headers += k + b": " + v + b"\r\n"
+#             if headers:
+#                 output_file.write(headers + b"\r\n")
+#         elif isinstance(http_event, DataReceived):
+#             output_file.write(http_event.data)
 
 
 # def save_session_ticket(ticket: SessionTicket) -> None:
@@ -299,9 +299,9 @@ class RPDPApp(SavApp):
         self.prefix_as_path_dict = {}  # key is prefix,value is AS path
         self.connect_objs = {}
         self.metric = self.get_init_metric_dict()
-        self.quic_config = QuicConfiguration(
-            is_client=True, alpn_protocols=H3_ALPN)
-        self.quic_config.load_verify_locations(r'/root/savop/ca_cert.pem')
+        # self.quic_config = QuicConfiguration(
+        #     is_client=True, alpn_protocols=H3_ALPN)
+        # self.quic_config.load_verify_locations(r'/root/savop/ca_cert.pem')
         self.stub_dict = {}
         self.spa_data = {"inter": {}, "intra": {}}
         self.spd_data = {"inter": {}, "intra": {}}
@@ -333,188 +333,188 @@ class RPDPApp(SavApp):
             self.metric[link_type]["start"] = in_time
         self.metric[link_type]["end"] = in_time+process_time
 
-    def send_msg(self, msg, config, link):
-        """send msg to other sav agent"""
-        t0 = time.time()
-        # self.logger.debug(f"sending {msg}")
-        # self.logger.debug(f"link: {link}")
-        try:
-            map_data = {}
-            link_name = link["protocol_name"]
-            if link_name in config["link_map"]:
-                link_type = config["link_map"][link_name]["link_type"]
-                map_data = config["link_map"][link_name]
-            else:
-                link_type = link["link_type"]
+    # def send_msg(self, msg, config, link):
+    #     """send msg to other sav agent"""
+    #     t0 = time.time()
+    #     # self.logger.debug(f"sending {msg}")
+    #     # self.logger.debug(f"link: {link}")
+    #     try:
+    #         map_data = {}
+    #         link_name = link["protocol_name"]
+    #         if link_name in config["link_map"]:
+    #             link_type = config["link_map"][link_name]["link_type"]
+    #             map_data = config["link_map"][link_name]
+    #         else:
+    #             link_type = link["link_type"]
 
-            if link_type == "grpc":
-                self._send_grpc(msg, config["router_id"], map_data)
-            elif link_type == LINK_RPDP_BGP:
-                # using reference router
-                self._send_dsav(msg)
-            elif link_type == "quic":
-                a = threading.Thread(target=self._send_quic, args=(
-                    msg, link, self.quic_config))
-                # a.setDaemon(True)
-                a.start()
-                a.join()
-            elif link_type == "bgp":
-                # this should not happen
-                self.logger.error(link)
-                self.logger.error(msg)
-            else:
-                self.logger.error(f"unhandled msg {msg}")
-            t = time.time()
-            # self.logger.debug(f"sending {link_type} took {t-t0:.4f} seconds")
-            process_time = t-t0
-            if process_time > TIMEIT_THRESHOLD:
-                self.logger.warning(f"TIMEIT {t:.4f} seconds")
-            # self._add_metric(msg, t0, process_time, link_type, "send")
-        except Exception as e:
-            self.logger.exception(e)
-            self.logger.error(e)
-            self.logger.error(f"sending [{msg}] error")
+    #         # if link_type == "grpc":
+    #         #     self._send_grpc(msg, config["router_id"], map_data)
+    #         # elif link_type == LINK_RPDP_BGP:
+    #         #     # using reference router
+    #         #     self._send_dsav(msg)
+    #         # elif link_type == "quic":
+    #         #     a = threading.Thread(target=self._send_quic, args=(
+    #         #         msg, link, self.quic_config))
+    #         #     # a.setDaemon(True)
+    #         #     a.start()
+    #         #     a.join()
+    #         # elif link_type == "bgp":
+    #         #     # this should not happen
+    #         #     self.logger.error(link)
+    #         #     self.logger.error(msg)
+    #         # else:
+    #         #     self.logger.error(f"unhandled msg {msg}")
+    #         t = time.time()
+    #         # self.logger.debug(f"sending {link_type} took {t-t0:.4f} seconds")
+    #         process_time = t-t0
+    #         if process_time > TIMEIT_THRESHOLD:
+    #             self.logger.warning(f"TIMEIT {t:.4f} seconds")
+    #         # self._add_metric(msg, t0, process_time, link_type, "send")
+    #     except Exception as e:
+    #         self.logger.exception(e)
+    #         self.logger.error(e)
+    #         self.logger.error(f"sending [{msg}] error")
 
-    def _quic_msg_box(self, msg, bgp_meta):
-        msg["sav_nlri"] = list(map(prefix2str, msg["sav_nlri"]))
-        # msg["dummy_link"] = f"savbgp_{bgp_meta['remote_as']}_{bgp_meta['local_as']}"
-        return json.dumps(msg)
+    # def _quic_msg_box(self, msg, bgp_meta):
+    #     msg["sav_nlri"] = list(map(prefix2str, msg["sav_nlri"]))
+    #     # msg["dummy_link"] = f"savbgp_{bgp_meta['remote_as']}_{bgp_meta['local_as']}"
+    #     return json.dumps(msg)
 
-    def _quic_msg_unbox(self, msg):
-        link_meta = self.agent.link_man.get_by_name(
-            msg["source_link"])
-        msg["msg"]["interface_name"] = link_meta["interface_name"]
-        msg["msg"]["as_path"] = msg["msg"]["sav_path"]
-        return msg
+    # def _quic_msg_unbox(self, msg):
+    #     link_meta = self.agent.link_man.get_by_name(
+    #         msg["source_link"])
+    #     msg["msg"]["interface_name"] = link_meta["interface_name"]
+    #     msg["msg"]["as_path"] = msg["msg"]["sav_path"]
+    #     return msg
 
-    async def __quic_send(self, host, configuration, msg, url):
-        # self.logger.debug(host)
-        # self.logger.debug(url)
-        try:
-            async with connect(
-                host,
-                7777,
-                configuration=configuration,
-                create_protocol=HttpClient,
-                session_ticket_handler=None,
-                local_port=0,
-                wait_connected=True,
-            ) as client:
-                client = cast(HttpClient, client)
-                ws = await client.websocket(url, subprotocols=["chat", "superchat"])
+    # async def __quic_send(self, host, configuration, msg, url):
+    #     # self.logger.debug(host)
+    #     # self.logger.debug(url)
+    #     try:
+    #         async with connect(
+    #             host,
+    #             7777,
+    #             configuration=configuration,
+    #             create_protocol=HttpClient,
+    #             session_ticket_handler=None,
+    #             local_port=0,
+    #             wait_connected=True,
+    #         ) as client:
+    #             client = cast(HttpClient, client)
+    #             ws = await client.websocket(url, subprotocols=["chat", "superchat"])
 
-                await ws.send(msg)
-                rep = await ws.recv()
-                if not rep == "good":
-                    self.logger.debug(rep)
-                    self.logger.error("not good")
-                await ws.close()
-                client._quic.close(error_code=ErrorCode.H3_NO_ERROR)
-        except Exception as e:
-            self.logger.exception(e)
-            self.logger.debug(f"connect {host} failed")
-            trace = e.with_traceback()
-            # self.logger.error(str(e))
-            self.logger.error(str(trace))
-            self.logger.error(dir(trace))
-            self.logger.error()
+    #             await ws.send(msg)
+    #             rep = await ws.recv()
+    #             if not rep == "good":
+    #                 self.logger.debug(rep)
+    #                 self.logger.error("not good")
+    #             await ws.close()
+    #             client._quic.close(error_code=ErrorCode.H3_NO_ERROR)
+    #     except Exception as e:
+    #         self.logger.exception(e)
+    #         self.logger.debug(f"connect {host} failed")
+    #         trace = e.with_traceback()
+    #         # self.logger.error(str(e))
+    #         self.logger.error(str(trace))
+    #         self.logger.error(dir(trace))
+    #         self.logger.error()
 
-    async def __quic_send2(self, host, configuration, msg, url, connection=None):
-        if connection is None:
-            try:
-                async with connect(
-                    host,
-                    7777,
-                    configuration=configuration,
-                    create_protocol=HttpClient,
-                    session_ticket_handler=None,
-                    local_port=0,
-                    wait_connected=True,
-                ) as client:
-                    client = cast(HttpClient, client)
-                    ws = await client.websocket(url, subprotocols=["chat", "superchat"])
-                    await ws.send(msg)
-                    rep = await ws.recv()
-                    if not rep == "good":
-                        self.logger.debug(rep)
-                        self.logger.error("not good")
-                    connection = {"client": client, "ws": ws}
-                # await ws.close()
-                # client._quic.close(error_code=ErrorCode.H3_NO_ERROR)
-            except Exception as e:
-                self.logger.exception(e)
-                self.logger.debug(f"connect {host} failed")
-                self.logger.error(type(e))
-                self.logger.error(dir(e))
-        else:
-            ws = connection["ws"]
-            await ws.send(msg)
-            rep = await ws.recv()
-            if not rep == "good":
-                self.logger.debug(rep)
-                self.logger.error("not good")
+    # async def __quic_send2(self, host, configuration, msg, url, connection=None):
+    #     if connection is None:
+    #         try:
+    #             async with connect(
+    #                 host,
+    #                 7777,
+    #                 configuration=configuration,
+    #                 create_protocol=HttpClient,
+    #                 session_ticket_handler=None,
+    #                 local_port=0,
+    #                 wait_connected=True,
+    #             ) as client:
+    #                 client = cast(HttpClient, client)
+    #                 ws = await client.websocket(url, subprotocols=["chat", "superchat"])
+    #                 await ws.send(msg)
+    #                 rep = await ws.recv()
+    #                 if not rep == "good":
+    #                     self.logger.debug(rep)
+    #                     self.logger.error("not good")
+    #                 connection = {"client": client, "ws": ws}
+    #             # await ws.close()
+    #             # client._quic.close(error_code=ErrorCode.H3_NO_ERROR)
+    #         except Exception as e:
+    #             self.logger.exception(e)
+    #             self.logger.debug(f"connect {host} failed")
+    #             self.logger.error(type(e))
+    #             self.logger.error(dir(e))
+    #     else:
+    #         ws = connection["ws"]
+    #         await ws.send(msg)
+    #         rep = await ws.recv()
+    #         if not rep == "good":
+    #             self.logger.debug(rep)
+    #             self.logger.error("not good")
 
-    def _send_quic(self, msg, bgp_meta, configuration):
-        # self.logger.debug(msg)
-        t0 = time.time()
-        try:
-            url = f"wss://node_{bgp_meta['remote_as']}:7777/savop_quic"
-            host = bgp_meta["remote_ip"]
-            msg = self._quic_msg_box(msg, bgp_meta)
-            asyncio.run(self.__quic_send2(
-                host, configuration, msg, url), debug=True)
-        except Exception as e:
-            self.logger.exception(e)
-            self.logger.error(e)
-            self.logger.error(type(e))
-        t = time.time()-t0
-        if t > TIMEIT_THRESHOLD:
-            self.logger.debug(f"TIMEIT {time.time()-t0:.4f} seconds")
+    # def _send_quic(self, msg, bgp_meta, configuration):
+    #     # self.logger.debug(msg)
+    #     t0 = time.time()
+    #     try:
+    #         url = f"wss://node_{bgp_meta['remote_as']}:7777/savop_quic"
+    #         host = bgp_meta["remote_ip"]
+    #         msg = self._quic_msg_box(msg, bgp_meta)
+    #         asyncio.run(self.__quic_send2(
+    #             host, configuration, msg, url), debug=True)
+    #     except Exception as e:
+    #         self.logger.exception(e)
+    #         self.logger.error(e)
+    #         self.logger.error(type(e))
+    #     t = time.time()-t0
+    #     if t > TIMEIT_THRESHOLD:
+    #         self.logger.debug(f"TIMEIT {time.time()-t0:.4f} seconds")
 
-    def _send_grpc(self, msg, grpc_id, grpc_link):
-        t0 = time.time()
-        try:
-            if isinstance(msg["sav_nlri"][0], netaddr.IPNetwork):
-                msg["sav_nlri"] = list(map(prefix2str, msg["sav_nlri"]))
-            remote_addr = grpc_link["remote_addr"]
-            remote_ip = remote_addr.split(':')[0]
-            remote_id = grpc_link["remote_id"]
-            msg["dst_ip"] = remote_ip
-            str_msg = json.dumps(msg)
-            self.logger.debug(remote_addr)
-            while True:
-                try:
-                    if not remote_addr in self.stub_dict:
-                        channel = grpc.insecure_channel(remote_addr)
-                        stub = agent_msg_pb2_grpc.AgentLinkStub(channel)
-                        self.stub_dict[remote_addr] = stub
-                    agent_msg = agent_msg_pb2.AgentMsg(
-                        sender_id=grpc_id, json_str=str_msg)
-                    rep = self.stub_dict[remote_addr].Simple(agent_msg)
-                    expected_str = f"got {str_msg}"
-                    if not rep.json_str == expected_str:
-                        raise ValueError(
-                            f"json expected {expected_str}, got {rep.json_str}")
-                    if not rep.sender_id == remote_id:
-                        self.logger.debug(
-                            f"sending to {remote_addr},{remote_id}")
-                        raise ValueError(
-                            f"remote id expected {remote_id}, got {rep.sender_id}")
-                    t = time.time()-t0
-                    if t > TIMEIT_THRESHOLD:
-                        self.logger.warning(
-                            f"TIMEIT {time.time()-t0:.4f} seconds")
-                    return True
-                except Exception as e:
-                    self.logger.exception(e)
-                    self.logger.debug(msg)
-                    self.logger.error(e)
-                    self.logger.error(
-                        f"grpc error, retrying in {GRPC_RETRY_INTERVAL} seconds")
-                    time.sleep(GRPC_RETRY_INTERVAL)
-        except Exception as e:
-            self.logger.exception(e)
-            self.logger.error(e)
+    # def _send_grpc(self, msg, grpc_id, grpc_link):
+    #     t0 = time.time()
+    #     try:
+    #         if isinstance(msg["sav_nlri"][0], netaddr.IPNetwork):
+    #             msg["sav_nlri"] = list(map(prefix2str, msg["sav_nlri"]))
+    #         remote_addr = grpc_link["remote_addr"]
+    #         remote_ip = remote_addr.split(':')[0]
+    #         remote_id = grpc_link["remote_id"]
+    #         msg["dst_ip"] = remote_ip
+    #         str_msg = json.dumps(msg)
+    #         self.logger.debug(remote_addr)
+    #         while True:
+    #             try:
+    #                 if not remote_addr in self.stub_dict:
+    #                     channel = grpc.insecure_channel(remote_addr)
+    #                     stub = agent_msg_pb2_grpc.AgentLinkStub(channel)
+    #                     self.stub_dict[remote_addr] = stub
+    #                 agent_msg = agent_msg_pb2.AgentMsg(
+    #                     sender_id=grpc_id, json_str=str_msg)
+    #                 rep = self.stub_dict[remote_addr].Simple(agent_msg)
+    #                 expected_str = f"got {str_msg}"
+    #                 if not rep.json_str == expected_str:
+    #                     raise ValueError(
+    #                         f"json expected {expected_str}, got {rep.json_str}")
+    #                 if not rep.sender_id == remote_id:
+    #                     self.logger.debug(
+    #                         f"sending to {remote_addr},{remote_id}")
+    #                     raise ValueError(
+    #                         f"remote id expected {remote_id}, got {rep.sender_id}")
+    #                 t = time.time()-t0
+    #                 if t > TIMEIT_THRESHOLD:
+    #                     self.logger.warning(
+    #                         f"TIMEIT {time.time()-t0:.4f} seconds")
+    #                 return True
+    #             except Exception as e:
+    #                 self.logger.exception(e)
+    #                 self.logger.debug(msg)
+    #                 self.logger.error(e)
+    #                 self.logger.error(
+    #                     f"grpc error, retrying in {GRPC_RETRY_INTERVAL} seconds")
+    #                 time.sleep(GRPC_RETRY_INTERVAL)
+    #     except Exception as e:
+    #         self.logger.exception(e)
+    #         self.logger.error(e)
 
     # def perf_test_send(self, msgs):
     #     count = 0
@@ -559,99 +559,99 @@ class RPDPApp(SavApp):
     #         self.logger.debug(f"SENT {count} msg ({msg['msg_type']})")
     #     self.logger.debug("perf test send finished")
 
-    def _send_dsav(self, msg):
-        """
-        notify the bird to retrieve the msg from flask server and execute it.
-        """
-        # self.logger.debug(msg.keys())
-        if not isinstance(msg, dict):
-            self.logger.error(f"msg is not a dictionary msg is {type(msg)}")
-            return
-        # specialized for bird app, we need to convert the msg to byte array
-        nlri = copy.deepcopy(msg["sav_nlri"])
-        # split into multi mesgs
-        max_nlri_len = 50
-        while len(nlri) > 0:
-            msg["sav_nlri"] = nlri[:max_nlri_len]
-            msg_byte = self._msg_to_hex_str(msg)
-            out_msg = {"msg_type": LINK_RPDP_BGP, "data": msg_byte,
-                       "source_app": self.app_id, "timeout": 0, "store_rep": False}
-            self.agent.put_out_msg(out_msg)
-            nlri = nlri[max_nlri_len:]
-        # self.logger.info(
-            # f"SENT MSG ON LINK [{msg['protocol_name']}]:{msg}, time_stamp: [{time.time()}]]")
+    # def _send_dsav(self, msg):
+    #     """
+    #     notify the bird to retrieve the msg from flask server and execute it.
+    #     """
+    #     # self.logger.debug(msg.keys())
+    #     if not isinstance(msg, dict):
+    #         self.logger.error(f"msg is not a dictionary msg is {type(msg)}")
+    #         return
+    #     # specialized for bird app, we need to convert the msg to byte array
+    #     nlri = copy.deepcopy(msg["sav_nlri"])
+    #     # split into multi mesgs
+    #     max_nlri_len = 50
+    #     while len(nlri) > 0:
+    #         msg["sav_nlri"] = nlri[:max_nlri_len]
+    #         msg_byte = self._msg_to_hex_str(msg)
+    #         out_msg = {"msg_type": LINK_RPDP_BGP, "data": msg_byte,
+    #                    "source_app": self.app_id, "timeout": 0, "store_rep": False}
+    #         self.agent.put_out_msg(out_msg)
+    #         nlri = nlri[max_nlri_len:]
+    #     # self.logger.info(
+    #         # f"SENT MSG ON LINK [{msg['protocol_name']}]:{msg}, time_stamp: [{time.time()}]]")
 
-    def _msg_to_hex_str(self, msg):
-        """
-        msg is in json format,but bird is difficult to use,
-        therefore we transfer the msg to byte array,
-        and put that into the json for bird app
-        """
-        t0 = time.time()
-        key_types = [("msg_type", str), ("protocol_name", str),
-                     ("as4_session", bool), ("sav_nlri", list),
-                     ("is_interior", bool), ("is_native_bgp", int)]
-        try:
-            keys_types_check(msg, key_types)
-        except Exception as e:
-            self.logger.exception(e)
-            self.logger.error(e)
-            return None
+    # def _msg_to_hex_str(self, msg):
+    #     """
+    #     msg is in json format,but bird is difficult to use,
+    #     therefore we transfer the msg to byte array,
+    #     and put that into the json for bird app
+    #     """
+    #     t0 = time.time()
+    #     key_types = [("msg_type", str), ("protocol_name", str),
+    #                  ("as4_session", bool), ("sav_nlri", list),
+    #                  ("is_interior", bool), ("is_native_bgp", int)]
+    #     try:
+    #         keys_types_check(msg, key_types)
+    #     except Exception as e:
+    #         self.logger.exception(e)
+    #         self.logger.error(e)
+    #         return None
 
-        hex_str_msg = {"is_native_bgp": msg["is_native_bgp"]}
-        is_as4 = msg["as4_session"]
-        hex_str_msg["sav_nlri"] = prefixes2hex_str(msg["sav_nlri"])
-        hex_str_msg["nlri_len"] = len(decode_csv(hex_str_msg["sav_nlri"]))
-        m_t = msg["msg_type"]
-        hex_str_msg["protocol_name"] = msg["protocol_name"]
-        hex_str_msg["next_hop"] = msg["src"].split(".")
-        hex_str_msg["next_hop"] = [
-            str(len(hex_str_msg["next_hop"]))] + hex_str_msg["next_hop"]
-        hex_str_msg["next_hop"] = ",".join(hex_str_msg["next_hop"])
-        # self.logger.debug(msg["sav_scope"])
-        hex_str_msg["sav_scope"] = scope_to_hex_str(
-            msg["sav_scope"], msg["is_interior"], is_as4)
-        # self.logger.debug(hex_str_msg["sav_scope"] )
-        hex_str_msg["is_interior"] = 1 if msg["is_interior"] else 0
-        if msg["is_interior"]:
-            as_path_code = "2"
-            hex_str_msg["withdraws"] = "0,0"
-            hex_str_msg["sav_origin"] = ",".join(int2hex(
-                msg["sav_origin"], is_as4))
-            if m_t == "origin":
-                # insert origin for sav
-                # using ba_origin, there is no need to convert tot as4
-                hex_str_msg["as_path"] = ",".join(
-                    [as_path_code, "1", hex_str_msg["sav_origin"]])
-                hex_str_msg["as_path_len"] = len(
-                    decode_csv(hex_str_msg["as_path"]))
-                # insert asn_paths
-                t = time.time()-t0
-                if t > TIMEIT_THRESHOLD:
-                    self.logger.warning(f"TIMEIT {time.time()-t0:.4f} seconds")
-                return hex_str_msg
-            elif m_t == "relay":
-                as_number = str(len(msg["sav_path"]))
-                temp = path2hex(msg["sav_path"], is_as4)
-                hex_str_msg["as_path"] = ",".join(
-                    [as_path_code, as_number]+temp)
-                hex_str_msg["as_path_len"] = len(
-                    decode_csv(hex_str_msg["as_path"]))
-                t = time.time()-t0
-                if t > TIMEIT_THRESHOLD:
-                    self.logger.warning(f"TIMEIT {time.time()-t0:.4f} seconds")
-                return hex_str_msg
-            else:
-                self.logger.error(f"unknown msg_type: {m_t}")
+    #     hex_str_msg = {"is_native_bgp": msg["is_native_bgp"]}
+    #     is_as4 = msg["as4_session"]
+    #     hex_str_msg["sav_nlri"] = prefixes2hex_str(msg["sav_nlri"])
+    #     hex_str_msg["nlri_len"] = len(decode_csv(hex_str_msg["sav_nlri"]))
+    #     m_t = msg["msg_type"]
+    #     hex_str_msg["protocol_name"] = msg["protocol_name"]
+    #     hex_str_msg["next_hop"] = msg["src"].split(".")
+    #     hex_str_msg["next_hop"] = [
+    #         str(len(hex_str_msg["next_hop"]))] + hex_str_msg["next_hop"]
+    #     hex_str_msg["next_hop"] = ",".join(hex_str_msg["next_hop"])
+    #     # self.logger.debug(msg["sav_scope"])
+    #     hex_str_msg["sav_scope"] = scope_to_hex_str(
+    #         msg["sav_scope"], msg["is_interior"], is_as4)
+    #     # self.logger.debug(hex_str_msg["sav_scope"] )
+    #     hex_str_msg["is_interior"] = 1 if msg["is_interior"] else 0
+    #     if msg["is_interior"]:
+    #         as_path_code = "2"
+    #         hex_str_msg["withdraws"] = "0,0"
+    #         hex_str_msg["sav_origin"] = ",".join(int2hex(
+    #             msg["sav_origin"], is_as4))
+    #         if m_t == "origin":
+    #             # insert origin for sav
+    #             # using ba_origin, there is no need to convert tot as4
+    #             hex_str_msg["as_path"] = ",".join(
+    #                 [as_path_code, "1", hex_str_msg["sav_origin"]])
+    #             hex_str_msg["as_path_len"] = len(
+    #                 decode_csv(hex_str_msg["as_path"]))
+    #             # insert asn_paths
+    #             t = time.time()-t0
+    #             if t > TIMEIT_THRESHOLD:
+    #                 self.logger.warning(f"TIMEIT {time.time()-t0:.4f} seconds")
+    #             return hex_str_msg
+    #         elif m_t == "relay":
+    #             as_number = str(len(msg["sav_path"]))
+    #             temp = path2hex(msg["sav_path"], is_as4)
+    #             hex_str_msg["as_path"] = ",".join(
+    #                 [as_path_code, as_number]+temp)
+    #             hex_str_msg["as_path_len"] = len(
+    #                 decode_csv(hex_str_msg["as_path"]))
+    #             t = time.time()-t0
+    #             if t > TIMEIT_THRESHOLD:
+    #                 self.logger.warning(f"TIMEIT {time.time()-t0:.4f} seconds")
+    #             return hex_str_msg
+    #         else:
+    #             self.logger.error(f"unknown msg_type: {m_t}")
 
-        else:
-            hex_str_msg["withdraws"] = "0,0"
-            hex_str_msg["sav_origin"] = ",".join(
-                ipv4_str_to_hex(msg["sav_origin"]))
-            t = time.time()-t0
-            if t > TIMEIT_THRESHOLD:
-                self.logger.warning(f"TIMEIT {time.time()-t0:.4f} seconds")
-            return hex_str_msg
+    #     else:
+    #         hex_str_msg["withdraws"] = "0,0"
+    #         hex_str_msg["sav_origin"] = ",".join(
+    #             ipv4_str_to_hex(msg["sav_origin"]))
+    #         t = time.time()-t0
+    #         if t > TIMEIT_THRESHOLD:
+    #             self.logger.warning(f"TIMEIT {time.time()-t0:.4f} seconds")
+    #         return hex_str_msg
 
     def _construct_msg(self, link, input_msg, msg_type, is_inter):
         """
@@ -761,7 +761,7 @@ class RPDPApp(SavApp):
             if not "link_name" in msg["msg"]:
                 self.logger.error(msg)
                 return
-            self.logger.debug(msg)
+            # self.logger.debug(msg)
             link_meta = self.agent.link_man.get_by_name(msg["source_link"])
             msg["msg"]["link_type"] = link_meta["link_type"]
         if msg["msg"]["link_type"] in RPDP_LINK_TYPES:
@@ -804,23 +804,23 @@ class RPDPApp(SavApp):
     #         self.logger.error(e)
     #     return adds
 
-    def process_grpc_msg(self, msg):
-        # self.logger.debug(msg)
-        link_meta = self.agent.link_man.get_by_name(
-            msg["source_link"])
-        while link_meta is None:
-            self.logger.debug(f"link_meta is None, updating protos")
-            link_meta = self.agent.link_man.get_by_name(msg["source_link"])
+    # def process_grpc_msg(self, msg):
+    #     # self.logger.debug(msg)
+    #     link_meta = self.agent.link_man.get_by_name(
+    #         msg["source_link"])
+    #     while link_meta is None:
+    #         self.logger.debug(f"link_meta is None, updating protos")
+    #         link_meta = self.agent.link_man.get_by_name(msg["source_link"])
 
-        msg["msg"]["interface_name"] = link_meta["interface_name"]
-        msg["link_type"] = "grpc"
-        return self.process_spa(msg)
+    #     msg["msg"]["interface_name"] = link_meta["interface_name"]
+    #     msg["link_type"] = "grpc"
+    #     return self.process_spa(msg)
 
-    def process_quic_msg(self, msg, is_test_msg=False, test_id=None):
-        self.logger.debug("enter")
-        msg = self._quic_msg_unbox(msg)
-        self.logger.debug("unboxed")
-        return self.process_spa(msg)
+    # def process_quic_msg(self, msg, is_test_msg=False, test_id=None):
+    #     self.logger.debug("enter")
+    #     msg = self._quic_msg_unbox(msg)
+    #     self.logger.debug("unboxed")
+    #     return self.process_spa(msg)
 
     def preprocess_msg(self, msg):
         # as_path is easier to process in string format, so we keep it
@@ -930,6 +930,7 @@ class RPDPApp(SavApp):
     #                     f"unable to find interior link for as: {next_as}, no SAV ?")
 
     def process_spa(self, msg, link_meta):
+        """pre process of spa message and then call the function that actual process the spa message"""
         is_inter = link_meta["is_interior"]
         link_type = link_meta["link_type"]
         if link_type == LINK_RPDP_BGP:
@@ -947,9 +948,8 @@ class RPDPApp(SavApp):
                     result.append(read_inter_spa_nlri_hex(i, v))
                 else:
                     result.append(read_intra_spa_nlri_hex(i, v))
-            spa_adds, sp_dels = result
-            rpdp_msg["spa_add"] = spa_adds
-            rpdp_msg["spa_del"] = sp_dels
+            rpdp_msg["spa_add"] = result[0]
+            rpdp_msg["spa_del"] = result[1]
             # self.logger.debug(rpdp_msg)
             msg["msg"] = rpdp_msg
         elif link_type == LINK_RPDP_HTTP:
@@ -1126,7 +1126,7 @@ class RPDPApp(SavApp):
             spd_msg["opt_data"] = {"agent_router_ids": [
                 my_router_id], "path_router_ids": [my_router_id]}
             spd_msg["addresses"] = list(rids)
-            self.logger.debug(spd_msg["addresses"])
+            # self.logger.debug(spd_msg["addresses"])
         return spd_msg
 
     def _get_interface_name_by_prefix(self, prefix):
@@ -1141,7 +1141,7 @@ class RPDPApp(SavApp):
                     break
             ifa_name = ipr.get_links(oif_index)[0].get_attr('IFLA_IFNAME')
             ifa_names.append(ifa_name)
-        self.logger.debug(ifa_names)
+        # self.logger.debug(ifa_names)
         return ifa_name
         # self.agent.ip_route.get_links(oif_index)[0]
 
@@ -1162,7 +1162,7 @@ class RPDPApp(SavApp):
             if not interface_name in intra_data:
                 intra_data[interface_name] = set()
             intra_data[interface_name].add(rid)
-        self.logger.debug(intra_data)
+        # self.logger.debug(intra_data)
         for link_name, link_meta in rpdp_links.items():
             self.logger.debug(f"sending spd on {link_name}")
             is_inter = link_meta["is_interior"]
@@ -1346,7 +1346,6 @@ class RPDPApp(SavApp):
         spd_msg = msg['msg']
         link_type = link_meta["link_type"]
         is_inter = link_meta["is_interior"]
-        my_router_id = self.agent.config["router_id"]
         bgp_inter_links, bgp_intra_links = self.get_bgp_links()
         if link_type == LINK_RPDP_BGP:
             # process common fields
@@ -1368,77 +1367,96 @@ class RPDPApp(SavApp):
         spd_msg["origin_ip"] = netaddr.IPAddress(spd_msg['origin_router_id'])
         del spd_msg['origin_router_id']
         # self.logger.debug(spd_msg)
-        prefixe2source_id = self._get_source_id_prefix_map()
-        self.logger.debug(prefixe2source_id)
+        # prefixe2source_id = self._get_source_id_prefix_map()
+        # self.logger.debug(prefixe2source_id)
         if is_inter:
-            src_asn = spd_msg['origin_asn']
-            need_to_relay = self.agent.config["local_as"] != src_asn
-            data = self.spd_data["inter"]
-            allowed_ases = [src_asn]
-            # self.logger.debug(f"allowed_ases: {allowed_ases}")
-
-            allowed_ases.extend(spd_msg["neighbor_as_list"])
-            self.logger.debug(
-                f"{spd_msg['origin_asn']}:allowed_ases: {allowed_ases}")
-            for asn in allowed_ases:
-                if not src_asn in data:
-                    data[src_asn] = set()
-                if not asn in bgp_inter_links:
-                    self.logger.warning(f"no bgp link for {asn}")
-                    continue
-                data[src_asn].add(bgp_inter_links[asn])
-            self.spd_data["inter"] = data
-            if need_to_relay:
-                pass
-                # TODO SPD relay
-                # self.logger.error("inter spd relay todo")
+            self._process_spd_inter(spd_msg, bgp_inter_links)
         else:
-            data = self.spd_data["intra"]
-            need_to_relay = False
-            self.logger.debug(spd_msg)
-            # spd_msg['origin_ip'] is the router_id
-            allowed_ip_ids = set()
-            allowed_ip_ids.add(spd_msg['origin_ip'])
-            for router_id in spd_msg["opt_data"]["agent_router_ids"]:
-                allowed_ip_ids.add(netaddr.IPAddress(router_id))
-            next_address = spd_msg["addresses"]
-            if my_router_id in next_address:
-                next_address.remove(my_router_id)
-            if len(next_address) > 0:
-                need_to_relay = True
-            self.logger.debug(allowed_ip_ids)
-            for router_id in allowed_ip_ids:
-                if not router_id in data:
-                    data[router_id] = set()
-                data[router_id].add(bgp_intra_links[router_id])
-            self.spd_data["intra"] = data
-            if need_to_relay:
-                relay_map = {}
-                self.logger.debug(next_address)
-                for target_id in next_address:
-                    ifa = self._get_interface_name_by_prefix(target_id)
-                    if not ifa in relay_map:
-                        relay_map[ifa] = []
-                    relay_map[ifa].append(target_id)
-                self.logger.debug(relay_map)
-                for link_name, address in relay_map.items():
-                    self.logger.debug(f"relaying spd on {link_name}")
-                    link_meta = self.agent.link_man.get_by_name(link_name)
-                    next_spd_msg = self._get_spd_msg(link_name, link_meta,
-                                                     my_router_id, is_inter,
-                                                     None, None, intra_data.get(link_meta["interface_name"], address))
-                    next_spd_msg["opt_data"] = spd_msg["opt_data"]
-                    next_spd_msg["opt_data"]["agent_router_ids"].append(
-                        my_router_id)
-                    next_spd_msg["opt_data"]["path_router_ids"].append(
-                        my_router_id)
-                pass
-                # TODO SPD relay
-                # self.logger.error("inter spd relay todo")
+            self._process_spd_intra(spd_msg, bgp_intra_links)
         msg['msg'] = spd_msg
         self._log_for_front(msg, "receive", link_meta, SPD, None, None)
         self._log_for_front(msg, "terminate", link_meta, SPD, None, None)
         self._refresh_sav_rules()
+
+    def _process_spd_inter(self, inter_spd: dict, bgp_inter_links) -> dict:
+        """
+        process the inter spd message
+        """
+        src_asn = inter_spd['origin_asn']
+        # this should always be true
+        need_to_relay = self.agent.config["local_as"] != src_asn
+        data = self.spd_data["inter"]
+        allowed_ases = [src_asn]
+        # self.logger.debug(f"allowed_ases: {allowed_ases}")
+
+        allowed_ases.extend(inter_spd["neighbor_as_list"])
+        self.logger.debug(f"{src_asn}:allowed_ases: {allowed_ases}")
+        for asn in allowed_ases:
+            if not src_asn in data:
+                data[src_asn] = set()
+            if not asn in bgp_inter_links:
+                self.logger.warning(f"no bgp link for {asn}")
+                continue
+            data[src_asn].add(bgp_inter_links[asn])
+            self.spd_data["inter"] = data
+        if need_to_relay:
+            # TODO SPD relay
+            self.logger.warning("inter spd relay TODO")
+
+    def _process_spd_intra(self, spd_msg: dict, bgp_intra_links) -> dict:
+        my_router_id = self.agent.config["router_id"]
+        data = self.spd_data["intra"]
+        need_to_relay = False
+        # self.logger.debug(spd_msg)
+        # spd_msg['origin_ip'] is the router_id
+        allowed_ip_ids = set()
+        allowed_ip_ids.add(spd_msg['origin_ip'])
+        for router_id in spd_msg["opt_data"]["agent_router_ids"]:
+            allowed_ip_ids.add(netaddr.IPAddress(router_id))
+        next_address = spd_msg["addresses"]
+        if not my_router_id in next_address:
+            self.logger.error(
+                f"my_router_id {my_router_id} not in next_address {next_address}")
+        next_address.remove(my_router_id)
+        if len(next_address) > 0:
+            need_to_relay = True
+        # self.logger.debug(allowed_ip_ids)
+        for router_id in allowed_ip_ids:
+            if not router_id in data:
+                data[router_id] = set()
+            data[router_id].add(bgp_intra_links[router_id])
+        self.spd_data["intra"] = data
+        if need_to_relay:
+            relay_map = {}
+            # self.logger.debug(next_address)
+            for target_id in next_address:
+                ifa = self._get_interface_name_by_prefix(target_id)
+                if not ifa in relay_map:
+                    relay_map[ifa] = []
+                relay_map[ifa].append(target_id)
+            self.logger.debug(relay_map)
+            for interface_name, address in relay_map.items():
+                self.logger.debug(f"relaying spd on {interface_name}")
+                link_metas = self.agent.link_man.get_by_interface(
+                    interface_name)
+                for link_meta in link_metas:
+                    if not link_meta["link_type"] in RPDP_LINK_TYPES:
+                        continue
+                    self.logger.debug(link_meta)
+                # next_spd_msg = self._get_spd_msg(interface_name, link_meta,
+                #                                  my_router_id, False,
+                #                                  None, None, intra_data.get(link_meta["interface_name"], address))
+                # next_spd_msg["opt_data"] = spd_msg["opt_data"]
+                # next_spd_msg["opt_data"]["agent_router_ids"].append(
+                #     my_router_id)
+                # next_spd_msg["opt_data"]["path_router_ids"].append(
+                #     my_router_id)
+
+    def _process_spa_inter(self, inter_msg: dict) -> dict:
+        """
+        process the inter spa message
+        """
+        return
 
     def _send_spa_origin_bgp(self, spa_msg, link_meta):
         is_inter = link_meta["is_interior"]
@@ -1508,15 +1526,15 @@ class RPDPApp(SavApp):
         the prefixes must either be a ipv4 prefix or a ipv6 prefix
         """
         # send to all neighbors
-        self.logger.debug(
-            f"building spa origin on inter {link_name}:{prefixes}")
+        # self.logger.debug(
+        #     f"building spa origin on inter {link_name}:{prefixes}")
         link_type = link_meta["link_type"]
-        self.logger.debug(link_type)
-        spa_msg = self._get_spa_origin_msg(link_name, link_meta, prefixes)
+        # self.logger.debug(link_type)
+        spa_msg = self._get_spa_msg(link_name, link_meta, prefixes, [], [])
         if link_type in [LINK_RPDP_BGP, LINK_BGP_WITH_RPDP]:
             self._send_spa_origin_bgp(spa_msg, link_meta)
         elif link_type == LINK_RPDP_HTTP:
-            self.logger.debug(spa_msg)
+            # self.logger.debug(spa_msg)
             self._send_spa_origin_http(spa_msg, link_meta)
         else:
             raise ValueError(f"unknown link type {link_type}")
@@ -1535,37 +1553,37 @@ class RPDPApp(SavApp):
             pass
         return default
 
-    def _get_spa_origin_msg(self, link_name, link_meta, prefixes) -> dict:
-        spa_del = []  # when broadcasting, we don't delete any prefix
-        spa_add = list(prefixes.keys())
-        # TODO better add and del
-        prefix_version = self.get_ip_version(spa_add, spa_del)
+    def _get_spa_msg(self, link_name: str, link_meta: dict, add_prefixes: list, del_prefixes: list, as_path: list) -> dict:
+        """will add my as to the as_path"""
+        as_path.append(self.agent.config["local_as"])
+        prefix_version = self.get_ip_version(add_prefixes, del_prefixes)
         next_hop = link_meta["local_ip"]
         ip_version = next_hop.version
-        spa_msg = {"spa_add": spa_add,
-                   "spa_del": spa_del,
+        spa_msg = {"spa_add": add_prefixes,
+                   "spa_del": del_prefixes,
                    "link_name": link_name,
                    "rpdp_version": f"rpdp{prefix_version}",
                    "ip_version": ip_version,
                    "next_hop": next_hop,
-                   "as_path": [self.agent.config["local_as"]],
+                   "as_path": as_path,
                    "as4_session": link_meta["as4_session"],
                    "is_interior": link_meta["is_interior"]
                    }
         return spa_msg
 
-    def _send_spa_origin_intra(self, link_name, link_meta, prefixes):
+    def _send_spa_origin_intra(self, link_name, link_meta, prefixes: dict):
         """
         send spa origin msg
         update the link_meta["initial_broadcast"] to True
         the prefixes must either be a ipv4 prefix or a ipv6 prefix
         """
         # send to all neighbors
-        self.logger.debug(
-            f"building spa origin on intra {link_name}:{prefixes}")
+        # self.logger.debug(
+        # f"building spa origin on intra {link_name}:{prefixes}")
         link_type = link_meta["link_type"]
-        self.logger.debug(link_type)
-        spa_msg = self._get_spa_origin_msg(link_name, link_meta, prefixes)
+        # self.logger.debug(link_type)
+        spa_msg = self._get_spa_msg(
+            link_name, link_meta, list(prefixes.keys()), [], [])
         if link_type == LINK_RPDP_BGP:
             msg = self._send_spa_origin_bgp(spa_msg, link_meta)
         elif link_type == LINK_RPDP_HTTP:
@@ -1688,27 +1706,65 @@ class RPDPApp(SavApp):
         """
         rpdp_links = self.agent.link_man.get_all_rpdp_links()
         # self.logger.debug(rpdp_links)
-        prefixes_for_inter, prefixes_for_intra = self._tell_prefixes(
-            self.agent.get_fib("kernel", ["remote", "local"]))
-        adj_in = self.agent.get_adj_in()
-        self.logger.debug(adj_in)
+        my_dev_ps = self.agent.get_fib("kernel", ["local"]).keys()
+        my_passing_ps = self.agent.get_fib("kernel", ["remote"]).keys()
+        # self.logger.debug(my_dev_ps)
+        # self.logger.debug(my_passing_ps)
+        my_router_id = netaddr.IPAddress(self.agent.config["router_id"])
         for link_name, link in rpdp_links.items():
-
             if link["initial_broadcast"]:
                 continue
             self.logger.debug(
                 f"sending initial_broadcast spa on link {link_name}")
             # self.logger.debug(link)
+            this_prefix = list(my_dev_ps)
             if link["is_interior"]:
-                # self.logger.debug(f"prefixes {prefixes_for_inter}")
-                prefixes = self._add_miig_info(prefixes_for_inter)
-                # self.logger.debug(f"prefixes {prefixes}")
+                for p in my_passing_ps:
+                    data = self.agent.find_prefix_info_in_adj_in(p)
+                    if len(data['origin_ases']) == 0:
+                        # prefix from other router in my as
+                        this_prefix.append(p)
+                    else:
+                        # prefix from other as
+                        origin_ases = data['origin_ases']
+                        if link["remote_as"] in origin_ases:
+                            continue
+                        this_prefix.append(p)
                 self._send_spa_origin_inter(
-                    link_name, link, prefixes)
+                    link_name, link, this_prefix)
             else:
-                prefixes = self._add_miig_info(prefixes_for_intra)
+                intra_prefix = {}
+                for p in my_dev_ps:
+                    intra_prefix[p] = {
+                        "src_flag": True,
+                        "dst_flag": True,
+                        "origin_id": my_router_id
+                    }
+                for p in my_passing_ps:
+                    data = self.agent.find_prefix_info_in_adj_in(p)
+                    if len(data['origin_ases']) == 0:
+                        # prefix from other router in my as
+                        if not len(data["srcs"]) == 1:
+                            self.logger.error(f"srcs error {p}:{data}")
+                        src = data["srcs"][0]['via']
+                        if src == link["remote_ip"]:
+                            # anti loop
+                            continue
+                        intra_prefix[p] = {
+                            "src_flag": True,
+                            "dst_flag": True,
+                            "origin_id": src
+                        }
+                    else:
+                        # prefix from other as
+                        intra_prefix[p] = {
+                            "src_flag": True,
+                            "dst_flag": True,
+                            "origin_id": my_router_id
+                        }
+                # TODO add miig type
                 self._send_spa_origin_intra(
-                    link_name, link, prefixes)
+                    link_name, link, intra_prefix)
 
     def _gen_rules(self, spa_data, spd_data, is_inter):
         """
