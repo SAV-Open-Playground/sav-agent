@@ -25,6 +25,12 @@ class UrpfApp(SavApp):
         if mode not in valid_modes:
             raise ValueError(f"mode must be one of {valid_modes}")
         self.mode = mode
+        self.ifa_map = {
+                "inter": {
+                    "provider": ALLOW_LIST,
+                    "customer": ALLOW_LIST,
+                    "peer": ALLOW_LIST},
+                "intra": ALLOW_LIST}
         super(UrpfApp, self).__init__(agent, name, logger)
 
     def generate_sav_rules(self, fib_adds, fib_dels, old_rules):

@@ -38,7 +38,7 @@ def index():
         LOGGER.exception(err)
         LOGGER.error(err)
         return {"code": "5001", "message": "Invalid Json String", "data": str(request.data)}
-    LOGGER.debug(msg)
+    # LOGGER.debug(msg)
     try:
         required_keys = ["msg_type", "msg"]
         for key in required_keys:

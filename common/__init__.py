@@ -148,7 +148,7 @@ def parse_bird_table(table, logger=None):
                     if not len(this_src[sub_k]) == 0:
                         new_table_content[p]["origin_ases"].add(
                             this_src[sub_k][0])
-                elif sub_k == "next_hop":
+                elif sub_k in ["next_hop", "origin_router_id"]:
                     this_src[sub_k] = netaddr.IPAddress(sub_v)
                 elif sub_k == "metric":
                     if not int(sub_v) == this_src["metric"]:
@@ -156,6 +156,11 @@ def parse_bird_table(table, logger=None):
                             f"metric not match:{sub_v}:{this_src['metric']}")
                 elif sub_k == "only_to_customer":
                     this_src[sub_k] = int(sub_v.strip())
+                elif sub_k == "cluster_list":
+                    sub_v = sub_v.split(" ")
+                    while "" in sub_v:
+                        sub_v.remove("")
+                    this_src[sub_k] = list(map(netaddr.IPAddress, sub_v))
                 else:
                     this_src["unprocessed_lines"].append(l)
                     logger.warning(f"unprocessed line:[{sub_k}:{sub_v}]")

@@ -704,17 +704,13 @@ def parse_prefix(data, my_asn):
                     # if len(as_path) > 0:
                     #         srcs[cur_key]["origin_as"] = as_path[0]
                     #         srcs[cur_key]["origin_type"] = "AS"
-                elif new_k in ["interface_name", "type", "via", 
-                               "origin","community"]:
-                    # no action required
-                    srcs[cur_key][new_k] = new_v
                 elif new_k == "next_hop":
                     # address type
                     srcs[cur_key][new_k] = netaddr.IPAddress(new_v)
                 elif new_k in ["metric", "only_to_customer"]:
                     srcs[cur_key][new_k] = int(new_v)
                 else:
-                    raise NotImplementedError(f"{new_k}:{new_v}")
+                    srcs[cur_key][new_k] = new_v
         new_srcs = []
         for k, v in srcs.items():
             new_v = process_src_kv(k, v, my_asn)

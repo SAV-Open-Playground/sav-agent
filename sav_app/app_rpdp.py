@@ -309,7 +309,12 @@ class RPDPApp(SavApp):
         # local rule cache
         self.spd_sn_dict = {}
         self.spa_sn_dict = {}
-
+        self.ifa_map = {
+            "inter": {
+                "provider": ALLOW_LIST,
+                "customer": ALLOW_LIST,
+                "peer": ALLOW_LIST},
+            "intra": ALLOW_LIST}
     def get_init_metric_dict(self):
         ret = {}
         for k in RPDP_LINK_TYPES:

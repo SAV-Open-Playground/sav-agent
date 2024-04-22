@@ -1,11 +1,10 @@
 from common import *
-head
 
-STRICT_URPF_ID = "strict_urpf"
+Example_ID = "example"
 LOOSE_URPF_ID = "loose_urpf"
 
 
-class UrpfApp(SavApp):
+class Example(SavApp):
     """
     a SavApp implementation of uRPF
     strict, loose
@@ -13,12 +12,14 @@ class UrpfApp(SavApp):
     loose: if we see a prefix in fib, we allow it coming from any interface
     """
 
-    def __init__(self, agent, name, mode="strict", logger=None):
-        valid_modes = ["strict", "loose"]
-        if mode not in valid_modes:
-            raise ValueError(f"mode must be one of {valid_modes}")
-        self.mode = mode
-        super(UrpfApp, self).__init__(agent, name, logger)
+    def __init__(self, agent, name, logger=None):
+        super(Example, self).__init__(agent, name, logger)
+        self.ifa_map = {
+            "inter": {
+                "provider": NOT_SPECIFIED,
+                "customer": NOT_SPECIFIED,
+                "peer": NOT_SPECIFIED},
+            "intra": NOT_SPECIFIED}
 
     def generate_sav_rules(self, fib_adds, fib_dels, old_rules):
         """

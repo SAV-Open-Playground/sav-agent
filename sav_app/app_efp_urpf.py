@@ -27,6 +27,12 @@ class EfpUrpfApp(SavApp):
     def __init__(self, agent, name, logger=None):
         self.pp_v4_dict = {}
         # pp represents prefix-(AS)path
+        self.ifa_map = {
+            "inter": {
+                "provider": NOT_SPECIFIED,
+                "customer": ALLOW_LIST,
+                "peer": NOT_SPECIFIED},
+            "intra": NOT_SPECIFIED}
         raw_name = name
         name = name[9:].upper().split("_")
         if "A" in name:

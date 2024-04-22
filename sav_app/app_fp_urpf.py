@@ -34,6 +34,12 @@ class FpUrpfApp(SavApp):
 
     def __init__(self, agent, name, logger=None):
         super(FpUrpfApp, self).__init__(agent, name, logger)
+        self.ifa_map = {
+            "inter": {
+                "provider": ALLOW_LIST,
+                "customer": ALLOW_LIST,
+                "peer": ALLOW_LIST},
+            "intra": ALLOW_LIST}
 
     def _get_prefix_interface_table(self):
         """

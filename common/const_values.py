@@ -31,11 +31,14 @@ BGP_LINK_TYPES = [LINK_NATIVE_BGP, LINK_BGP_WITH_RPDP, LINK_RPDP_BGP]
 RPDP_LINK_TYPES = [LINK_RPDP_HTTP, LINK_RPDP_BGP,LINK_BGP_WITH_RPDP]
 SPA = "spa"
 SPD = "spd"
-ALLOW_PREFIX_LIST = "allow_prefix_list"
-DENY_PREFIX_LIST = "deny_prefix_list"
+ALLOW_LIST = "allow_list"
+BLOCK_LIST = "block_list"
+ALL_ALLOW = "all_allow"
+ALL_BLOCK = "all_block"
+NOT_SPECIFIED = "not_specified"
 ALLOW_INTERFACE_LIST = "allow_interface_list"
 
-VALIDATE_MODES = [ALLOW_PREFIX_LIST, DENY_PREFIX_LIST, ALLOW_INTERFACE_LIST]
+VALIDATE_MODES = [ALLOW_LIST, BLOCK_LIST, ALL_BLOCK, ALL_ALLOW, NOT_SPECIFIED]
 # the edge router that work as the representative of the edge routers
 RT_EDGE_REP = 'edge_rep'
 RT_EDGE = 'edge'  # the edge router that has external links
@@ -60,7 +63,7 @@ HARDCODE_KEYS = {"dev ": "interface_name",
                       "Kernel.source: ": "kernel_source",
                       "Kernel.metric: ": "Kernel_metric",
                       "BGP.originator_id: ": "origin_router_id",
-                      "BGP.cluster_list": "cluster_list"}
+                      "BGP.cluster_list: ": "cluster_list"}
 MULT_HOMING_FULL = 1
 MULT_HOMING_PARTIAL = 0 
 SOLE_HOMING = 2

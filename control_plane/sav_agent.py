@@ -476,10 +476,10 @@ class SavAgent():
                     self.data["metric"]["initial_fib_stable"] = True
                     self.data["metric"]["initial_fib_stable_dt"] = fib_update_dt
 
-        if len(adds) > 0:
-            self.logger.debug(f"kernel fib adds:{adds}")
-        if len(dels) > 0:
-            self.logger.debug(f"kernel fib dels:{dels}")
+        # if len(adds) > 0:
+        #     self.logger.debug(f"kernel fib adds:{adds}")
+        # if len(dels) > 0:
+        #     self.logger.debug(f"kernel fib dels:{dels}")
 
         return adds, dels
 
@@ -585,13 +585,16 @@ class SavAgent():
             while True:
                 found = False
                 for event in ipr.get():
-                    if event["event"] in ["RTM_NEWROUTE", "RTM_DELROUTE", "RTM_NEWNEIGH"]:
+                    if event["event"] in ["RTM_NEWROUTE", "RTM_DELROUTE", "RTM_NEWLINK", "RTM_DELLINK"]:
                         found = True
-                        self.logger.debug(event)
+                        # self.logger.debug(event)
+                    elif event["event"] in ["RTM_NEWNEIGH"]:
+                        # self.logger.debug(event)
+                        pass
                     else:
                         self.logger.warning(event)
                 if found:
-                    self.logger.debug("fib changed")
+                    # self.logger.debug("fib changed")
                     self._refresh_fibs_notify_apps()
 
     def _start_main(self):
@@ -600,9 +603,9 @@ class SavAgent():
         """
         self._initial_wait()
         # generate initial sav rules
-        self.logger.debug("before initial fib")
+        # self.logger.debug("before initial fib")
         fib_adds = self.get_fib("kernel", ["remote", "local"])
-        self.logger.debug(f"initial fib:{fib_adds}")
+        # self.logger.debug(f"initial fib:{fib_adds}")
         self._notify_apps(True, fib_adds, {})
         self.logger.debug("starting main loop")
         while True:
@@ -755,6 +758,7 @@ class SavAgent():
                 device_flag = False
                 bgp_flag = False
                 static_flag = False
+                rpki_flag = False
                 for src in p_d:
                     if not "type" in src:
                         self.logger.error(src)
@@ -766,6 +770,12 @@ class SavAgent():
                         bgp_flag = True
                     if src["type"] == "static univ":
                         static_flag = True
+                    elif src["type"] == "inherit univ":
+                        rpki_flag = True
+                if rpki_flag:
+                    #TODO handle rpki
+                    # for now we filter them out
+                    continue
                 if static_flag or device_flag:
                     if l_flag:
                         data[p] = [i for i in p_d if i["type"] != "BGP univ"]
