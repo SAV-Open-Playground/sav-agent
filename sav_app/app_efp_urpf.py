@@ -215,12 +215,12 @@ class EfpUrpfApp(SavApp):
         for data in all_int_in:
             if data["meta"]["remote_role"] in ["peer", "provider"]:
                 # self.logger.debug(
-                    # f"protocol_name:{data['meta']['protocol_name']}:{data['adj-in'].keys()}")
+                # f"protocol_name:{data['meta']['protocol_name']}:{data['adj-in'].keys()}")
                 for prefix, prefix_data in data["adj-in"].items():
                     for origin_as in prefix_data["origin_ases"]:
                         # self.logger.debug(f"{prefix}:{origin_as}")
                         if origin_as in A:
-                           Q.add((prefix, origin_as))
+                            Q.add((prefix, origin_as))
         Z = P.union(Q)
         # self.logger.debug(f"I:{I}")
         # self.logger.debug(f"P:{P}")
